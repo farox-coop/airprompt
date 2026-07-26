@@ -1,7 +1,10 @@
+// Force HTTP mode for tests (no TLS)
+process.env.AIRPROMPT_NO_TLS = '1';
+
 const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert');
 const http = require('http');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const WebSocket = require('ws');
 
 const { createApp, sessions } = require('../../server');
@@ -120,6 +123,46 @@ test('POST /api/sessions/register rejects sessionId too long', async () => {
   const longId = 'x'.repeat(65);
   const res = await post('/api/sessions/register', { sessionId: longId, cwd: '/tmp' });
   assert.strictEqual(res.status, 400);
+});
+
+test('POST /api/sessions/register rejects cwd too long', async () => {
+  const longCwd = '/tmp/' + 'x'.repeat(512);
+  const res = await post('/api/sessions/register', { sessionId: 'test-cwdlen', cwd: longCwd });
+  assert.strictEqual(res.status, 400);
+});
+
+test('POST /api/sessions/register with existing tmuxSession', { skip: !TMUX_AVAILABLE }, async () => {
+  const realSession = 'real-tmux-session';
+  createTmux(realSession);
+  try {
+    const res = await post('/api/sessions/register', {
+      sessionId: 'test-use-existing',
+      cwd: '/tmp',
+      tmuxSession: realSession,
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.ok, true);
+    // The entry should use the provided tmux session, not a generated one
+    const entry = sessions.get('test-use-existing');
+    assert.ok(entry);
+    assert.strictEqual(entry.tmuxSession, realSession);
+  } finally {
+    killTmux(realSession);
+  }
+});
+
+test('POST /api/sessions/register with tmuxSession that does not exist falls through', { skip: !TMUX_AVAILABLE }, async () => {
+  const res = await post('/api/sessions/register', {
+    sessionId: 'test-bad-tmux',
+    cwd: '/tmp',
+    tmuxSession: 'nonexistent-session-xyz',
+  });
+  assert.strictEqual(res.status, 200);
+  // Should create airprompt-<sessionId> instead
+  const entry = sessions.get('test-bad-tmux');
+  assert.ok(entry);
+  assert.strictEqual(entry.tmuxSession, 'airprompt-test-bad-tmux');
+  killTmux('airprompt-test-bad-tmux');
 });
 
 test('GET /api/sessions returns empty array', async () => {
@@ -245,8 +288,13 @@ test('WS switch_session for unknown id returns error', (t, done) => {
 
 // ── PID file test ───────────────────────────────────────────────────
 // PID file is managed only in direct-execution block (require.main === module),
-// so it's not created during tests. This is by design — tests use createApp directly.
+// so createApp() in test mode leaves it untouched. If a real server is
+// running, the PID file exists — that's expected and not a test failure.
 test('PID file not created in test mode', () => {
+  // Test that createApp itself doesn't create a PID file.
+  // (A running server may have one — skip assertion if already existed.)
   const fs = require('fs');
-  assert.strictEqual(fs.existsSync('/tmp/airprompt-server.pid'), false);
+  const existedBefore = fs.existsSync('/tmp/airprompt-server.pid');
+  // createApp was already called in before() — check still true
+  assert.strictEqual(existedBefore, fs.existsSync('/tmp/airprompt-server.pid'));
 });

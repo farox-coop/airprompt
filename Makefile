@@ -1,10 +1,14 @@
-.PHONY: setup start stop clean refresh logs lint test-unit test-integration test-all
+.PHONY: setup cert start stop clean refresh logs lint test-unit test-integration test-all
 
 LOG_FILE := /tmp/airprompt.log
 PID_FILE := /tmp/airprompt-server.pid
 
 setup:
 	@npm install
+	@$(MAKE) cert
+
+cert:
+	@bash bin/generate-cert.sh
 
 start:
 	@nohup node server.js > $(LOG_FILE) 2>&1 &

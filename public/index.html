@@ -26,7 +26,7 @@
       font-size: 13px; color: #58a6ff; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; flex: 1;
     }
-    #session-label .no-session { color: #8b949e; }
+    #session-label.no-session { color: #8b949e; }
     #switch-btn {
       background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
       border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer;
@@ -68,22 +68,44 @@
     #terminal-container {
       flex: 1; width: 100%; padding: 4px; overflow: hidden;
     }
+    #terminal-container .xterm {
+      padding: 4px;
+    }
+    /* Force visible text on every renderer path (canvas + DOM) */
+    #terminal-container .xterm-rows,
+    #terminal-container .xterm-rows > div,
+    #terminal-container .xterm-rows span,
+    #terminal-container .xterm-screen {
+      color: #c9d1d9 !important;
+    }
+    /* Canvas fallback: light background behind canvas */
+    #terminal-container .xterm canvas {
+      background-color: #0d1117 !important;
+    }
+    #terminal-container .xterm-text-layer {
+      color: #c9d1d9 !important;
+      mix-blend-mode: normal !important;
+    }
 
     /* ── Controls ────────────────────────────────── */
     #controls {
-      height: 80px; background: #111; border-top: 1px solid #333;
-      display: flex; align-items: center; justify-content: center;
-      padding: 10px; flex-shrink: 0;
+      background: #111; border-top: 1px solid #333;
+      padding: 8px 10px; flex-shrink: 0;
     }
     #mic-btn {
-      width: 100%; height: 100%; border-radius: 12px;
+      width: 100%; height: 48px; border-radius: 12px;
       background: #2563eb; color: #fff; border: none;
-      font-size: 18px; font-weight: 600;
+      font-size: 16px; font-weight: 600;
       display: flex; align-items: center; justify-content: center; gap: 8px;
       user-select: none; -webkit-user-select: none; touch-action: manipulation;
     }
     #mic-btn.recording {
       background: #dc2626; animation: pulse 1.5s infinite;
+    }
+    #mic-btn:disabled { background: #30363d; color: #8b949e; }
+    #mic-error {
+      color: #f85149; font-size: 11px; text-align: center;
+      margin-top: 4px; display: none;
     }
     @keyframes pulse {
       0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; }
@@ -115,7 +137,7 @@
   <div id="pull-indicator"><div id="pull-spinner"></div></div>
 
   <div id="session-bar">
-    <span id="session-label"><span class="no-session">No session selected</span></span>
+    <span id="session-label">No session selected</span>
     <button id="switch-btn">Switch</button>
   </div>
 
@@ -130,6 +152,7 @@
   <div id="terminal-container"></div>
   <div id="controls">
     <button id="mic-btn">&#x1F3A4; Hold to Dictate</button>
+    <div id="mic-error"></div>
   </div>
 
   <script src="client.js"></script>

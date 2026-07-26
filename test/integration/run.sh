@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-PORT="${PORT:-3210}"
+PORT="${AIRPROMPT_TEST_PORT:-3211}"
 PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SERVER_PID=""
 TMPDIR=$(mktemp -d)
@@ -23,7 +23,7 @@ cleanup() {
     done
   fi
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
-  rm -f /tmp/airprompt-server.pid
+  rm -f "${TEST_PID_FILE:-/tmp/airprompt-server-test.pid}"
   rm -rf "$TMPDIR"
 }
 
@@ -38,8 +38,10 @@ echo "tmux available: $TMUX_OK"
 
 # ── Start server ─────────────────────────────────────────────────────
 echo "Starting AirPrompt server on port $PORT..."
+TEST_PID_FILE="/tmp/airprompt-server-test.pid"
+rm -f "$TEST_PID_FILE"
 cd "$PROJECT_DIR"
-PORT="$PORT" node server.js 2>/dev/null &
+AIRPROMPT_NO_TLS=1 AIRPROMPT_PID_FILE="$TEST_PID_FILE" PORT="$PORT" node server.js 2>/dev/null &
 SERVER_PID=$!
 
 for i in $(seq 1 20); do

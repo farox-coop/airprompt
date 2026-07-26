@@ -1,29 +1,30 @@
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { execSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const qrcode = require('qrcode-terminal');
 
 const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
-const PID_FILE = '/tmp/airprompt-server.pid';
+const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
 const STALE_CHECK_MS = 60_000;
 
-// ── In-memory session registry ──────────────────────────────────────
-const sessions = new Map();
+const CERT_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const CERT_FILE = path.join(CERT_DIR, 'airprompt-cert.pem');
+const KEY_FILE = path.join(CERT_DIR, 'airprompt-key.pem');
+const TLS_ENABLED = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
 
-// ── Helpers ─────────────────────────────────────────────────────────
+const sessions = new Map();
 
 function getLocalIp() {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
     }
   }
   return 'localhost';
@@ -33,180 +34,147 @@ function tmuxExists(sessionName) {
   try {
     const r = spawnSync('tmux', ['has-session', '-t', sessionName], { timeout: 2000 });
     return r.status === 0;
-  } catch (e) {
-    return false;
-  }
+  } catch (e) { return false; }
 }
 
 function createTmuxSession(sessionName, cwd) {
   try {
     const r = spawnSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd], { timeout: 2000 });
     return r.status === 0;
-  } catch (e) {
-    return false;
-  }
+  } catch (e) { return false; }
 }
 
 function killTmuxSession(sessionName) {
-  try {
-    spawnSync('tmux', ['kill-session', '-t', sessionName], { timeout: 2000 });
-  } catch (e) {
-    // session already dead — ok
-  }
+  try { spawnSync('tmux', ['kill-session', '-t', sessionName], { timeout: 2000 }); } catch (e) { /* ok */ }
 }
 
 function broadcastSessionList(wss) {
-  const list = Array.from(sessions.values()).map((s) => ({
-    id: s.sessionId,
-    cwd: s.cwd,
-    createdAt: s.createdAt,
-  }));
+  const list = Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, createdAt: s.createdAt }));
   const msg = JSON.stringify({ type: 'session_list', sessions: list });
   wss.clients.forEach((client) => {
     if (client.readyState === 1) {
-      try { client.send(msg); } catch (e) { /* client gone between check and send */ }
+      try { client.send(msg); } catch (e) { /* ok */ }
     }
   });
 }
-
-// ── PID management ──────────────────────────────────────────────────
 
 function writePid() {
   try {
     fs.writeFileSync(PID_FILE, String(process.pid), { flag: 'wx' });
   } catch (e) {
-    if (e.code === 'EEXIST') {
-      console.error('PID file already exists. Remove stale file or use different port.');
-      process.exit(1);
-    }
+    if (e.code === 'EEXIST') { console.error('PID file already exists.'); process.exit(1); }
     throw e;
   }
 }
 
-function removePid() {
-  try { fs.unlinkSync(PID_FILE); } catch (e) { /* ok */ }
-}
+function removePid() { try { fs.unlinkSync(PID_FILE); } catch (e) { /* ok */ } }
 
-function pidAlive(pid) {
-  try { process.kill(pid, 0); return true; } catch (e) { return false; }
-}
-
-// ── createApp (returned for testing) ────────────────────────────────
+function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return false; } }
 
 function createApp() {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.join(__dirname, 'public')));
 
-  // ── REST API ────────────────────────────────────────────────────
-
   app.get('/api/sessions', (_req, res) => {
-    const list = Array.from(sessions.values()).map((s) => ({
-      id: s.sessionId,
-      cwd: s.cwd,
-      createdAt: s.createdAt,
-    }));
-    res.json(list);
+    res.json(Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, createdAt: s.createdAt })));
   });
 
   app.post('/api/sessions/register', (req, res) => {
-    const { sessionId, cwd } = req.body || {};
-    if (!sessionId || !cwd) {
-      return res.status(400).json({ error: 'Missing sessionId or cwd' });
-    }
-    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) {
-      return res.status(400).json({ error: 'sessionId must be 1-64 alphanumeric chars (a-z, 0-9, -, _)' });
-    }
-    if (typeof cwd !== 'string' || cwd.length > 512) {
-      return res.status(400).json({ error: 'cwd must be a string, max 512 chars' });
-    }
-    if (sessions.has(sessionId)) {
-      return res.status(409).json({ error: 'Session already registered' });
-    }
-    const tmuxSession = `airprompt-${sessionId}`;
-    if (!tmuxExists(tmuxSession)) {
-      if (!createTmuxSession(tmuxSession, cwd)) {
-        return res.status(500).json({ error: 'Failed to create tmux session' });
+    const { sessionId, cwd, tmuxSession } = req.body || {};
+    if (!sessionId || !cwd) return res.status(400).json({ error: 'Missing sessionId or cwd' });
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) return res.status(400).json({ error: 'Invalid sessionId format' });
+    if (typeof cwd !== 'string' || cwd.length > 512) return res.status(400).json({ error: 'cwd too long' });
+    if (sessions.has(sessionId)) return res.status(409).json({ error: 'Session already registered' });
+
+    let actualTmuxSession;
+    if (tmuxSession && /^[a-zA-Z0-9_-]{1,64}$/.test(tmuxSession) && tmuxExists(tmuxSession)) {
+      actualTmuxSession = tmuxSession;
+    } else {
+      actualTmuxSession = `airprompt-${sessionId}`;
+      if (!tmuxExists(actualTmuxSession)) {
+        if (!createTmuxSession(actualTmuxSession, cwd)) {
+          return res.status(500).json({ error: 'Failed to create tmux session' });
+        }
       }
     }
-    const entry = { sessionId, cwd, tmuxSession, createdAt: new Date().toISOString() };
-    sessions.set(sessionId, entry);
+    sessions.set(sessionId, { sessionId, cwd, tmuxSession: actualTmuxSession, createdAt: new Date().toISOString() });
     broadcastSessionList(wss);
     res.json({ ok: true, sessionId });
   });
 
   app.post('/api/sessions/unregister', (req, res) => {
     const { sessionId } = req.body || {};
-    if (!sessionId) {
-      return res.status(400).json({ error: 'Missing sessionId' });
-    }
-    if (!sessions.has(sessionId)) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-    const entry = sessions.get(sessionId);
-    killTmuxSession(entry.tmuxSession);
+    if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
+    if (!sessions.has(sessionId)) return res.status(404).json({ error: 'Session not found' });
+    killTmuxSession(sessions.get(sessionId).tmuxSession);
     sessions.delete(sessionId);
     broadcastSessionList(wss);
     res.json({ ok: true });
   });
 
-  const httpServer = http.createServer(app);
-  const wss = new WebSocketServer({ server: httpServer });
+  const tlsOptions = TLS_ENABLED ? { key: fs.readFileSync(KEY_FILE), cert: fs.readFileSync(CERT_FILE) } : null;
+  const httpServer = tlsOptions ? https.createServer(tlsOptions, app) : http.createServer(app);
+  const wss = new WebSocketServer({ server: httpServer, pingInterval: 30000, pingTimeout: 5000 });
   wss.on('error', (err) => console.error('WebSocketServer error:', err.message));
-
-  // ── WebSocket handler ───────────────────────────────────────────
 
   wss.on('connection', (ws) => {
     let ptyProcess = null;
     let activeSessionId = null;
 
-    ws.on('error', () => { /* prevent crash on socket error */ });
+    ws.on('error', () => { /* prevent crash */ });
 
-    // Send current session list on connect
-    const list = Array.from(sessions.values()).map((s) => ({
-      id: s.sessionId,
-      cwd: s.cwd,
-      createdAt: s.createdAt,
+    ws.send(JSON.stringify({
+      type: 'session_list',
+      sessions: Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, createdAt: s.createdAt })),
     }));
-    ws.send(JSON.stringify({ type: 'session_list', sessions: list }));
 
     function spawnPty(sessionId) {
       if (ptyProcess) {
+        const oldWeb = ptyProcess._airpromptWebSession;
         try { ptyProcess.kill(); } catch (e) { /* ok */ }
         ptyProcess = null;
+        // Kill old webSession — prevents orphan session accumulation
+        if (oldWeb) spawnSync('tmux', ['kill-session', '-t', oldWeb], { timeout: 1000 });
       }
       const entry = sessions.get(sessionId);
       if (!entry) return false;
 
       activeSessionId = sessionId;
+      const termCols = ws._airpromptCols || 120;
+      const termRows = ws._airpromptRows || 40;
+
+      // Per-client grouped tmux session. Prefix with random suffix
+      // to prevent Date.now() collisions in same-millisecond spawns.
+      const rnd = Math.random().toString(36).slice(2, 6);
+      const webSession = `airprompt-web-${sessionId}-${Date.now()}-${rnd}`;
+
+      spawnSync('tmux', ['new-session', '-d', '-t', entry.tmuxSession, '-s', webSession,
+        '-x', String(termCols), '-y', String(termRows)], { timeout: 2000 });
+      spawnSync('tmux', ['set-option', '-t', webSession, 'status', 'off'], { timeout: 1000 });
+      spawnSync('tmux', ['set-option', '-t', webSession, 'pane-border-status', 'off'], { timeout: 1000 });
+
       try {
-        ptyProcess = pty.spawn('tmux', ['attach-session', '-t', entry.tmuxSession], {
-          name: 'xterm-256color',
-          cols: 80,
-          rows: 30,
-          cwd: entry.cwd,
-          env: process.env,
+        ptyProcess = pty.spawn('tmux', ['attach-session', '-t', webSession], {
+          name: 'xterm-256color', cols: termCols, rows: termRows, cwd: entry.cwd, env: process.env,
         });
+        ptyProcess._airpromptWebSession = webSession;
+        ptyProcess._airpromptAlive = true;
       } catch (e) {
-        if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Failed to spawn terminal: ' + e.message }));
-        }
+        // Clean up orphaned webSession on spawn failure
+        spawnSync('tmux', ['kill-session', '-t', webSession], { timeout: 1000 });
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'error', message: 'Failed to spawn: ' + e.message }));
         return false;
       }
 
-      ptyProcess.onData((data) => {
-        if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ type: 'output', data }));
-        }
-      });
-
+      ptyProcess.onData((data) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'output', data })); });
       ptyProcess.onExit(() => {
-        if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ type: 'output', data: '\r\n\x1b[33m[AirPrompt: session ended]\x1b[0m\r\n' }));
-        }
+        // Guard: only notify if this ptyProcess is still the active one
+        // (prevents stale onExit from old pty overwriting new pty's state)
+        if (!ptyProcess || !ptyProcess._airpromptAlive) return;
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'output', data: '\r\n\x1b[33m[AirPrompt: session ended]\x1b[0m\r\n' }));
         ptyProcess = null;
       });
-
       return true;
     }
 
@@ -216,106 +184,84 @@ function createApp() {
 
       switch (msg.type) {
         case 'input':
-          if (ptyProcess && msg.data) {
-            try { ptyProcess.write(msg.data); } catch (e) { /* fd closed */ }
+          if (ptyProcess && msg.data) { try { ptyProcess.write(msg.data); } catch (e) { /* ok */ } }
+          break;
+        case 'switch_session':
+          if (msg.sessionId && sessions.has(msg.sessionId)) spawnPty(msg.sessionId);
+          else ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
+          break;
+        case 'resize':
+          if (ptyProcess && typeof msg.cols === 'number' && typeof msg.rows === 'number'
+            && msg.cols > 0 && msg.cols <= 500 && msg.rows > 0 && msg.rows <= 200) {
+            ws._airpromptCols = msg.cols;
+            ws._airpromptRows = msg.rows;
+            try { ptyProcess.resize(msg.cols, msg.rows); } catch (e) { /* ok */ }
           }
           break;
-
-        case 'switch_session': {
-          if (!msg.sessionId) break;
-          const entry = sessions.get(msg.sessionId);
-          if (entry) {
-            spawnPty(msg.sessionId);
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
-          }
-          break;
-        }
-
-        case 'list_sessions':
-          broadcastSessionList(wss);
-          break;
-
-        default:
-          break;
+        case 'list_sessions': broadcastSessionList(wss); break;
       }
     });
 
     ws.on('close', () => {
       if (ptyProcess) {
+        const wsess = ptyProcess._airpromptWebSession;
         try { ptyProcess.kill(); } catch (e) { /* ok */ }
         ptyProcess = null;
+        if (wsess) spawnSync('tmux', ['kill-session', '-t', wsess], { timeout: 2000 });
       }
     });
   });
 
-  // ── Stale session cleanup ───────────────────────────────────────
-
   const staleInterval = setInterval(() => {
     let changed = false;
     for (const [id, entry] of sessions) {
-      if (!tmuxExists(entry.tmuxSession)) {
-        sessions.delete(id);
-        changed = true;
-      }
+      if (!tmuxExists(entry.tmuxSession)) { sessions.delete(id); changed = true; }
     }
     if (changed) broadcastSessionList(wss);
   }, STALE_CHECK_MS);
 
-  // Clean up interval on server close (for tests)
-  httpServer.on('close', () => {
-    clearInterval(staleInterval);
-  });
-  // Don't block process exit waiting for stale cleanup
+  httpServer.on('close', () => clearInterval(staleInterval));
   staleInterval.unref();
 
-  return { app, httpServer, wss };
+  return { app, httpServer, wss, tlsOptions };
 }
-
-// ── Exports for testing ─────────────────────────────────────────────
 
 module.exports = { createApp, sessions };
 
-// ── Direct execution ────────────────────────────────────────────────
-
 if (require.main === module) {
-  // Atomically claim PID file before opening port (prevents race)
   try {
     const existingPid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
     if (pidAlive(existingPid)) {
-      console.error(`AirPrompt server already running (PID ${existingPid}).`);
-      console.error(`Remove ${PID_FILE} if stale.`);
+      console.error(`AirPrompt already running (PID ${existingPid}).`);
       process.exit(1);
     }
-    // PID file exists but process dead — clean it
     removePid();
-  } catch (e) {
-    // no PID file — ok, first run
-  }
+  } catch (e) { /* ok */ }
 
-  // Write PID atomically before listen to prevent two servers on different ports
   writePid();
-
-  const { httpServer } = createApp();
+  const { httpServer, tlsOptions: tls } = createApp();
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     const lanIp = getLocalIp();
-    const url = `http://${lanIp}:${PORT}`;
-    console.log('\n==================================================');
+    const url = `${tls ? 'https' : 'http'}://${lanIp}:${PORT}`;
+    console.log('\n' + '='.repeat(50));
     console.log(`AirPrompt Server running at: ${url}`);
-    console.log('Scan QR Code from your mobile phone:');
-    console.log('==================================================\n');
+    if (tls) console.log('TLS: self-signed (accept warning on first connect)');
+    console.log('='.repeat(50) + '\n');
     qrcode.generate(url, { small: true });
   });
 
-  httpServer.on('error', (err) => {
-    console.error(`Server error: ${err.message}`);
+  httpServer.on('error', (err) => { console.error(`Server error: ${err.message}`); removePid(); process.exit(1); });
+  function gracefulShutdown() {
     removePid();
-    process.exit(1);
-  });
-
-  // Cleanup on exit
-  process.on('SIGINT', () => { removePid(); process.exit(0); });
-  process.on('SIGTERM', () => { removePid(); process.exit(0); });
+    // Kill all web sessions to prevent orphan accumulation
+    const out = spawnSync('tmux', ['ls', '-F', '#{session_name}'], { timeout: 2000 }).stdout || '';
+    for (const name of out.toString().split('\n')) {
+      if (name.startsWith('airprompt-web-')) spawnSync('tmux', ['kill-session', '-t', name], { timeout: 1000 });
+    }
+    process.exit(0);
+  }
+  process.on('SIGINT', gracefulShutdown);
+  process.on('SIGTERM', gracefulShutdown);
   process.on('exit', () => removePid());
 }

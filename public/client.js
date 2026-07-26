@@ -2,6 +2,7 @@
 const term = new window.Terminal({
   cursorBlink: true,
   fontSize: 14,
+  allowTransparency: false,
   theme: {
     background: '#0d1117',
     foreground: '#c9d1d9',
@@ -24,11 +25,24 @@ const term = new window.Terminal({
     brightWhite: '#f0f6fc',
   },
 });
+
 const fitAddon = new window.FitAddon.FitAddon();
 term.loadAddon(fitAddon);
 term.open(document.getElementById('terminal-container'));
 fitAddon.fit();
-window.addEventListener('resize', () => fitAddon.fit());
+
+// Send initial size so server spawns pty matching viewport
+setTimeout(() => {
+  send({ type: 'resize', cols: term.cols, rows: term.rows });
+}, 300);
+
+// Send resize events
+window.addEventListener('resize', () => {
+  fitAddon.fit();
+  setTimeout(() => {
+    send({ type: 'resize', cols: term.cols, rows: term.rows });
+  }, 100);
+});
 
 // ── DOM refs ────────────────────────────────────────────────────────
 const sessionLabel = document.getElementById('session-label');
@@ -37,6 +51,7 @@ const sessionModal = document.getElementById('session-modal');
 const sessionList = document.getElementById('session-list');
 const modalClose = document.getElementById('modal-close');
 const micBtn = document.getElementById('mic-btn');
+const micError = document.getElementById('mic-error');
 
 // ── State ───────────────────────────────────────────────────────────
 let sessions = [];
@@ -70,6 +85,8 @@ ws.onmessage = (event) => {
       break;
     case 'error':
       console.error('Server error:', msg.message);
+      if (msg.message === 'Session not found') activeSessionId = null;
+      updateUI();
       break;
     default:
       break;
@@ -78,6 +95,18 @@ ws.onmessage = (event) => {
 
 ws.onclose = () => {
   term.write('\r\n\x1b[31m[AirPrompt: disconnected]\x1b[0m\r\n');
+  // Flash overlay banner — impossible to miss on mobile
+  const banner = document.createElement('div');
+  banner.textContent = '⚠️ DISCONNECTED';
+  Object.assign(banner.style, {
+    position: 'fixed', top: '0', left: '0', right: '0',
+    background: '#dc2626', color: '#fff', textAlign: 'center',
+    padding: '14px 8px', fontSize: '16px', fontWeight: '700',
+    zIndex: '300', animation: '0.3s ease-out',
+  });
+  document.body.appendChild(banner);
+  // Auto-remove after 5s
+  setTimeout(() => { if (banner.parentNode) banner.remove(); }, 5000);
 };
 
 // ── Session UI ──────────────────────────────────────────────────────
@@ -85,8 +114,10 @@ function updateUI() {
   const s = sessions.find((s) => s.id === activeSessionId);
   if (activeSessionId && s) {
     sessionLabel.textContent = s.cwd;
+    sessionLabel.classList.remove('no-session');
   } else {
     sessionLabel.textContent = 'No session selected';
+    sessionLabel.classList.add('no-session');
   }
 
   // Session list in modal
@@ -160,17 +191,22 @@ if (SpeechRecognition) {
   };
 
   recognition.onerror = (e) => {
-    console.error('Speech error:', e.error);
     stopDictation();
+    if (e.error === 'not-allowed') {
+      micBtn.disabled = true;
+      micBtn.textContent = '🔇 Mic Blocked (HTTPS required)';
+      micError.style.display = 'block';
+      micError.textContent = 'Voice needs HTTPS or localhost. Chrome blocks mic on HTTP LAN IP. Use keyboard below.';
+    }
   };
 
   recognition.onend = () => {
     if (isListening) recognition.start();
   };
 } else {
-  micBtn.innerText = 'Dictation Not Supported';
+  micBtn.textContent = 'Dictation Not Supported';
   micBtn.disabled = true;
-  micBtn.style.background = '#444';
+  micBtn.style.background = '#30363d';
 }
 
 function startDictation(e) {
@@ -208,20 +244,21 @@ document.addEventListener('touchstart', (e) => {
     pullStartY = e.touches[0].clientY;
     pullActive = true;
   }
-}, { passive: true });
+}, { passive: true, capture: true });
 
 document.addEventListener('touchmove', (e) => {
   if (!pullActive || pullRefreshing) return;
   const dy = e.touches[0].clientY - pullStartY;
   if (dy > 10) {
     e.preventDefault();
+    e.stopPropagation();
     if (dy > PULL_THRESHOLD) {
       pullIndicator.className = 'refreshing';
     } else {
       pullIndicator.className = 'showing';
     }
   }
-}, { passive: false });
+}, { passive: false, capture: true });
 
 document.addEventListener('touchend', () => {
   if (!pullActive) return;
@@ -233,4 +270,4 @@ document.addEventListener('touchend', () => {
     pullIndicator.className = 'refreshing';
     setTimeout(() => location.reload(), 350);
   }
-});
+}, { capture: true });

@@ -14,7 +14,7 @@ Enable remote mobile access and voice dictation for this Claude session.
 - Mobile UI at `http://<LAN-IP>:3210` with session selector, xterm.js terminal, and push-to-talk voice dictation
 
 ## Execution
-1. `/airprompt on` runs `bash /home/diego/projects/airprompt/bin/airprompt-register.sh` (saves session ID to `~/.claude/.airprompt-session` for auto-discovery on off).
+1. `/airprompt on` runs `bash bin/airprompt-register.sh` (saves session ID to `~/.claude/.airprompt-session` for auto-discovery on off).
 2. Daemon auto-starts if not running (single instance enforced via PID file).
 3. Statusline hook (`airprompt-statusline.sh`) shows `[airprompt: http://<IP>:3210]` badge when active.
-4. `/airprompt off` runs `bash /home/diego/projects/airprompt/bin/airprompt-unregister.sh` which auto-discovers the saved session ID.
+4. `/airprompt off` runs `bash bin/airprompt-unregister.sh` which auto-discovers the saved session ID.

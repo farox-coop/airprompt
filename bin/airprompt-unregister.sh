@@ -20,8 +20,18 @@ if [ -z "$SESSION_ID" ]; then
   exit 1
 fi
 
+# ── Detect protocol ──────────────────────────────────────────────────
+CERT_FILE="${CONFIG_DIR}/airprompt-cert.pem"
+KEY_FILE="${CONFIG_DIR}/airprompt-key.pem"
+PROTO="http"
+CURL_OPTS=""
+if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
+  PROTO="https"
+  CURL_OPTS="-k"
+fi
+
 # ── Unregister from daemon ──────────────────────────────────────────
-if ! curl -s -X POST "http://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+if ! curl -s $CURL_OPTS -X POST "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
   -H "Content-Type: application/json" \
   -d "{\"sessionId\":\"${SESSION_ID}\"}" > /dev/null; then
   echo "Warning: failed to contact daemon, removing local markers anyway" >&2

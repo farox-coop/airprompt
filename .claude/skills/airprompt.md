@@ -12,8 +12,8 @@ When invoked, this skill manages the AirPrompt multi-session remote access syste
 3. Shows local network URL + QR code for mobile connection.
 
 ## Instructions
-- `/airprompt on` — register current session, start daemon if needed, show connection info. Runs `bash /home/diego/projects/airprompt/bin/airprompt-register.sh`.
-- `/airprompt off` — unregister current session, remove statusline badge. Runs `bash /home/diego/projects/airprompt/bin/airprompt-unregister.sh` (auto-discovers session ID from `~/.claude/.airprompt-session`).
+- `/airprompt on` — register current session, start daemon if needed, show connection info. Runs `bash bin/airprompt-register.sh`.
+- `/airprompt off` — unregister current session, remove statusline badge. Runs `bash bin/airprompt-unregister.sh` (auto-discovers session ID from `~/.claude/.airprompt-session`).
 - `/airprompt status` — show current sessions via `curl http://localhost:3210/api/sessions`.
 
 ## Architecture
