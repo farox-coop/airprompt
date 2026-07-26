@@ -1,5 +1,7 @@
 # PoC AirPrompt: Claude Remote Control with Voice Dictation
 
+> **Historical document — superseded by [PLAN.md](PLAN.md).** This describes the original single-session PoC. The implementation evolved to a multi-session architecture with session registry, tmux multiplexing, and statusline integration. Refer to PLAN.md for current design.
+
 ## Overview
 This document summarizes the architecture and implementation steps for an MVP (Minimum Viable Product) that bridges the gap between the user and a local Claude CLI agent. 
 The goal is to allow the user to view the remote Claude session (running on a home LAN laptop with Ubuntu 24.04.4 LTS) from their mobile phone, and interact by sending prompts via voice dictation instantly.

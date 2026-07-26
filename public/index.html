@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AirPrompt - Mobile Terminal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body, html {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      background-color: #0d1117; color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ── Session bar ─────────────────────────────── */
+    #session-bar {
+      height: 44px; background: #0d1117; border-bottom: 1px solid #30363d;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 12px; flex-shrink: 0;
+    }
+    #session-label {
+      font-size: 13px; color: #58a6ff; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; flex: 1;
+    }
+    #session-label .no-session { color: #8b949e; }
+    #switch-btn {
+      background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+      border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+      flex-shrink: 0; margin-left: 8px;
+    }
+    #switch-btn:active { background: #30363d; }
+
+    /* ── Session modal ──────────────────────────── */
+    #session-modal {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.8); z-index: 100;
+      flex-direction: column; align-items: center; justify-content: center;
+    }
+    #session-modal.open { display: flex; }
+    #session-modal-content {
+      background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+      width: 90%; max-height: 70vh; overflow-y: auto; padding: 16px;
+    }
+    #session-modal-content h3 {
+      margin: 0 0 12px 0; font-size: 16px; color: #c9d1d9;
+    }
+    .session-item {
+      display: block; width: 100%; background: #21262d; border: 1px solid #30363d;
+      border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer;
+      text-align: left; color: #c9d1d9; font-size: 14px;
+    }
+    .session-item:active { background: #30363d; }
+    .session-item.active { border-color: #58a6ff; }
+    .session-item .cwd { font-weight: 600; }
+    .session-item .time { font-size: 11px; color: #8b949e; margin-top: 4px; }
+    .session-empty { color: #8b949e; text-align: center; padding: 24px; }
+    #modal-close {
+      display: block; width: 100%; background: #21262d; color: #c9d1d9;
+      border: 1px solid #30363d; border-radius: 6px; padding: 10px;
+      font-size: 14px; cursor: pointer; margin-top: 8px;
+    }
+
+    /* ── Terminal ────────────────────────────────── */
+    #terminal-container {
+      flex: 1; width: 100%; padding: 4px; overflow: hidden;
+    }
+
+    /* ── Controls ────────────────────────────────── */
+    #controls {
+      height: 80px; background: #111; border-top: 1px solid #333;
+      display: flex; align-items: center; justify-content: center;
+      padding: 10px; flex-shrink: 0;
+    }
+    #mic-btn {
+      width: 100%; height: 100%; border-radius: 12px;
+      background: #2563eb; color: #fff; border: none;
+      font-size: 18px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      user-select: none; -webkit-user-select: none; touch-action: manipulation;
+    }
+    #mic-btn.recording {
+      background: #dc2626; animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; }
+    }
+
+    /* ── Pull-to-refresh indicator ─────────────── */
+    #pull-indicator {
+      position: fixed; top: 0; left: 0; right: 0; height: 0;
+      background: #0d1117; z-index: 200;
+      display: flex; align-items: flex-end; justify-content: center;
+      overflow: hidden; transition: height 0.2s;
+      pointer-events: none; touch-action: none;
+    }
+    #pull-indicator.showing { height: 56px; }
+    #pull-indicator.refreshing { height: 56px; }
+    #pull-spinner {
+      width: 24px; height: 24px; border: 2px solid #30363d;
+      border-top-color: #58a6ff; border-radius: 50%;
+      margin-bottom: 10px; opacity: 0;
+      transition: opacity 0.15s;
+    }
+    #pull-indicator.showing #pull-spinner,
+    #pull-indicator.refreshing #pull-spinner { opacity: 1; }
+    #pull-indicator.refreshing #pull-spinner { animation: spin 0.6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="pull-indicator"><div id="pull-spinner"></div></div>
+
+  <div id="session-bar">
+    <span id="session-label"><span class="no-session">No session selected</span></span>
+    <button id="switch-btn">Switch</button>
+  </div>
+
+  <div id="session-modal">
+    <div id="session-modal-content">
+      <h3>Active Sessions</h3>
+      <div id="session-list"></div>
+      <button id="modal-close">Close</button>
+    </div>
+  </div>
+
+  <div id="terminal-container"></div>
+  <div id="controls">
+    <button id="mic-btn">&#x1F3A4; Hold to Dictate</button>
+  </div>
+
+  <script src="client.js"></script>
+</body>
+</html>

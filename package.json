@@ -1,0 +1,22 @@
+{
+  "name": "airprompt",
+  "version": "0.2.0",
+  "description": "Remote control interface for Claude CLI with voice dictation",
+  "main": "server.js",
+  "scripts": {
+    "start": "nohup node server.js > /tmp/airprompt.log 2>&1 & echo \"AirPrompt daemon started\"",
+    "stop": "kill $$(cat /tmp/airprompt-server.pid 2>/dev/null) 2>/dev/null; rm -f /tmp/airprompt-server.pid",
+    "register": "bash bin/airprompt-register.sh",
+    "unregister": "bash bin/airprompt-unregister.sh",
+    "test": "node --test test/unit/*.test.js && bash test/integration/run.sh",
+    "lint": "node --check server.js && node --check public/client.js"
+  },
+  "author": "Farox",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-pty": "^1.0.0",
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.17.0"
+  }
+}
