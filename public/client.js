@@ -7,9 +7,11 @@ function log(level, msg, extra) {
   const extraStr = extra ? ' ' + JSON.stringify(extra) : '';
   console.log(`[airprompt:${level}] ${ts} ${msg}${extraStr}`);
   // Forward to server so it appears in server logs too
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    send({ type: 'debug', level, msg, extra, ts });
-  }
+  try {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'debug', level, msg, extra, ts }));
+    }
+  } catch (_) { /* ws may be in transient state */ }
 }
 
 // ── Terminal ─────────────────────────────────────────────────────────
@@ -46,18 +48,19 @@ term.loadAddon(fitAddon);
 term.open(document.getElementById('terminal-container'));
 fitAddon.fit();
 
-// Send initial size so server spawns pty matching viewport
-setTimeout(() => {
-  send({ type: 'resize', cols: term.cols, rows: term.rows });
-}, 300);
-
-// Send resize events
-window.addEventListener('resize', () => {
+// ── Resize debounce ────────────────────────────────────────────────────
+let resizeTimer = null;
+function scheduleResize() {
   fitAddon.fit();
-  setTimeout(() => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
     send({ type: 'resize', cols: term.cols, rows: term.rows });
-  }, 100);
-});
+  }, 200);
+}
+
+// Send initial size so server spawns pty matching viewport
+setTimeout(scheduleResize, 300);
+window.addEventListener('resize', scheduleResize);
 
 // ── DOM refs ────────────────────────────────────────────────────────
 const sessionLabel = document.getElementById('session-label');
@@ -72,29 +75,83 @@ const micError = document.getElementById('mic-error');
 let sessions = [];
 let activeSessionId = null;
 
-// ── WebSocket ───────────────────────────────────────────────────────
+// ── WebSocket with auto-reconnect ────────────────────────────────────
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${protocol}//${window.location.host}`);
-log('info', 'ws connecting', { url: `${protocol}//${window.location.host}` });
+let ws = null;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+const MAX_RECONNECT_MS = 30_000;
+
+function wsUrl() { return `${protocol}//${window.location.host}`; }
+
+function connect() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  ws = new WebSocket(wsUrl());
+  log('info', 'ws connecting', { url: wsUrl() });
+
+  ws.onopen = () => {
+    log('info', 'ws connected');
+    reconnectAttempts = 0;
+    // Dismiss disconnect banner on reconnect
+    if (window._airpromptDiscBanner) {
+      if (window._airpromptDiscBanner.parentNode) {
+        window._airpromptDiscBanner.remove();
+      }
+      window._airpromptDiscBanner = null;
+    }
+    // Re-send resize so server re-spawns pty with correct dimensions
+    scheduleResize();
+  };
+
+  ws.onmessage = wsMessageHandler;
+
+  ws.onclose = () => {
+    log('warn', 'ws disconnected');
+    term.write('\r\n\x1b[31m[AirPrompt: disconnected]\x1b[0m\r\n');
+    // Overlay banner — stays until clicked or reconnected
+    if (!window._airpromptDiscBanner) {
+      const banner = document.createElement('div');
+      banner.textContent = '⚠️ DISCONNECTED — Tap to dismiss';
+      Object.assign(banner.style, {
+        position: 'fixed', top: '0', left: '0', right: '0',
+        background: '#dc2626', color: '#fff', textAlign: 'center',
+        padding: '14px 8px', fontSize: '16px', fontWeight: '700',
+        zIndex: '300', cursor: 'pointer',
+      });
+      banner.addEventListener('click', () => {
+        if (banner.parentNode) banner.remove();
+      });
+      document.body.appendChild(banner);
+      window._airpromptDiscBanner = banner;
+    }
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => { /* onclose fires next; reconnect handled there */ };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_MS);
+  reconnectAttempts++;
+  log('info', 'reconnecting', { attempt: reconnectAttempts, delay });
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+  }, delay);
+}
+
+// Kick off first connection
+connect();
 
 function send(msg) {
-  if (ws.readyState === WebSocket.OPEN) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
   }
 }
 
-ws.onopen = () => {
-  log('info', 'ws connected');
-  // Dismiss disconnect banner on reconnect
-  if (window._airpromptDiscBanner) {
-    if (window._airpromptDiscBanner.parentNode) {
-      window._airpromptDiscBanner.remove();
-    }
-    window._airpromptDiscBanner = null;
-  }
-};
-
-ws.onmessage = (event) => {
+// ── Message handler (detached for reconnect) ─────────────────────────
+function wsMessageHandler(event) {
   let msg;
   try { msg = JSON.parse(event.data); } catch (e) { return; }
 
@@ -118,27 +175,7 @@ ws.onmessage = (event) => {
     default:
       break;
   }
-};
-
-ws.onclose = () => {
-  log('warn', 'ws disconnected');
-  term.write('\r\n\x1b[31m[AirPrompt: disconnected]\x1b[0m\r\n');
-  // Overlay banner — stays until clicked or reconnected
-  const banner = document.createElement('div');
-  banner.textContent = '⚠️ DISCONNECTED — Tap to dismiss';
-  Object.assign(banner.style, {
-    position: 'fixed', top: '0', left: '0', right: '0',
-    background: '#dc2626', color: '#fff', textAlign: 'center',
-    padding: '14px 8px', fontSize: '16px', fontWeight: '700',
-    zIndex: '300', cursor: 'pointer',
-  });
-  banner.addEventListener('click', () => {
-    if (banner.parentNode) banner.remove();
-  });
-  document.body.appendChild(banner);
-  // Save ref so ws.onopen can dismiss on reconnect
-  window._airpromptDiscBanner = banner;
-};
+}
 
 // ── Session UI ──────────────────────────────────────────────────────
 function updateUI() {

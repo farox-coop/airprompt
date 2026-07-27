@@ -55,11 +55,14 @@ function startDaemon() {
     cwd: INSTALL_DIR, env, detached: true, stdio: 'ignore',
   });
   child.unref();
-  // Poll for daemon to be ready (PID file written + HTTP responding)
+  // Poll for daemon to be ready (PID file written + HTTP responding).
+  // Use spawnSync('sleep', ...) for cross-platform sub-second sleep —
+  // Node's execSync(`sleep 0.${ms}`) fails on macOS where sleep only
+  // accepts one decimal place (0.1 not 0.100).
   for (let i = 0; i < 30; i++) {
     if (daemonRunning()) return true;
-    const ms = (i < 10) ? 100 : 300;
-    require('child_process').execSync(`sleep 0.${ms}`, { timeout: 500 });
+    const ms = (i < 10) ? 0.1 : 0.3;
+    try { spawnSync('sleep', [String(ms)], { timeout: 1000 }); } catch (_) {}
   }
   return daemonRunning();
 }
@@ -99,16 +102,35 @@ async function main() {
     process.stdout.write('done\n');
   }
 
-  // 2. Generate session ID
+  // 2. Idempotency: if /airprompt on already registered this tmux session,
+  //    don't clobber SESSION_FILE with a different sessionId.
+  //    /airprompt on uses stable tmux group names; activate's PID-based IDs
+  //    would create duplicate sessions in the daemon.
+  if (fs.existsSync(SESSION_FILE) && fs.existsSync(MARKER)) {
+    // Already registered — skip.
+    process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
+    return;
+  }
+
+  // 3. Generate session ID
   const cwd = process.cwd();
   const cwdSafe = path.basename(cwd).replace(/[^a-zA-Z0-9_-]/g, '');
   const sessionId = `${Date.now()}-${process.pid}-${cwdSafe}`;
 
-  // 3. Detect tmux session
+  // 4. Detect tmux session — resolve web proxy sessions same as on.sh
   let tmuxSession = '';
   if (process.env.TMUX) {
-    const r = spawnSync('tmux', ['display-message', '-p', '#S'], { timeout: 2000 });
-    if (r.status === 0) tmuxSession = r.stdout.toString().trim();
+    const r = spawnSync('tmux', ['display-message', '-p', '#S'], { timeout: 2000, encoding: 'utf8' });
+    if (r.status === 0) {
+      tmuxSession = r.stdout.toString().trim();
+      // Inside a web proxy session — resolve to parent group
+      if (tmuxSession.startsWith('airprompt-web-')) {
+        const r2 = spawnSync('tmux', ['display-message', '-p', '#{session_group}'], { timeout: 2000, encoding: 'utf8' });
+        if (r2.status === 0 && r2.stdout.trim()) {
+          tmuxSession = r2.stdout.trim();
+        }
+      }
+    }
   }
   if (!tmuxSession && fs.existsSync(TMUX_MARKER)) {
     tmuxSession = fs.readFileSync(TMUX_MARKER, 'utf8').trim().slice(0, 128);

@@ -21,10 +21,15 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 # 2. Kill all airprompt tmux sessions
-tmux ls 2>/dev/null | grep '^airprompt-' | cut -d: -f1 | while read s; do
-  tmux kill-session -t "$s" 2>/dev/null || true
-  echo "  tmux session killed: $s"
-done || true
+# Use mapfile to avoid subshell issues with pipe → while read.
+if command -v tmux &>/dev/null; then
+  mapfile -t AIRPROMPT_SESSIONS < <(tmux ls 2>/dev/null | grep '^airprompt-' | cut -d: -f1 || true)
+  for s in "${AIRPROMPT_SESSIONS[@]}"; do
+    [ -z "$s" ] && continue
+    tmux kill-session -t "$s" 2>/dev/null || true
+    echo "  tmux session killed: $s"
+  done
+fi
 
 # 3. Remove all markers
 MARKERS_REMOVED=0
@@ -34,13 +39,6 @@ for f in \
   "$CONFIG_DIR/.airprompt-session" \
   "$CONFIG_DIR/.airprompt-tmux-active" \
   "$CONFIG_DIR/.airprompt-tmux-session"; do
-  if [ -f "$f" ]; then
-    rm -f "$f"
-    MARKERS_REMOVED=$((MARKERS_REMOVED + 1))
-  fi
-done
-# Wildcard glob for per-session markers
-for f in "$CONFIG_DIR/.airprompt-session-"*; do
   if [ -f "$f" ]; then
     rm -f "$f"
     MARKERS_REMOVED=$((MARKERS_REMOVED + 1))

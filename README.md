@@ -8,9 +8,8 @@ AirPrompt allows you to view and interact with remote Claude CLI sessions runnin
 ## Requirements
 - **Node.js** ≥ 18
 - **tmux** (`sudo apt install tmux`)
-- **reptyr** (`sudo apt install reptyr`) — attach running processes to tmux without restart. May need `echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope`
+- **reptyr** (`sudo apt install reptyr`) — optional, for `airprompt-attach.sh` (attach running processes to tmux)
 - **openssl** — TLS certificate generation for HTTPS voice dictation
-- **airprompt-claude** — convenience wrapper at `~/bin/airprompt-claude` (auto-starts Claude inside tmux)
 
 ## Architecture
 - **Daemon**: Single `server.js` instance on port 3210 managing multiple Claude sessions
@@ -23,10 +22,7 @@ AirPrompt allows you to view and interact with remote Claude CLI sessions runnin
 make setup          # install deps + generate TLS cert
 make start          # start daemon in background
 
-# Use the convenience wrapper (auto-starts Claude inside tmux)
-airprompt-claude --continue
-
-# Or manually: start Claude inside tmux
+# Start Claude inside tmux
 tmux new-session -s claude && claude
 
 # Inside Claude: /airprompt on
@@ -53,8 +49,10 @@ tmux new-session -s claude && claude
 ## Scripts
 | Script | Purpose |
 |--------|---------|
-| `bin/airprompt-register.sh` | Register tmux session with daemon (auto-detects `$TMUX`) |
-| `bin/airprompt-unregister.sh` | Unregister session (auto-discovers saved session ID) |
+| `bin/airprompt-on.sh` | Register session with daemon (`/airprompt on`) |
+| `bin/airprompt-off.sh` | Unregister session (`/airprompt off`) |
+| `bin/airprompt-status.sh` | Show daemon status and registered sessions |
+| `bin/airprompt-clean.sh` | Full teardown — kill all sessions, remove markers |
 | `bin/airprompt-attach.sh <PID>` | Attach running process to tmux via reptyr + register |
 | `bin/generate-cert.sh` | Create self-signed TLS cert (idempotent, always refreshes) |
 

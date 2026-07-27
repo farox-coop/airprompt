@@ -18,8 +18,8 @@
   "scripts": {
     "start": "nohup node server.js > /tmp/airprompt.log 2>&1 & echo \"AirPrompt daemon started\"",
     "stop": "kill $$(cat ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid} 2>/dev/null) 2>/dev/null; rm -f ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}",
-    "register": "bash bin/airprompt-register.sh",
-    "unregister": "bash bin/airprompt-unregister.sh",
+    "register": "bash bin/airprompt-on.sh",
+    "unregister": "bash bin/airprompt-off.sh",
     "test": "node --test test/unit/*.test.js && bash test/integration/run.sh",
     "lint": "node --check server.js && node --check public/client.js && node --check bin/install.js"
   },

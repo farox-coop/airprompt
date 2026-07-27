@@ -513,7 +513,7 @@ function uninstall(ctx) {
   }
 
   // 6. Remove marker files
-  for (const f of ['.airprompt-active', '.airprompt-url', '.airprompt-session', '.airprompt-tmux-session']) {
+  for (const f of ['.airprompt-active', '.airprompt-url', '.airprompt-session', '.airprompt-tmux-active', '.airprompt-tmux-session']) {
     const p = path.join(configDir, f);
     if (fs.existsSync(p)) {
       if (!opts.dryRun) { try { fs.unlinkSync(p); } catch (_) {} }
