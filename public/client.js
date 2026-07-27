@@ -43,10 +43,62 @@ const term = new window.Terminal({
   },
 });
 
+// Smart default fontSize: larger on touch devices
+const DEFAULT_FONT_SIZE = window.matchMedia('(pointer: coarse)').matches ? 16 : 14;
+
 const fitAddon = new window.FitAddon.FitAddon();
 term.loadAddon(fitAddon);
 term.open(document.getElementById('terminal-container'));
 fitAddon.fit();
+
+// ── Pinch-to-zoom (2-finger only) ─────────────────────────────────────
+// 1-finger touch passes through to xterm natively (tap-to-position,
+// text selection, keyboard). Tap on terminal opens keyboard via xterm.
+(function () {
+  const ZOOM_MIN = 8;
+  const ZOOM_MAX = 24;
+  let currentZoom = parseInt(localStorage.getItem('airprompt-font-size'), 10) || DEFAULT_FONT_SIZE;
+  term.options.fontSize = currentZoom;
+
+  const container = document.getElementById('terminal-container');
+  let startDist = 0, startZoom = 0, pinchActive = false;
+
+  container.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 2) { pinchActive = false; return; }
+    pinchActive = true;
+    startDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    startZoom = currentZoom;
+  }, { passive: true });
+
+  container.addEventListener('touchmove', function (e) {
+    if (!pinchActive || e.touches.length !== 2) return;
+    const dist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    if (Math.abs(dist - startDist) < 10) return;
+    e.preventDefault();
+    const newSize = Math.round(startZoom * dist / startDist);
+    const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newSize));
+    if (clamped !== currentZoom) {
+      currentZoom = clamped;
+      term.options.fontSize = clamped;
+      fitAddon.fit();
+    }
+  }, { passive: false });
+
+  container.addEventListener('touchend', function () {
+    if (pinchActive) {
+      currentZoom = term.options.fontSize;
+      localStorage.setItem('airprompt-font-size', currentZoom);
+      scheduleResize();
+    }
+    pinchActive = false;
+  });
+})();
 
 // ── Resize debounce ────────────────────────────────────────────────────
 let resizeTimer = null;
@@ -72,6 +124,11 @@ const sessionModal = document.getElementById('session-modal');
 const sessionList = document.getElementById('session-list');
 const modalClose = document.getElementById('modal-close');
 const micError = document.getElementById('mic-error');
+const loadSpinner = document.getElementById('load-spinner');
+
+function hideLoadSpinner() {
+  if (loadSpinner) loadSpinner.classList.add('hidden');
+}
 
 // ── State ───────────────────────────────────────────────────────────
 const SESSION_STORAGE_KEY = 'airprompt-active-session';
@@ -247,6 +304,7 @@ function selectSession(id) {
   send({ type: 'switch_session', sessionId: id });
   closeModal();
   updateUI();
+  hideLoadSpinner();
 }
 
 function escHtml(str) {
@@ -336,84 +394,9 @@ function toggleDictation(e) {
 
 dictateBtn.addEventListener('click', toggleDictation);
 
-// ── Touch scroll through terminal history ───────────────────────────
-const termContainer = document.getElementById('terminal-container');
-let touchScrollStartY = 0;
-let touchScrollStartX = 0;
-let touchScrollActive = false;
-const SCROLL_DEADZONE = 8;
 
-termContainer.addEventListener('touchstart', (e) => {
-  if (e.touches.length !== 1) { touchScrollActive = false; return; }
-  touchScrollStartY = e.touches[0].clientY;
-  touchScrollStartX = e.touches[0].clientX;
-  touchScrollActive = true;
-}, { passive: true });
-
-termContainer.addEventListener('touchmove', (e) => {
-  if (!touchScrollActive || e.touches.length !== 1) return;
-  const dy = e.touches[0].clientY - touchScrollStartY;
-  const dx = Math.abs(e.touches[0].clientX - touchScrollStartX);
-
-  // Swipe is not vertical enough — let xterm handle (text selection etc.)
-  if (Math.abs(dy) < dx || Math.abs(dy) < SCROLL_DEADZONE) return;
-
-  // If at top of scrollback AND swiping down, let pull-to-refresh fire
-  if (dy > 0 && term.buffer.active.viewportY <= 0) return;
-
-  e.preventDefault();
-  e.stopPropagation();
-  // Positive dy = finger down → scroll UP through history
-  // scrollLines(-) = scroll up, scrollLines(+) = scroll down
-  const lines = Math.round(-dy / 20);
-  if (lines !== 0) {
-    try { term.scrollLines(lines); } catch (_) {}
-  }
-  touchScrollStartY = e.touches[0].clientY;
-  touchScrollStartX = e.touches[0].clientX;
-}, { passive: false });
-
-termContainer.addEventListener('touchend', () => {
-  touchScrollActive = false;
+// ── Refresh button ────────────────────────────────────────────────────
+document.getElementById('refresh-btn').addEventListener('click', function (e) {
+  e.preventDefault(); e.stopPropagation();
+  location.reload();
 });
-
-// ── Pull-to-refresh ─────────────────────────────────────────────────
-const pullIndicator = document.getElementById('pull-indicator');
-const PULL_THRESHOLD = 60;
-let pullStartY = 0;
-let pullActive = false;
-let pullRefreshing = false;
-
-document.addEventListener('touchstart', (e) => {
-  if (pullRefreshing || e.touches.length !== 1) return;
-  if (window.scrollY === 0) {
-    pullStartY = e.touches[0].clientY;
-    pullActive = true;
-  }
-}, { passive: true, capture: true });
-
-document.addEventListener('touchmove', (e) => {
-  if (!pullActive || pullRefreshing) return;
-  const dy = e.touches[0].clientY - pullStartY;
-  if (dy > 10) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (dy > PULL_THRESHOLD) {
-      pullIndicator.className = 'refreshing';
-    } else {
-      pullIndicator.className = 'showing';
-    }
-  }
-}, { passive: false, capture: true });
-
-document.addEventListener('touchend', () => {
-  if (!pullActive) return;
-  const wasShowing = pullIndicator.classList.contains('refreshing');
-  pullActive = false;
-  pullIndicator.className = '';
-  if (wasShowing && !pullRefreshing) {
-    pullRefreshing = true;
-    pullIndicator.className = 'refreshing';
-    setTimeout(() => location.reload(), 350);
-  }
-}, { capture: true });
