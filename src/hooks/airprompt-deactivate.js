@@ -56,43 +56,83 @@ async function main() {
   if (!sessionId) { dlog('sessionId empty — exit 0'); process.exit(0); }
 
   // 2. Guard: check if the registered tmux session is still alive.
+  // Try multiple sources — .airprompt-tmux-active (primary) and
+  // .airprompt-tmux-session (fallback). Both are written by airprompt-on.sh.
   let registeredTmux = '';
-  try {
-    registeredTmux = fs.readFileSync(TMUX_ACTIVE_FILE, 'utf8').trim().slice(0, 128);
-    dlog(`registeredTmux='${registeredTmux}' from ${TMUX_ACTIVE_FILE} (exists=${fs.existsSync(TMUX_ACTIVE_FILE)})`);
-  } catch (_) {
-    dlog(`TMUX_ACTIVE_FILE ${TMUX_ACTIVE_FILE} not readable — ${_.message}`);
+  for (const f of [TMUX_ACTIVE_FILE, TMUX_SESSION_FILE]) {
+    try {
+      registeredTmux = fs.readFileSync(f, 'utf8').trim().slice(0, 128);
+      if (registeredTmux) { dlog(`registeredTmux='${registeredTmux}' from ${f}`); break; }
+    } catch (_) {
+      dlog(`file ${f} not readable — ${_.message}`);
+    }
   }
 
-  if (registeredTmux) {
+  // Last-resort guard: if no file was readable, check whether ANY tmux
+  // session from the same session group is still alive. If we can't even
+  // run tmux, err on the safe side and refuse cleanup.
+  if (!registeredTmux) {
+    dlog('GUARD: no registeredTmux from files — trying session group check');
     try {
-      const r = spawnSync('tmux', ['has-session', '-t', registeredTmux], { timeout: 2000 });
-      dlog(`tmux has-session status=${r.status} error=${r.error ? r.error.code || r.error.message : 'none'}`);
-      if (r.status === 0) {
-        dlog('GUARD: tmux session ALIVE → exit 0 (no cleanup)');
-        process.exit(0);
+      const r = spawnSync('tmux', ['display-message', '-p', '#{session_group}'], {
+        timeout: 2000, encoding: 'utf8',
+      });
+      if (r.status === 0 && r.stdout) {
+        const group = r.stdout.trim();
+        dlog(`GUARD: current session_group='${group}'`);
+        // If we're inside a session group, check whether the group itself
+        // exists as a tmux session (it does for group-named sessions).
+        const r2 = spawnSync('tmux', ['has-session', '-t', group], { timeout: 2000 });
+        if (r2.status === 0) {
+          dlog(`GUARD: session group '${group}' ALIVE → exit 0 (no cleanup)`);
+          process.exit(0);
+        }
       }
-      if (r.status === null || r.error) {
-        dlog(`GUARD: tmux not available (status=${r.status} error=${r.error?.code}) → exit 0 (safe)`);
-        process.exit(0);
-      }
-      dlog(`GUARD: tmux session CONFIRMED DEAD (status=${r.status}) → proceed with cleanup`);
     } catch (_) {
-      dlog(`GUARD: spawnSync threw (${_.message}) → exit 0 (safe)`);
+      dlog(`GUARD: session group check failed (${_.message}) → exit 0 (safe)`);
       process.exit(0);
     }
-  } else {
-    dlog(`GUARD BYPASSED: registeredTmux is empty — FALLING THROUGH TO CLEANUP`);
+    // If we truly can't confirm anything, play it safe and exit.
+    dlog('GUARD: could not confirm tmux state → exit 0 (safe, no cleanup)');
+    process.exit(0);
   }
 
-  // 3. Unregister from daemon
   try {
-    await post('/api/sessions/unregister', { sessionId });
+    const r = spawnSync('tmux', ['has-session', '-t', registeredTmux], { timeout: 2000 });
+    dlog(`tmux has-session -t '${registeredTmux}' status=${r.status} error=${r.error ? r.error.code || r.error.message : 'none'}`);
+    if (r.status === 0) {
+      dlog('GUARD: tmux session ALIVE → exit 0 (no cleanup)');
+      process.exit(0);
+    }
+    if (r.status === null || r.error) {
+      dlog(`GUARD: tmux not available (status=${r.status} error=${r.error?.code}) → exit 0 (safe)`);
+      process.exit(0);
+    }
+    dlog(`GUARD: tmux session CONFIRMED DEAD (status=${r.status}) → proceed with cleanup`);
   } catch (_) {
-    // Daemon may already be gone — remove markers anyway
+    dlog(`GUARD: spawnSync threw (${_.message}) → exit 0 (safe)`);
+    process.exit(0);
   }
 
-  // 4. Remove all marker files
+  // 3. Unregister from daemon — respect server response.
+  // If server refuses (tmux still alive), don't delete local markers.
+  let serverOk = false;
+  try {
+    const resp = await post('/api/sessions/unregister', { sessionId });
+    dlog(`unregister response: ${JSON.stringify(resp)}`);
+    // Server returns { ok: true } on success, or error message on refusal.
+    if (resp && resp.ok) {
+      serverOk = true;
+    } else {
+      dlog('GUARD: server refused unregister (tmux still alive) → skipping local cleanup');
+      process.exit(0);
+    }
+  } catch (_) {
+    // Daemon unreachable — session may already be gone, clean up locally.
+    dlog(`unregister request failed (${_.message}) → proceeding with local cleanup`);
+  }
+
+  // 4. Remove all marker files (only if server confirmed or is unreachable)
   try { fs.unlinkSync(MARKER); } catch (_) {}
   try { fs.unlinkSync(URL_FILE); } catch (_) {}
   try { fs.unlinkSync(SESSION_FILE); } catch (_) {}
@@ -109,7 +149,9 @@ async function main() {
     stopDaemon();
   }
 
-  process.stdout.write(`airprompt: session ${sessionId} unregistered\n`);
+  if (serverOk) {
+    process.stdout.write(`airprompt: session ${sessionId} unregistered\n`);
+  }
 }
 
 function post(path, body) {

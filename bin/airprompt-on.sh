@@ -28,8 +28,15 @@ TMUX_MARKER="${CONFIG_DIR}/.airprompt-tmux-session"
 if [ -n "${TMUX:-}" ]; then
   TMUX_SESSION=$(tmux display-message -p '#S' 2>/dev/null)
   if echo "$TMUX_SESSION" | grep -q '^airprompt-web-'; then
-    echo "Warning: running inside web proxy session ($TMUX_SESSION), skipping" >&2
-    TMUX_SESSION=""
+    # Resolve web proxy session to parent group — same logic as statusline script.
+    PARENT_GROUP=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r')
+    if [ -n "${PARENT_GROUP:-}" ]; then
+      echo "Resolved web proxy session ($TMUX_SESSION) to parent group: $PARENT_GROUP" >&2
+      TMUX_SESSION="$PARENT_GROUP"
+    else
+      echo "Warning: running inside web proxy session ($TMUX_SESSION), skipping" >&2
+      TMUX_SESSION=""
+    fi
   fi
 fi
 if [ -z "${TMUX_SESSION:-}" ] && [ -f "$TMUX_MARKER" ]; then
@@ -122,6 +129,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
   echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
   echo "$SESSION_ID" > "$SESSION_FILE"
   echo "$TMUX_SESSION" > "$TMUX_ACTIVE_FILE"
+  echo "$TMUX_SESSION" > "$TMUX_MARKER"
   touch "$MARKER"
   echo "AirPrompt session registered: $SESSION_ID"
   echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
@@ -130,6 +138,7 @@ elif echo "$RESP" | grep -q '"already registered"'; then
   echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
   echo "$SESSION_ID" > "$SESSION_FILE"
   echo "$TMUX_SESSION" > "$TMUX_ACTIVE_FILE"
+  echo "$TMUX_SESSION" > "$TMUX_MARKER"
   touch "$MARKER"
   echo "AirPrompt already registered for this session."
 elif echo "$RESP" | grep -q '"Session already registered"'; then
@@ -137,6 +146,7 @@ elif echo "$RESP" | grep -q '"Session already registered"'; then
   echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
   echo "$SESSION_ID" > "$SESSION_FILE"
   echo "$TMUX_SESSION" > "$TMUX_ACTIVE_FILE"
+  echo "$TMUX_SESSION" > "$TMUX_MARKER"
   touch "$MARKER"
   echo "AirPrompt already registered for this session."
 else
