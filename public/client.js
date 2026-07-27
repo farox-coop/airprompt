@@ -65,11 +65,12 @@ window.addEventListener('resize', scheduleResize);
 // ── DOM refs ────────────────────────────────────────────────────────
 const sessionBar = document.getElementById('session-bar');
 const sessionLabel = document.getElementById('session-label');
-const switchBtn = document.getElementById('switch-btn');
+const dictateBtn = document.getElementById('dictate-btn');
+const dictateIcon = document.getElementById('dictate-icon');
+const dictateLabel = document.getElementById('dictate-label');
 const sessionModal = document.getElementById('session-modal');
 const sessionList = document.getElementById('session-list');
 const modalClose = document.getElementById('modal-close');
-const micBtn = document.getElementById('mic-btn');
 const micError = document.getElementById('mic-error');
 
 // ── State ───────────────────────────────────────────────────────────
@@ -206,10 +207,10 @@ function updateUI() {
         const activeClass = s.id === activeSessionId ? ' active' : '';
         const time = new Date(s.createdAt).toLocaleString();
         const label = escHtml(sessionDisplayLabel(s));
-        const sub = s.name ? escHtml(s.cwd) : '';
-        const subHtml = sub ? `<div class="time">${sub}</div>` : '';
+        const cwd = s.name ? escHtml(s.cwd) : '';
+        const subHtml = cwd ? `<div class="cwd">${cwd}</div>` : '';
         return `<button class="session-item${activeClass}" data-id="${s.id}">
-          <div class="cwd">${label}</div>
+          <div class="name">${label}</div>
           ${subHtml}
           <div class="time">${escHtml(time)}</div>
         </button>`;
@@ -244,7 +245,6 @@ function closeModal() {
 }
 
 sessionBar.addEventListener('click', openModal);
-switchBtn.addEventListener('click', openModal);
 modalClose.addEventListener('click', closeModal);
 sessionModal.addEventListener('click', (e) => {
   if (e.target === sessionModal) closeModal();
@@ -269,17 +269,22 @@ if (SpeechRecognition) {
   recognition.onresult = (event) => {
     const transcript = event.results[event.results.length - 1][0].transcript;
     if (transcript.trim()) {
-      send({ type: 'input', data: transcript + '\r' });
+      send({ type: 'input', data: transcript });
     }
   };
 
   recognition.onerror = (e) => {
-    stopDictation();
+    isListening = false;
+    dictateBtn.classList.remove('recording');
     if (e.error === 'not-allowed') {
-      micBtn.disabled = true;
-      micBtn.textContent = '🔇 Mic Blocked (HTTPS required)';
+      dictateBtn.disabled = true;
+      dictateIcon.textContent = '🔇';
+      dictateLabel.textContent = 'Dictate';
       micError.style.display = 'block';
       micError.textContent = 'Voice needs HTTPS or localhost. Chrome blocks mic on HTTP LAN IP. Use keyboard below.';
+    } else {
+      dictateIcon.textContent = '🎤';
+      dictateLabel.textContent = 'Dictate';
     }
   };
 
@@ -287,32 +292,31 @@ if (SpeechRecognition) {
     if (isListening) recognition.start();
   };
 } else {
-  micBtn.textContent = 'Dictation Not Supported';
-  micBtn.disabled = true;
-  micBtn.style.background = '#30363d';
+  dictateIcon.textContent = '🚫';
+  dictateLabel.textContent = 'Dictate';
+  dictateBtn.disabled = true;
 }
 
-function startDictation(e) {
-  if (e) e.preventDefault();
-  if (!recognition || isListening) return;
-  isListening = true;
-  recognition.start();
-  micBtn.classList.add('recording');
-  micBtn.innerText = '🛑 Listening... Release to Send';
+function toggleDictation(e) {
+  if (e) { e.preventDefault(); e.stopPropagation(); }
+  if (!recognition) return;
+
+  if (isListening) {
+    isListening = false;
+    recognition.stop();
+    dictateBtn.classList.remove('recording');
+    dictateIcon.textContent = '🎤';
+    dictateLabel.textContent = 'Dictate';
+  } else {
+    isListening = true;
+    recognition.start();
+    dictateBtn.classList.add('recording');
+    dictateIcon.textContent = '🔴';
+    dictateLabel.textContent = 'Recording';
+  }
 }
 
-function stopDictation(e) {
-  if (e) e.preventDefault();
-  if (!recognition || !isListening) return;
-  isListening = false;
-  recognition.stop();
-  micBtn.classList.remove('recording');
-  micBtn.innerText = '🎤 Hold to Dictate';
-}
-
-micBtn.addEventListener('pointerdown', startDictation);
-micBtn.addEventListener('pointerup', stopDictation);
-micBtn.addEventListener('pointercancel', stopDictation);
+dictateBtn.addEventListener('click', toggleDictation);
 
 // ── Touch scroll through terminal history ───────────────────────────
 const termContainer = document.getElementById('terminal-container');

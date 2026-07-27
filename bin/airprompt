@@ -23,6 +23,8 @@ for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
     help|-h|--help)
       echo "AirPrompt — remote mobile access and voice dictation for Claude sessions"
       echo ""
+      echo "ALL COMMANDS EXECUTE IMMEDIATELY — NO CONFIRMATION EVER."
+      echo ""
       echo "Usage: /airprompt <command>"
       echo ""
       echo "Commands:"

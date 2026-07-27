@@ -21,22 +21,35 @@
       height: 44px; background: #0d1117; border-bottom: 1px solid #30363d;
       display: flex; align-items: center; justify-content: space-between;
       padding: 0 12px; flex-shrink: 0; cursor: pointer;
+      overflow: visible;
     }
     #session-bar:active { background: #161b22; }
     #session-label {
-      font-size: 13px; color: #58a6ff; overflow: hidden;
+      font-size: 16px; color: #58a6ff; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; flex: 1;
-      display: flex; align-items: center; gap: 4px;
+      display: flex; flex-direction: column; gap: 0;
     }
     #session-label .name { color: #58a6ff; }
-    #session-label .cwd { color: #8b949e; font-size: 12px; }
+    #session-label .cwd { color: #c9d1d9; font-size: 11px; }
     #session-label.no-session { color: #8b949e; }
-    #switch-btn {
-      background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
-      border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer;
-      flex-shrink: 0; margin-left: 8px;
+    #dictate-btn {
+      background: #1f6feb; color: #fff; border: 1px solid #388bfd;
+      border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+      flex-shrink: 0; margin-left: 8px; height: 32px;
+      display: flex; align-items: center; gap: 8px;
+      user-select: none; -webkit-user-select: none; touch-action: manipulation; font-weight: 700;
+      box-shadow: 0 0 12px rgba(56, 139, 253, 0.7), 0 0 24px rgba(56, 139, 253, 0.3);
+      position: relative; z-index: 1;
     }
-    #switch-btn:active { background: #30363d; }
+    #dictate-btn:active { background: #388bfd; box-shadow: 0 0 18px rgba(56, 139, 253, 0.8), 0 0 32px rgba(56, 139, 253, 0.4); }
+    #dictate-btn.recording {
+      background: #dc2626; color: #fff; border-color: #dc2626;
+      box-shadow: 0 0 14px rgba(220, 38, 38, 0.7), 0 0 28px rgba(220, 38, 38, 0.35);
+    }
+    #dictate-btn:disabled {
+      background: #21262d; color: #8b949e; border-color: #30363d;
+      box-shadow: none; cursor: default;
+    }
 
     /* ── Session modal ──────────────────────────── */
     #session-modal {
@@ -54,13 +67,14 @@
     }
     .session-item {
       display: block; width: 100%; background: #21262d; border: 1px solid #30363d;
-      border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer;
-      text-align: left; color: #c9d1d9; font-size: 14px;
+      border-radius: 8px; padding: 14px; margin-bottom: 8px; cursor: pointer;
+      text-align: left; color: #c9d1d9; font-size: 16px;
     }
     .session-item:active { background: #30363d; }
     .session-item.active { border-color: #58a6ff; }
-    .session-item .cwd { font-weight: 600; }
-    .session-item .time { font-size: 11px; color: #8b949e; margin-top: 4px; }
+    .session-item .name { font-weight: 600; font-size: 18px; }
+    .session-item .cwd { font-size: 14px; }
+    .session-item .time { font-size: 13px; color: #8b949e; margin-top: 4px; }
     .session-empty { color: #8b949e; text-align: center; padding: 24px; }
     #modal-close {
       display: block; width: 100%; background: #21262d; color: #c9d1d9;
@@ -91,28 +105,9 @@
       mix-blend-mode: normal !important;
     }
 
-    /* ── Controls ────────────────────────────────── */
-    #controls {
-      background: #111; border-top: 1px solid #333;
-      padding: 8px 10px; flex-shrink: 0;
-    }
-    #mic-btn {
-      width: 100%; height: 48px; border-radius: 12px;
-      background: #2563eb; color: #fff; border: none;
-      font-size: 16px; font-weight: 600;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-      user-select: none; -webkit-user-select: none; touch-action: manipulation;
-    }
-    #mic-btn.recording {
-      background: #dc2626; animation: pulse 1.5s infinite;
-    }
-    #mic-btn:disabled { background: #30363d; color: #8b949e; }
     #mic-error {
       color: #f85149; font-size: 11px; text-align: center;
       margin-top: 4px; display: none;
-    }
-    @keyframes pulse {
-      0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; }
     }
 
     /* ── Pull-to-refresh indicator ─────────────── */
@@ -142,7 +137,7 @@
 
   <div id="session-bar">
     <span id="session-label">No session selected</span>
-    <button id="switch-btn">Switch</button>
+    <button id="dictate-btn"><span id="dictate-icon">🎤</span> <span id="dictate-label">Dictate</span></button>
   </div>
 
   <div id="session-modal">
@@ -154,10 +149,7 @@
   </div>
 
   <div id="terminal-container"></div>
-  <div id="controls">
-    <button id="mic-btn">&#x1F3A4; Hold to Dictate</button>
-    <div id="mic-error"></div>
-  </div>
+  <div id="mic-error"></div>
 
   <script src="client.js"></script>
 </body>

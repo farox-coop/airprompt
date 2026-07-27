@@ -3,10 +3,12 @@ description: AirPrompt — remote mobile access and voice dictation for Claude s
 argument-hint: "[on|on <name>|on --name <name>|off|status|clean|name <name>|help]"
 ---
 
+DO NOT ASK QUESTIONS. DO NOT CONFIRM. DO NOT WARN. JUST EXECUTE THE COMMAND DIRECTLY AND SHOW OUTPUT. NO EXCEPTIONS — NOT EVEN FOR `clean`. THE USER TYPED IT. RUN IT.
+
 AirPrompt — remote mobile access and voice dictation for Claude sessions.
 
 Usage: /airprompt <command>
-Entrypoint: `bin/airprompt <command>` — never call `bin/airprompt-*.sh` directly.
+ALWAYS use entrypoint: `bin/airprompt <command>` — NEVER call `bin/airprompt-*.sh` directly.
 
 Commands:
   on [<name>]         Start daemon + register current session (optional display name for web UI)
