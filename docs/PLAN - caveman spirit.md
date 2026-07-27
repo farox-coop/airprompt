@@ -562,3 +562,36 @@ Each would get its own skill/command files adapted to that agent's format. The i
 - **Multi-agent beyond Claude Code** — provider matrix is extensible, but implementation focuses on Claude Code first.
 - **Config file** — no `~/.airpromptrc` yet. Port/config-dir via CLI flags + env vars for now. Add config file when demand emerges.
 - **Auto-update** — caveman doesn't do this either. User re-runs install command to update.
+
+---
+
+## Implementation Status: COMPLETE (2026-07-27)
+
+All steps (1–11) implemented. Key differences from original plan:
+
+- **Per-session isolation**: marker files moved from global flat files to
+  `~/.claude/.airprompt-sessions/{tmux-name}/` directories. Multiple Claude sessions coexist
+  without fighting over global files. Legacy global markers cleaned up during migration.
+- **Session naming**: `/airprompt name <name>` sets a human-readable label. Shows in
+  statusline badge as `[<name>@https://<IP>:3210]` and in web UI session bar/modal.
+  `/airprompt on <name>` registers with name in one step. New `PUT /api/sessions/name` endpoint.
+- **Unified dispatcher**: `bin/airprompt` as single entrypoint for all subcommands
+  (on/off/status/clean/name). Sub-scripts (`airprompt-on.sh`, etc.) are internal only.
+- **`airprompt-claude` launcher**: starts Claude inside named tmux session and auto-registers
+  with AirPrompt. Supports `--name`, `--continue`, `--resume`.
+- **Web UI improvements**: WS auto-reconnect (exponential backoff, max 30s), resize debounce
+  (200ms), session bar clickable, named sessions show `{name} ({cwd})` in bar and modal.
+- **Deactivate guard hardened**: triple guard (per-session tmux file + legacy files + session
+  group check). Respects server 409 response — won't delete local markers if daemon says
+  tmux still alive.
+- **Clean script hardened**: PID verification via `/proc/PID/cmdline` before killing, force-kill
+  after 1s grace period.
+- **Web proxy session resolution**: all scripts resolve `airprompt-web-*` tmux sessions to
+  parent session group, preventing stale PID-based session ID generation.
+- **`activate.js` idempotency**: SessionStart hook skips registration if this tmux session
+  already has per-session `active` marker (from `/airprompt on`). Sweeps dead session dirs.
+- **Statusline badge format**: named sessions show `[<name>@<url>]`, unnamed show
+  `[AirPrompt: <url>]`. Per-session isolation via `~/.claude/.airprompt-sessions/`.
+- **`status.sh`**: shows session name when set, cwd fallback otherwise.
+
+Original steps 1–11 all implemented. No steps removed. See git log for full history.

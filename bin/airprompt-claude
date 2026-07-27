@@ -6,31 +6,43 @@
 #         airprompt-claude --continue
 #         airprompt-claude --continue <session_id>
 #         airprompt-claude --resume <session_id>
+#         airprompt-claude --name <name> [claude-args...]
 #
 # --resume / --continue <id> accepts both:
 #   • tmux session name  (e.g. claude-149509-1785091896)
 #   • Claude session ID  (e.g. 3bc8beca-35eb-44ef-a75b-d6c07564ae25)
 # If <id> is not a tmux session, we create one and run claude --resume <id>.
+#
+# --name gives a stable, human-readable tmux session name (sanitised).
 
 set -euo pipefail
 
 REAL_CLAUDE="$HOME/.local/bin/claude"
-SESSION_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.airprompt-tmux-session"
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
 
 if [ ! -x "$REAL_CLAUDE" ]; then
   echo "Error: Claude not found at $REAL_CLAUDE" >&2
   exit 1
 fi
 
+# ── Per-session marker — writes metadata only (session/tmux/name).
+# Does NOT write `active` or `url` — those are set by airprompt-on.sh
+# or the SessionStart hook after daemon registration.
 save_session_marker() {
-  local name="$1"
-  mkdir -p "$(dirname "$SESSION_FILE")" 2>/dev/null || true
-  echo "$name" > "$SESSION_FILE"
+  local tmux_name="$1"
+  local session_name="${2:-}"
+  local my_dir="${SESSIONS_DIR}/${tmux_name}"
+  mkdir -p "$my_dir" 2>/dev/null || true
+  echo "$tmux_name" > "${my_dir}/session"
+  [ -n "$session_name" ] && echo "$session_name" > "${my_dir}/name"
+  echo "$tmux_name" > "${my_dir}/tmux"
 }
 
-# ── Parse --resume / --continue <session_id> ─────────────────────────
+# ── Parse args ────────────────────────────────────────────────────────
 RESUME_SESSION=""
 RESUME_CLAUDE_ID=""   # set when <id> is a Claude session UUID, not tmux
+SESSION_NAME=""       # human-readable name for the session
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -51,6 +63,14 @@ while [ $# -gt 0 ]; do
         shift
       fi
       ;;
+    --name)
+      if [ $# -lt 2 ]; then
+        echo "Error: --name requires a name" >&2
+        exit 1
+      fi
+      SESSION_NAME="$2"
+      shift 2
+      ;;
     *)
       args+=("$1")
       shift
@@ -60,7 +80,7 @@ done
 
 # ── Resume path ──────────────────────────────────────────────────────
 if [ -n "$RESUME_SESSION" ]; then
-  save_session_marker "$RESUME_SESSION"
+  save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
 
   if tmux has-session -t "$RESUME_SESSION" 2>/dev/null; then
     # ── Known tmux session — reuse it ────────────────────────────────
@@ -72,7 +92,7 @@ if [ -n "$RESUME_SESSION" ]; then
         tmux kill-session -t "$RESUME_SESSION" 2>/dev/null || true
         RESUME_CLAUDE_ID=""
         RESUME_SESSION="claude-$$-$(date +%s)"
-        save_session_marker "$RESUME_SESSION"
+        save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
         tmux new-session -d -s "$RESUME_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" "${args[@]}"
         tmux set-option -t "$RESUME_SESSION" focus-events on
       }
@@ -87,7 +107,7 @@ if [ -n "$RESUME_SESSION" ]; then
     # ── Not a tmux session — treat as Claude session ID ──────────────
     RESUME_CLAUDE_ID="$RESUME_SESSION"
     TMUX_SESSION="claude-$$-$(date +%s)"
-    save_session_marker "$TMUX_SESSION"
+    save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
     tmux new-session -d -s "$TMUX_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" --resume "$RESUME_CLAUDE_ID"
     tmux set-option -t "$TMUX_SESSION" focus-events on
     if [ -n "${TMUX:-}" ]; then
@@ -100,18 +120,23 @@ fi
 
 # ── Already inside tmux — just run real Claude, save session name ────
 if [ -n "${TMUX:-}" ]; then
-  SESSION_NAME=$(tmux display-message -p '#S' 2>/dev/null)
-  save_session_marker "$SESSION_NAME"
+  SESSION_NAME_TMUX=$(tmux display-message -p '#S' 2>/dev/null)
+  save_session_marker "$SESSION_NAME_TMUX" "$SESSION_NAME"
   exec "$REAL_CLAUDE" "${args[@]}"
 fi
 
 # ── Not in tmux — create a tmux session and run Claude inside ────────
-SESSION="claude-$$-$(date +%s)"
-save_session_marker "$SESSION"
+if [ -n "$SESSION_NAME" ]; then
+  SANITIZED=$(echo "$SESSION_NAME" | tr -cd 'a-zA-Z0-9_-')
+  TMUX_SESSION="claude-${SANITIZED}"
+else
+  TMUX_SESSION="claude-$$-$(date +%s)"
+fi
+save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
 
 # Bash wrapper runs Claude via "$@". When Claude exits (regardless of
 # exit code), prints the resume message that Claude outputs then waits
 # for Enter.
-tmux new-session -d -s "$SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" "${args[@]}"
-tmux set-option -t "$SESSION" focus-events on
-exec tmux attach-session -t "$SESSION"
+tmux new-session -d -s "$TMUX_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" "${args[@]}"
+tmux set-option -t "$TMUX_SESSION" focus-events on
+exec tmux attach-session -t "$TMUX_SESSION"

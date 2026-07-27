@@ -3,10 +3,8 @@ set -euo pipefail
 
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
 PID_FILE="/tmp/airprompt-server.pid"
-MARKER="${CONFIG_DIR}/.airprompt-active"
-URL_FILE="${CONFIG_DIR}/.airprompt-url"
-SESSION_FILE="${CONFIG_DIR}/.airprompt-session"
 
 # ── Detect protocol ──────────────────────────────────────────────────
 CERT_FILE="${CONFIG_DIR}/airprompt-cert.pem"
@@ -26,6 +24,15 @@ fi
 [ -z "$LAN_IP" ] && LAN_IP="localhost"
 
 API_URL="${PROTO}://localhost:${DAEMON_PORT}"
+
+# ── Resolve current tmux session ─────────────────────────────────────
+CURRENT_TMUX=""
+if [ -n "${TMUX:-}" ]; then
+  CURRENT_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
+  if echo "$CURRENT_TMUX" | grep -q '^airprompt-web-'; then
+    CURRENT_TMUX=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r')
+  fi
+fi
 
 # ── Status output ────────────────────────────────────────────────────
 echo "=== AirPrompt Status ==="
@@ -56,7 +63,9 @@ import sys, json
 try:
   data = json.load(sys.stdin)
   for s in data:
-    print(f\"  \033[36m{s['id']}\033[0m\")
+    label = s.get('name') or s['cwd']
+    print(f\"  \033[36m{label}\033[0m\")
+    print(f\"    id: {s['id']}\")
     print(f\"    cwd: {s['cwd']}\")
     print(f\"    created: {s['createdAt']}\")
 except: print('  (parse error)')
@@ -66,15 +75,24 @@ except: print('  (parse error)')
   fi
   echo ""
 
-  # ── Local markers ──────────────────────────────────────────────────
-  if [ -f "$SESSION_FILE" ]; then
-    LOCAL_SESSION=$(head -c 128 "$SESSION_FILE" 2>/dev/null | tr -d '\n\r')
+  # ── Local status ──────────────────────────────────────────────────
+  if [ -n "$CURRENT_TMUX" ] && [ -d "${SESSIONS_DIR}/${CURRENT_TMUX}" ]; then
+    MY_DIR="${SESSIONS_DIR}/${CURRENT_TMUX}"
+    LOCAL_SESSION=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
     echo "This session: $LOCAL_SESSION"
-    if [ -f "$MARKER" ]; then
+    if [ -f "${MY_DIR}/active" ]; then
       echo "Status:      ACTIVE (badge shown in statusline)"
     else
       echo "Status:      INACTIVE (no statusline badge)"
     fi
+    if [ -f "${MY_DIR}/name" ]; then
+      echo "Name:        $(cat "${MY_DIR}/name")"
+    fi
+  elif [ -f "${CONFIG_DIR}/.airprompt-session" ]; then
+    # Legacy fallback
+    LOCAL_SESSION=$(head -c 128 "${CONFIG_DIR}/.airprompt-session" 2>/dev/null | tr -d '\n\r')
+    echo "This session: $LOCAL_SESSION (legacy)"
+    echo "Register with: /airprompt on"
   else
     echo "This session: NOT REGISTERED"
     echo "Register with: /airprompt on"

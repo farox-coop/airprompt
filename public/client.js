@@ -63,6 +63,7 @@ setTimeout(scheduleResize, 300);
 window.addEventListener('resize', scheduleResize);
 
 // ── DOM refs ────────────────────────────────────────────────────────
+const sessionBar = document.getElementById('session-bar');
 const sessionLabel = document.getElementById('session-label');
 const switchBtn = document.getElementById('switch-btn');
 const sessionModal = document.getElementById('session-modal');
@@ -178,10 +179,18 @@ function wsMessageHandler(event) {
 }
 
 // ── Session UI ──────────────────────────────────────────────────────
+function sessionDisplayLabel(s) {
+  return s.name || s.cwd;
+}
+
 function updateUI() {
   const s = sessions.find((s) => s.id === activeSessionId);
   if (activeSessionId && s) {
-    sessionLabel.textContent = s.cwd;
+    if (s.name) {
+      sessionLabel.innerHTML = `<span class="name">${escHtml(s.name)}</span><span class="cwd">${escHtml(s.cwd)}</span>`;
+    } else {
+      sessionLabel.textContent = s.cwd;
+    }
     sessionLabel.classList.remove('no-session');
   } else {
     sessionLabel.textContent = 'No session selected';
@@ -196,8 +205,12 @@ function updateUI() {
       .map((s) => {
         const activeClass = s.id === activeSessionId ? ' active' : '';
         const time = new Date(s.createdAt).toLocaleString();
+        const label = escHtml(sessionDisplayLabel(s));
+        const sub = s.name ? escHtml(s.cwd) : '';
+        const subHtml = sub ? `<div class="time">${sub}</div>` : '';
         return `<button class="session-item${activeClass}" data-id="${s.id}">
-          <div class="cwd">${escHtml(s.cwd)}</div>
+          <div class="cwd">${label}</div>
+          ${subHtml}
           <div class="time">${escHtml(time)}</div>
         </button>`;
       })
@@ -230,6 +243,7 @@ function closeModal() {
   sessionModal.classList.remove('open');
 }
 
+sessionBar.addEventListener('click', openModal);
 switchBtn.addEventListener('click', openModal);
 modalClose.addEventListener('click', closeModal);
 sessionModal.addEventListener('click', (e) => {

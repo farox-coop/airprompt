@@ -1,0 +1,45 @@
+#!/bin/bash
+# airprompt — Unified dispatch for multi-word arguments.
+# /airprompt on my project → bash airprompt-on.sh --name "my project"
+# /airprompt on             → bash airprompt-on.sh
+# /airprompt name something → bash airprompt-name.sh "something"
+set -euo pipefail
+
+ARGS="$*"
+CMD="${1:-}"
+shift 2>/dev/null || true
+REST="${*:-}"
+
+# Resolve install dir
+for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
+  [ -d "$d" ] || continue
+  SUB=""
+  case "$CMD" in
+    on)     SUB="$d/bin/airprompt-on.sh";;
+    off)    SUB="$d/bin/airprompt-off.sh";;
+    status) SUB="$d/bin/airprompt-status.sh";;
+    clean)  SUB="$d/bin/airprompt-clean.sh";;
+    name)   SUB="$d/bin/airprompt-name.sh";;
+    *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, name" >&2; exit 1 ;;
+  esac
+  if [ -x "$SUB" ]; then
+    case "$CMD" in
+      on)
+        if [ -n "$REST" ]; then
+          exec bash "$SUB" --name "$REST"
+        else
+          exec bash "$SUB"
+        fi
+        ;;
+      name)
+        exec bash "$SUB" "$REST"
+        ;;
+      *)
+        exec bash "$SUB"
+        ;;
+    esac
+  fi
+done
+
+echo "Error: airprompt scripts not found" >&2
+exit 1

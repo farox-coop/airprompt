@@ -57,7 +57,7 @@ function killTmuxSession(sessionName) {
 }
 
 function broadcastSessionList(wss) {
-  const list = Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, createdAt: s.createdAt }));
+  const list = Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, name: s.name || null, createdAt: s.createdAt }));
   const msg = JSON.stringify({ type: 'session_list', sessions: list });
   wss.clients.forEach((client) => {
     if (client.readyState === 1) {
@@ -79,20 +79,65 @@ function removePid() { try { fs.unlinkSync(PID_FILE); } catch (e) { /* ok */ } }
 
 function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return false; } }
 
+// ── Startup recovery: scan per-session dirs and re-register alive sessions ──
+// Daemon restart loses in-memory state. On-disk markers survive.
+// Rebuild session registry from ~/.claude/.airprompt-sessions/{tmux}/
+function recoverSessionsFromDisk() {
+  const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const sessionsDir = path.join(configDir, '.airprompt-sessions');
+  if (!fs.existsSync(sessionsDir)) return;
+
+  let entries;
+  try { entries = fs.readdirSync(sessionsDir); } catch (_) { return; }
+
+  for (const entry of entries) {
+    const dir = path.join(sessionsDir, entry);
+    if (!fs.statSync(dir).isDirectory()) continue;
+
+    // Check if tmux session is still alive
+    if (!tmuxExists(entry)) {
+      // Dead session — clean up on-disk markers
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+      continue;
+    }
+
+    // Read metadata from disk
+    let sessionId, name;
+    try { sessionId = fs.readFileSync(path.join(dir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) { sessionId = entry; }
+    try { name = fs.readFileSync(path.join(dir, 'name'), 'utf8').trim().slice(0, 64) || null; } catch (_) { name = null; }
+
+    // Derive cwd from tmux session
+    let cwd = process.env.HOME || '/';
+    try {
+      const r = spawnSync('tmux', ['display-message', '-t', entry, '-p', '#{pane_current_path}'], { timeout: 2000, encoding: 'utf8' });
+      if (r.status === 0 && r.stdout.trim()) cwd = r.stdout.trim();
+    } catch (_) {}
+
+    if (!sessions.has(sessionId)) {
+      sessions.set(sessionId, { sessionId, cwd, name, tmuxSession: entry, createdAt: new Date().toISOString() });
+      log('info', 'session recovered from disk', { sessionId, tmuxSession: entry, cwd, name });
+    }
+  }
+
+  if (sessions.size > 0) log('info', 'recovery complete', { recovered: sessions.size });
+}
+
 function createApp() {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.join(__dirname, 'public')));
 
   app.get('/api/sessions', (_req, res) => {
-    res.json(Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, createdAt: s.createdAt })));
+    res.json(Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, name: s.name || null, createdAt: s.createdAt })));
   });
 
   app.post('/api/sessions/register', (req, res) => {
-    const { sessionId, cwd, tmuxSession } = req.body || {};
+    const { sessionId, cwd, tmuxSession, name } = req.body || {};
     if (!sessionId || !cwd) return res.status(400).json({ error: 'Missing sessionId or cwd' });
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) return res.status(400).json({ error: 'Invalid sessionId format' });
     if (typeof cwd !== 'string' || cwd.length > 512) return res.status(400).json({ error: 'cwd too long' });
+    if (name !== undefined && (typeof name !== 'string' || name.length > 64 || !/^[a-zA-Z0-9 _-]{1,64}$/.test(name)))
+      return res.status(400).json({ error: 'Invalid name: max 64 chars, alphanumeric + spaces, dashes, underscores' });
     if (sessions.has(sessionId)) return res.status(409).json({ error: 'Session already registered' });
 
     let actualTmuxSession;
@@ -106,20 +151,21 @@ function createApp() {
         }
       }
     }
-    sessions.set(sessionId, { sessionId, cwd, tmuxSession: actualTmuxSession, createdAt: new Date().toISOString() });
-    log('info', 'session registered', { sessionId, tmuxSession: actualTmuxSession, cwd });
+    sessions.set(sessionId, { sessionId, cwd, name: name || null, tmuxSession: actualTmuxSession, createdAt: new Date().toISOString() });
+    log('info', 'session registered', { sessionId, tmuxSession: actualTmuxSession, cwd, name: name || null });
     broadcastSessionList(wss);
     res.json({ ok: true, sessionId });
   });
 
   app.post('/api/sessions/unregister', (req, res) => {
-    const { sessionId } = req.body || {};
+    const { sessionId, force } = req.body || {};
     if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
     if (!sessions.has(sessionId)) return res.status(404).json({ error: 'Session not found' });
     const entry = sessions.get(sessionId);
     // Guard: if the registered tmux session is still alive, refuse to unregister.
     // This is a server-side safety net against spurious Stop hook invocations.
-    if (entry.tmuxSession && tmuxExists(entry.tmuxSession)) {
+    // force: true bypasses this — used by explicit /airprompt off user command.
+    if (!force && entry.tmuxSession && tmuxExists(entry.tmuxSession)) {
       log('warn', 'unregister refused — tmux session still alive', { sessionId, tmuxSession: entry.tmuxSession });
       return res.status(409).json({ error: 'Session still active', ok: false });
     }
@@ -148,6 +194,24 @@ function createApp() {
     res.json({ ok: true });
   });
 
+  app.put('/api/sessions/name', (req, res) => {
+    const { sessionId, name } = req.body || {};
+    if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
+    if (!sessions.has(sessionId)) return res.status(404).json({ error: 'Session not found' });
+    // Reject non-string non-nullish values (numbers, objects, booleans)
+    if (name != null && typeof name !== 'string')
+      return res.status(400).json({ error: 'name must be a string' });
+    // Empty string clears the name; non-empty must pass validation
+    if (typeof name === 'string' && name.length > 0 && !/^[a-zA-Z0-9 _-]{1,64}$/.test(name))
+      return res.status(400).json({ error: 'Invalid name: max 64 chars, alphanumeric + spaces, dashes, underscores' });
+    const entry = sessions.get(sessionId);
+    const prev = entry.name;
+    entry.name = (typeof name === 'string' && name.length > 0) ? name : null;
+    log('info', 'session named', { sessionId, name: entry.name, prev: prev || null });
+    broadcastSessionList(wss);
+    res.json({ ok: true, name: entry.name });
+  });
+
   const tlsOptions = TLS_ENABLED ? { key: fs.readFileSync(KEY_FILE), cert: fs.readFileSync(CERT_FILE) } : null;
   const httpServer = tlsOptions ? https.createServer(tlsOptions, app) : http.createServer(app);
   const wss = new WebSocketServer({ server: httpServer, pingInterval: 30000, pingTimeout: 5000 });
@@ -163,7 +227,7 @@ function createApp() {
 
     ws.send(JSON.stringify({
       type: 'session_list',
-      sessions: Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, createdAt: s.createdAt })),
+      sessions: Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, name: s.name || null, createdAt: s.createdAt })),
     }));
 
     function spawnPty(sessionId) {
@@ -286,6 +350,8 @@ if (require.main === module) {
   const { httpServer, tlsOptions: tls } = createApp();
 
   httpServer.listen(PORT, '0.0.0.0', () => {
+    // Rebuild session registry from on-disk markers (survives daemon restart)
+    recoverSessionsFromDisk();
     const lanIp = getLocalIp();
     const url = `${tls ? 'https' : 'http'}://${lanIp}:${PORT}`;
     console.log('\n' + '='.repeat(50));

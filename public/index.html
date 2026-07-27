@@ -20,12 +20,16 @@
     #session-bar {
       height: 44px; background: #0d1117; border-bottom: 1px solid #30363d;
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0 12px; flex-shrink: 0;
+      padding: 0 12px; flex-shrink: 0; cursor: pointer;
     }
+    #session-bar:active { background: #161b22; }
     #session-label {
       font-size: 13px; color: #58a6ff; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; flex: 1;
+      display: flex; align-items: center; gap: 4px;
     }
+    #session-label .name { color: #58a6ff; }
+    #session-label .cwd { color: #8b949e; font-size: 12px; }
     #session-label.no-session { color: #8b949e; }
     #switch-btn {
       background: #21262d; color: #c9d1d9; border: 1px solid #30363d;

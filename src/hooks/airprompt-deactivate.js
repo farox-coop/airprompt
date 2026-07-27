@@ -5,6 +5,8 @@
 //
 // Guards against spurious Stop hook invocations by checking
 // whether the registered tmux session is still alive before cleaning up.
+//
+// Per-session isolation: reads from ~/.claude/.airprompt-sessions/{tmux}/
 
 'use strict';
 
@@ -17,10 +19,14 @@ const { spawnSync } = require('child_process');
 
 const PORT = process.env.AIRPROMPT_PORT || 3210;
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
 const PID_FILE = '/tmp/airprompt-server.pid';
+
+// Legacy paths (fallback)
 const SESSION_FILE = path.join(CONFIG_DIR, '.airprompt-session');
 const MARKER = path.join(CONFIG_DIR, '.airprompt-active');
 const URL_FILE = path.join(CONFIG_DIR, '.airprompt-url');
+const NAME_FILE = path.join(CONFIG_DIR, '.airprompt-name');
 const TMUX_ACTIVE_FILE = path.join(CONFIG_DIR, '.airprompt-tmux-active');
 const TMUX_SESSION_FILE = path.join(CONFIG_DIR, '.airprompt-tmux-session');
 
@@ -42,35 +48,78 @@ function dlog(msg) {
 
 dlog(`INVOKED CONFIG_DIR=${CONFIG_DIR} PORT=${PORT} TLS=${TLS} HOME=${process.env.HOME} TMUX=${process.env.TMUX || '(unset)'}`);
 
-async function main() {
-  // 1. Read session ID
-  let sessionId = '';
-  try {
-    sessionId = fs.readFileSync(SESSION_FILE, 'utf8').trim().slice(0, 128);
-    dlog(`sessionId='${sessionId}' from ${SESSION_FILE}`);
-  } catch (_) {
-    dlog(`no session file at ${SESSION_FILE} — exit 0`);
-    process.exit(0);
+// ── Resolve current tmux session ──────────────────────────────────────
+function resolveCurrentTmux() {
+  if (process.env.TMUX) {
+    let s = '';
+    const r = spawnSync('tmux', ['display-message', '-p', '#S'], { timeout: 2000, encoding: 'utf8' });
+    if (r.status === 0) s = r.stdout.trim();
+    if (s && s.startsWith('airprompt-web-')) {
+      const r2 = spawnSync('tmux', ['display-message', '-p', '#{session_group}'], { timeout: 2000, encoding: 'utf8' });
+      if (r2.status === 0 && r2.stdout.trim()) s = r2.stdout.trim();
+    }
+    return s || '';
   }
+  return '';
+}
 
+// ── Find my per-session dir ───────────────────────────────────────────
+function findMyDir(currentTmux) {
+  // Primary: per-session dir matching current tmux
+  if (currentTmux && fs.existsSync(path.join(SESSIONS_DIR, currentTmux, 'active'))) {
+    return path.join(SESSIONS_DIR, currentTmux);
+  }
+  // Fallback: scan per-session dirs for one whose tmux matches
+  try {
+    if (fs.existsSync(SESSIONS_DIR)) {
+      for (const name of fs.readdirSync(SESSIONS_DIR)) {
+        const d = path.join(SESSIONS_DIR, name);
+        if (!fs.statSync(d).isDirectory()) continue;
+        const tmuxName = name;
+        if (tmuxName === currentTmux && fs.existsSync(path.join(d, 'active'))) {
+          return d;
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+// ── Read session ID from per-session dir or legacy ────────────────────
+function readSessionId(myDir) {
+  if (myDir) {
+    try { return fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
+  }
+  // Legacy fallback
+  try { return fs.readFileSync(SESSION_FILE, 'utf8').trim().slice(0, 128); } catch (_) {}
+  return '';
+}
+
+// ── Read registered tmux from per-session dir or legacy ───────────────
+function readRegisteredTmux(myDir) {
+  if (myDir) {
+    try { return fs.readFileSync(path.join(myDir, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
+  }
+  // Legacy fallback
+  for (const f of [TMUX_ACTIVE_FILE, TMUX_SESSION_FILE]) {
+    try { const v = fs.readFileSync(f, 'utf8').trim().slice(0, 128); if (v) return v; } catch (_) {}
+  }
+  return '';
+}
+
+async function main() {
+  const currentTmux = resolveCurrentTmux();
+  const myDir = findMyDir(currentTmux);
+
+  // 1. Read session ID
+  let sessionId = readSessionId(myDir);
+  dlog(`sessionId='${sessionId}' myDir=${myDir || 'none'}`);
   if (!sessionId) { dlog('sessionId empty — exit 0'); process.exit(0); }
 
   // 2. Guard: check if the registered tmux session is still alive.
-  // Try multiple sources — .airprompt-tmux-active (primary) and
-  // .airprompt-tmux-session (fallback). Both are written by airprompt-on.sh.
-  let registeredTmux = '';
-  for (const f of [TMUX_ACTIVE_FILE, TMUX_SESSION_FILE]) {
-    try {
-      registeredTmux = fs.readFileSync(f, 'utf8').trim().slice(0, 128);
-      if (registeredTmux) { dlog(`registeredTmux='${registeredTmux}' from ${f}`); break; }
-    } catch (_) {
-      dlog(`file ${f} not readable — ${_.message}`);
-    }
-  }
+  let registeredTmux = readRegisteredTmux(myDir);
+  dlog(`registeredTmux='${registeredTmux}'`);
 
-  // Last-resort guard: if no file was readable, check whether ANY tmux
-  // session from the same session group is still alive. If we can't even
-  // run tmux, err on the safe side and refuse cleanup.
   if (!registeredTmux) {
     dlog('GUARD: no registeredTmux from files — trying session group check');
     try {
@@ -80,8 +129,6 @@ async function main() {
       if (r.status === 0 && r.stdout) {
         const group = r.stdout.trim();
         dlog(`GUARD: current session_group='${group}'`);
-        // If we're inside a session group, check whether the group itself
-        // exists as a tmux session (it does for group-named sessions).
         const r2 = spawnSync('tmux', ['has-session', '-t', group], { timeout: 2000 });
         if (r2.status === 0) {
           dlog(`GUARD: session group '${group}' ALIVE → exit 0 (no cleanup)`);
@@ -92,7 +139,6 @@ async function main() {
       dlog(`GUARD: session group check failed (${_.message}) → exit 0 (safe)`);
       process.exit(0);
     }
-    // If we truly can't confirm anything, play it safe and exit.
     dlog('GUARD: could not confirm tmux state → exit 0 (safe, no cleanup)');
     process.exit(0);
   }
@@ -120,7 +166,6 @@ async function main() {
   try {
     const resp = await post('/api/sessions/unregister', { sessionId });
     dlog(`unregister response: ${JSON.stringify(resp)}`);
-    // Server returns { ok: true } on success, or error message on refusal.
     if (resp && resp.ok) {
       serverOk = true;
     } else {
@@ -132,14 +177,20 @@ async function main() {
     dlog(`unregister request failed (${_.message}) → proceeding with local cleanup`);
   }
 
-  // 4. Remove all marker files (only if server confirmed or is unreachable)
+  // 4. Remove per-session directory
+  if (myDir) {
+    try { fs.rmSync(myDir, { recursive: true, force: true }); } catch (_) {}
+  }
+
+  // 5. Remove legacy marker files
   try { fs.unlinkSync(MARKER); } catch (_) {}
   try { fs.unlinkSync(URL_FILE); } catch (_) {}
   try { fs.unlinkSync(SESSION_FILE); } catch (_) {}
+  try { fs.unlinkSync(NAME_FILE); } catch (_) {}
   try { fs.unlinkSync(TMUX_ACTIVE_FILE); } catch (_) {}
   try { fs.unlinkSync(TMUX_SESSION_FILE); } catch (_) {}
 
-  // 5. Stop daemon if no sessions remain
+  // 6. Stop daemon if no sessions remain
   try {
     const resp = await get('/api/sessions');
     const sessions = Array.isArray(resp) ? resp : [];

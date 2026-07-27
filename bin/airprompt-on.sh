@@ -1,14 +1,28 @@
 #!/bin/bash
 set -euo pipefail
 
+# ── Argument parsing ──────────────────────────────────────────────────
+SESSION_NAME=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name) SESSION_NAME="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="/tmp/airprompt-server.pid"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
+
+# Legacy global marker paths (cleaned up during migration)
 MARKER="${CONFIG_DIR}/.airprompt-active"
 URL_FILE="${CONFIG_DIR}/.airprompt-url"
 SESSION_FILE="${CONFIG_DIR}/.airprompt-session"
 TMUX_ACTIVE_FILE="${CONFIG_DIR}/.airprompt-tmux-active"
+TMUX_MARKER="${CONFIG_DIR}/.airprompt-tmux-session"
+
 DEBUG="${AIRPROMPT_DEBUG:-1}"  # always debug during development
 
 # ── Dependency checks ───────────────────────────────────────────────
@@ -23,8 +37,6 @@ done
 ORIG_PWD="$PWD"
 
 # ── Generate stable session ID (based on tmux, not shell PID) ────────
-TMUX_MARKER="${CONFIG_DIR}/.airprompt-tmux-session"
-
 if [ -n "${TMUX:-}" ]; then
   TMUX_SESSION=$(tmux display-message -p '#S' 2>/dev/null)
   if echo "$TMUX_SESSION" | grep -q '^airprompt-web-'; then
@@ -109,47 +121,86 @@ if [ ! -f "$PID_FILE" ]; then
   cd "$ORIG_PWD"
 fi
 
+# ── Per-session directory ────────────────────────────────────────────
+MY_DIR="${SESSIONS_DIR}/${TMUX_SESSION}"
+ACTIVE_FILE="${MY_DIR}/active"
+
 # ── Idempotency: skip if already registered (same tmux session) ──────
-if [ -f "$MARKER" ] && [ -f "$SESSION_FILE" ] && [ -f "$TMUX_ACTIVE_FILE" ]; then
-  ACTIVE_TMUX=$(head -c 128 "$TMUX_ACTIVE_FILE" 2>/dev/null | tr -d '\n\r')
-  if [ "$ACTIVE_TMUX" = "$TMUX_SESSION" ]; then
-    echo "AirPrompt already active for this session."
-    echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
-    exit 0
-  fi
+# Daemon recovers state from on-disk markers on startup, so a simple
+# file check is sufficient — no need to double-check with daemon API.
+if [ -f "$ACTIVE_FILE" ]; then
+  echo "AirPrompt already active for this session."
+  echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
+  exit 0
 fi
 
 # ── Register with daemon ────────────────────────────────────────────
+REG_PAYLOAD="{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\""
+if [ -n "$SESSION_NAME" ]; then
+  # Escape backslashes and double-quotes to prevent JSON injection
+  ESCAPED_NAME=$(printf '%s' "$SESSION_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  REG_PAYLOAD="${REG_PAYLOAD},\"name\":\"${ESCAPED_NAME}\""
+fi
+REG_PAYLOAD="${REG_PAYLOAD}}"
+
 RESP=$(curl -s $CURL_OPTS -X POST "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/register" \
   -H "Content-Type: application/json" \
-  -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\"}")
+  -d "$REG_PAYLOAD")
 
 if echo "$RESP" | grep -q '"ok":true'; then
-  mkdir -p "$CONFIG_DIR"
-  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
-  echo "$SESSION_ID" > "$SESSION_FILE"
-  echo "$TMUX_SESSION" > "$TMUX_ACTIVE_FILE"
-  echo "$TMUX_SESSION" > "$TMUX_MARKER"
-  touch "$MARKER"
+  mkdir -p "$MY_DIR"
+  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
+  echo "$SESSION_ID" > "${MY_DIR}/session"
+  echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
+  touch "$ACTIVE_FILE"
+  if [ -n "$SESSION_NAME" ]; then
+    echo "$SESSION_NAME" > "${MY_DIR}/name"
+    echo "Session name: $SESSION_NAME"
+  fi
   echo "AirPrompt session registered: $SESSION_ID"
   echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
 elif echo "$RESP" | grep -q '"already registered"'; then
-  mkdir -p "$CONFIG_DIR"
-  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
-  echo "$SESSION_ID" > "$SESSION_FILE"
-  echo "$TMUX_SESSION" > "$TMUX_ACTIVE_FILE"
-  echo "$TMUX_SESSION" > "$TMUX_MARKER"
-  touch "$MARKER"
+  mkdir -p "$MY_DIR"
+  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
+  echo "$SESSION_ID" > "${MY_DIR}/session"
+  echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
+  touch "$ACTIVE_FILE"
+  [ -n "$SESSION_NAME" ] && echo "$SESSION_NAME" > "${MY_DIR}/name"
   echo "AirPrompt already registered for this session."
 elif echo "$RESP" | grep -q '"Session already registered"'; then
-  mkdir -p "$CONFIG_DIR"
-  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
-  echo "$SESSION_ID" > "$SESSION_FILE"
-  echo "$TMUX_SESSION" > "$TMUX_ACTIVE_FILE"
-  echo "$TMUX_SESSION" > "$TMUX_MARKER"
-  touch "$MARKER"
+  mkdir -p "$MY_DIR"
+  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
+  echo "$SESSION_ID" > "${MY_DIR}/session"
+  echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
+  touch "$ACTIVE_FILE"
+  [ -n "$SESSION_NAME" ] && echo "$SESSION_NAME" > "${MY_DIR}/name"
   echo "AirPrompt already registered for this session."
 else
   echo "Registration failed: $RESP" >&2
   exit 1
+fi
+
+# ── Migration: clean up legacy global marker files ──────────────────
+rm -f "$MARKER" "$URL_FILE" "$SESSION_FILE" "$TMUX_ACTIVE_FILE" "$TMUX_MARKER" "${CONFIG_DIR}/.airprompt-name"
+
+# ── Cleanup: sweep dead session dirs ─────────────────────────────────
+if [ -d "$SESSIONS_DIR" ]; then
+  for d in "$SESSIONS_DIR"/*/; do
+    [ -d "$d" ] || continue
+    DN=$(basename "$d")
+    [ "$DN" = "$TMUX_SESSION" ] && continue
+    tmux has-session -t "$DN" 2>/dev/null; HAS_SESSION_RC=$?
+    if [ $HAS_SESSION_RC -eq 0 ]; then
+      : # session alive — skip
+    elif [ $HAS_SESSION_RC -eq 1 ]; then
+      # Only delete if tmux explicitly says "no session" (exit code 1).
+      # Other non-zero codes = tmux error/timeout — don't touch (safe).
+      echo "Cleaning up dead session dir: $DN" >&2
+      rm -rf "$d"
+      DEAD_ID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
+      curl -s $CURL_OPTS -X POST "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+        -H "Content-Type: application/json" \
+        -d "{\"sessionId\":\"${DEAD_ID}\"}" > /dev/null 2>&1 || true
+    fi
+  done
 fi

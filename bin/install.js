@@ -512,13 +512,31 @@ function uninstall(ctx) {
     }
   }
 
-  // 6. Remove marker files
-  for (const f of ['.airprompt-active', '.airprompt-url', '.airprompt-session', '.airprompt-tmux-active', '.airprompt-tmux-session']) {
+  // 6. Remove legacy marker files
+  for (const f of ['.airprompt-active', '.airprompt-url', '.airprompt-session', '.airprompt-tmux-active', '.airprompt-tmux-session', '.airprompt-name']) {
     const p = path.join(configDir, f);
     if (fs.existsSync(p)) {
       if (!opts.dryRun) { try { fs.unlinkSync(p); } catch (_) {} }
       note(`  removed ${p}`);
     }
+  }
+
+  // 6b. Remove per-session directories
+  const sessionsDir = path.join(configDir, '.airprompt-sessions');
+  if (fs.existsSync(sessionsDir)) {
+    if (!opts.dryRun) {
+      try {
+        const entries = fs.readdirSync(sessionsDir);
+        for (const entry of entries) {
+          const p = path.join(sessionsDir, entry);
+          if (fs.statSync(p).isDirectory()) {
+            fs.rmSync(p, { recursive: true, force: true });
+          }
+        }
+        fs.rmdirSync(sessionsDir);
+      } catch (_) {}
+    }
+    note(`  removed ${sessionsDir}`);
   }
 
   // 7. Target dir removal prompt

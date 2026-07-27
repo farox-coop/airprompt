@@ -2,6 +2,8 @@
 // airprompt-activate.js — SessionStart hook.
 // Ensures the AirPrompt daemon is running and registers this Claude session.
 // Runs on every Claude Code session start. Idempotent — re-register is safe.
+// Per-session isolation: writes to ~/.claude/.airprompt-sessions/{tmux-name}/
+// Multiple Claude sessions can coexist without fighting over global files.
 
 'use strict';
 
@@ -16,11 +18,17 @@ const PORT = process.env.AIRPROMPT_PORT || 3210;
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const AIRPROMPT_DIR = path.join(os.homedir(), '.airprompt');
 const PID_FILE = '/tmp/airprompt-server.pid';
-const SESSION_FILE = path.join(CONFIG_DIR, '.airprompt-session');
-const MARKER = path.join(CONFIG_DIR, '.airprompt-active');
-const URL_FILE = path.join(CONFIG_DIR, '.airprompt-url');
-const TMUX_MARKER = path.join(CONFIG_DIR, '.airprompt-tmux-session');
-const TMUX_ACTIVE_FILE = path.join(CONFIG_DIR, '.airprompt-tmux-active');
+const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
+
+// Legacy global markers (cleaned up during migration)
+const OLD_MARKERS = [
+  path.join(CONFIG_DIR, '.airprompt-active'),
+  path.join(CONFIG_DIR, '.airprompt-url'),
+  path.join(CONFIG_DIR, '.airprompt-session'),
+  path.join(CONFIG_DIR, '.airprompt-tmux-active'),
+  path.join(CONFIG_DIR, '.airprompt-tmux-session'),
+  path.join(CONFIG_DIR, '.airprompt-name'),
+];
 
 // Resolve install dir — prefer CLAUDE_PLUGIN_ROOT (plugin installed),
 // fallback to ~/.airprompt/ (standalone manual install).
@@ -30,7 +38,6 @@ const INSTALL_DIR = process.env.CLAUDE_PLUGIN_ROOT || AIRPROMPT_DIR;
 const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');
 const KEY_FILE = path.join(CONFIG_DIR, 'airprompt-key.pem');
 const TLS = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
-const API = `${TLS ? 'https' : 'http'}://localhost:${PORT}`;
 
 function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (_) { return false; } }
 
@@ -48,17 +55,10 @@ function startDaemon() {
     return false;
   }
   const env = { ...process.env, PORT: String(PORT) };
-  // Fire-and-forget: daemon runs detached, unref prevents parent from
-  // waiting for it. Using spawnSync here would block forever because
-  // the server never exits.
   const child = spawn('node', [serverJs], {
     cwd: INSTALL_DIR, env, detached: true, stdio: 'ignore',
   });
   child.unref();
-  // Poll for daemon to be ready (PID file written + HTTP responding).
-  // Use spawnSync('sleep', ...) for cross-platform sub-second sleep —
-  // Node's execSync(`sleep 0.${ms}`) fails on macOS where sleep only
-  // accepts one decimal place (0.1 not 0.100).
   for (let i = 0; i < 30; i++) {
     if (daemonRunning()) return true;
     const ms = (i < 10) ? 0.1 : 0.3;
@@ -67,11 +67,11 @@ function startDaemon() {
   return daemonRunning();
 }
 
-function post(path, body) {
+function post(p, body) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const opts = {
-      hostname: 'localhost', port: PORT, path, method: 'POST',
+      hostname: 'localhost', port: PORT, path: p, method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
       timeout: 5000,
     };
@@ -91,74 +91,36 @@ function post(path, body) {
   });
 }
 
-async function main() {
-  // 1. Ensure daemon is running
-  if (!daemonRunning()) {
-    process.stdout.write('airprompt: starting daemon...');
-    if (!startDaemon()) {
-      process.stderr.write('failed\nairprompt: could not start daemon on port ' + PORT + '\n');
-      process.exit(0); // Don't block Claude from starting
-    }
-    process.stdout.write('done\n');
-  }
-
-  // 2. Idempotency: if /airprompt on already registered this tmux session,
-  //    don't clobber SESSION_FILE with a different sessionId.
-  //    /airprompt on uses stable tmux group names; activate's PID-based IDs
-  //    would create duplicate sessions in the daemon.
-  if (fs.existsSync(SESSION_FILE) && fs.existsSync(MARKER)) {
-    // Already registered — skip.
-    process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
-    return;
-  }
-
-  // 3. Generate session ID
-  const cwd = process.cwd();
-  const cwdSafe = path.basename(cwd).replace(/[^a-zA-Z0-9_-]/g, '');
-  const sessionId = `${Date.now()}-${process.pid}-${cwdSafe}`;
-
-  // 4. Detect tmux session — resolve web proxy sessions same as on.sh
-  let tmuxSession = '';
+// Detect current tmux session, resolving web proxy sessions to parent group
+function detectTmux() {
+  let tmux = '';
   if (process.env.TMUX) {
     const r = spawnSync('tmux', ['display-message', '-p', '#S'], { timeout: 2000, encoding: 'utf8' });
     if (r.status === 0) {
-      tmuxSession = r.stdout.toString().trim();
-      // Inside a web proxy session — resolve to parent group
-      if (tmuxSession.startsWith('airprompt-web-')) {
+      tmux = r.stdout.toString().trim();
+      if (tmux.startsWith('airprompt-web-')) {
         const r2 = spawnSync('tmux', ['display-message', '-p', '#{session_group}'], { timeout: 2000, encoding: 'utf8' });
-        if (r2.status === 0 && r2.stdout.trim()) {
-          tmuxSession = r2.stdout.trim();
-        }
+        if (r2.status === 0 && r2.stdout.trim()) tmux = r2.stdout.trim();
       }
     }
   }
-  if (!tmuxSession && fs.existsSync(TMUX_MARKER)) {
-    tmuxSession = fs.readFileSync(TMUX_MARKER, 'utf8').trim().slice(0, 128);
-    try { spawnSync('tmux', ['has-session', '-t', tmuxSession], { timeout: 2000 }); } catch (_) { tmuxSession = ''; }
-  }
-  if (!tmuxSession) {
-    tmuxSession = `airprompt-${sessionId}`;
-    spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], { timeout: 2000 });
-  }
+  return tmux;
+}
 
-  // 4. Register with daemon
-  try {
-    const resp = await post('/api/sessions/register', { sessionId, cwd, tmuxSession });
-    if (resp && resp.ok) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-      fs.writeFileSync(SESSION_FILE, sessionId + '\n');
-      fs.writeFileSync(MARKER, '');
-      fs.writeFileSync(TMUX_ACTIVE_FILE, tmuxSession + '\n');
-      fs.writeFileSync(TMUX_MARKER, tmuxSession + '\n');
-      const lanIp = getLanIp();
-      fs.writeFileSync(URL_FILE, `${TLS ? 'https' : 'http'}://${lanIp}:${PORT}\n`);
-      process.stdout.write(`airprompt: registered ${sessionId}\n`);
-      process.stdout.write(`airprompt: mobile URL ${TLS ? 'https' : 'http'}://${lanIp}:${PORT}\n`);
-    } else {
-      process.stderr.write(`airprompt: registration failed: ${JSON.stringify(resp)}\n`);
+// Clean up session directories whose tmux sessions are dead
+function sweepDeadSessions() {
+  if (!fs.existsSync(SESSIONS_DIR)) return;
+  let entries;
+  try { entries = fs.readdirSync(SESSIONS_DIR); } catch (_) { return; }
+  for (const entry of entries) {
+    const full = path.join(SESSIONS_DIR, entry);
+    if (!fs.statSync(full).isDirectory()) continue;
+    const r = spawnSync('tmux', ['has-session', '-t', entry], { timeout: 2000 });
+    // Only delete if tmux explicitly says session doesn't exist (exit code 1).
+    // status null = timeout/error → don't touch (safe).
+    if (r.status === 1) {
+      try { fs.rmSync(full, { recursive: true, force: true }); } catch (_) {}
     }
-  } catch (e) {
-    process.stderr.write(`airprompt: cannot reach daemon on port ${PORT} — ${e.message}\n`);
   }
 }
 
@@ -172,6 +134,74 @@ function getLanIp() {
     }
   } catch (_) {}
   return 'localhost';
+}
+
+async function main() {
+  // 1. Ensure daemon is running
+  if (!daemonRunning()) {
+    process.stdout.write('airprompt: starting daemon...');
+    if (!startDaemon()) {
+      process.stderr.write('failed\nairprompt: could not start daemon on port ' + PORT + '\n');
+      process.exit(0);
+    }
+    process.stdout.write('done\n');
+  }
+
+  // 2. Detect current tmux session
+  const currentTmux = detectTmux();
+
+  // 3. Idempotency: check per-session dir (no cross-session conflicts possible)
+  // Daemon recovers state from on-disk markers on startup, so a simple
+  // file check is sufficient — no need to double-check with daemon API.
+  if (currentTmux) {
+    const myDir = path.join(SESSIONS_DIR, currentTmux);
+    const activeFile = path.join(myDir, 'active');
+    if (fs.existsSync(activeFile)) {
+      process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
+      // Still sweep dead sessions and old markers — housekeeping
+      sweepDeadSessions();
+      OLD_MARKERS.forEach(f => { try { fs.unlinkSync(f); } catch (_) {} });
+      return;
+    }
+  }
+
+  // 4. Generate session ID
+  const cwd = process.cwd();
+  const cwdSafe = path.basename(cwd).replace(/[^a-zA-Z0-9_-]/g, '');
+  const sessionId = `${Date.now()}-${process.pid}-${cwdSafe}`;
+
+  // 5. Resolve tmux session (reuse currentTmux, or create one)
+  let tmuxSession = currentTmux;
+  if (!tmuxSession) {
+    tmuxSession = `airprompt-${sessionId}`;
+    spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], { timeout: 2000 });
+  }
+
+  // 6. Register with daemon
+  try {
+    const resp = await post('/api/sessions/register', { sessionId, cwd, tmuxSession });
+    if (resp && resp.ok) {
+      // Write per-session markers
+      const myDir = path.join(SESSIONS_DIR, tmuxSession);
+      fs.mkdirSync(myDir, { recursive: true });
+      const lanIp = getLanIp();
+      const url = `${TLS ? 'https' : 'http'}://${lanIp}:${PORT}`;
+      fs.writeFileSync(path.join(myDir, 'url'), url + '\n');
+      fs.writeFileSync(path.join(myDir, 'session'), sessionId + '\n');
+      fs.writeFileSync(path.join(myDir, 'tmux'), tmuxSession + '\n');
+      fs.writeFileSync(path.join(myDir, 'active'), '');
+      process.stdout.write(`airprompt: registered ${sessionId}\n`);
+      process.stdout.write(`airprompt: mobile URL ${url}\n`);
+
+      // Housekeeping: clean legacy global markers and dead session dirs
+      OLD_MARKERS.forEach(f => { try { fs.unlinkSync(f); } catch (_) {} });
+      sweepDeadSessions();
+    } else {
+      process.stderr.write(`airprompt: registration failed: ${JSON.stringify(resp)}\n`);
+    }
+  } catch (e) {
+    process.stderr.write(`airprompt: cannot reach daemon on port ${PORT} — ${e.message}\n`);
+  }
 }
 
 main().catch(() => process.exit(0));

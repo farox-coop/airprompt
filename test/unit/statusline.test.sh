@@ -34,7 +34,7 @@ echo "[2/6] Badge when marker present"
 touch "$MARKER"
 echo "http://192.168.1.100:3210" > "$URL_FILE"
 OUT=$(printf '%s' "$STDIN_JSON" | bash "$HOOK" 2>/dev/null || true)
-if echo "$OUT" | grep -q '\[airprompt: http://'; then ok "badge rendered"; else not_ok "no badge in: $OUT"; fi
+if echo "$OUT" | grep -q 'http://192.168.1.100:3210'; then ok "badge rendered"; else not_ok "no badge in: $OUT"; fi
 
 # 3: Badge includes full URL (port comes from URL file, not hardcoded)
 echo "[3/6] Badge includes URL from file"
