@@ -52,8 +52,6 @@ term.open(document.getElementById('terminal-container'));
 fitAddon.fit();
 
 // ── Pinch-to-zoom (2-finger only) ─────────────────────────────────────
-// 1-finger touch passes through to xterm natively (tap-to-position,
-// text selection, keyboard). Tap on terminal opens keyboard via xterm.
 (function () {
   const ZOOM_MIN = 8;
   const ZOOM_MAX = 24;
@@ -98,6 +96,79 @@ fitAddon.fit();
     }
     pinchActive = false;
   });
+})();
+
+// ── One-finger touch → synthetic wheel scroll (rAF-batched) ───────────
+// xterm.js has poor mobile touch support (xtermjs/xterm.js#5377).
+// iOS Safari: scroll fails completely if touch starts on rendered text
+// (xtermjs/xterm.js#3613).
+//
+// Strategy: intercept one-finger vertical touch in capture phase, batch
+// deltas via requestAnimationFrame, dispatch one WheelEvent per frame.
+// Without rAF batching, every touchmove (60fps) dispatches a tiny wheel
+// event synchronously. xterm's scrollLines() triggers main-thread layout
+// + repaint, so 60 small events/sec choke the main thread → scroll feels
+// progressively slower. Batching produces fewer, larger wheel events —
+// same pattern as a real mouse wheel on desktop.
+(function () {
+  var container = document.getElementById('terminal-container');
+  var viewport = container.querySelector('.xterm-viewport');
+  var lastY = 0;
+  var accumDY = 0;
+  var scrollActive = false;
+  var rafId = null;
+
+  container.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) {
+      scrollActive = false;
+      return;
+    }
+    scrollActive = true;
+    lastY = e.touches[0].clientY;
+    accumDY = 0;
+  }, { passive: true, capture: true });
+
+  function flushScroll() {
+    if (!scrollActive) { rafId = null; return; }
+    if (accumDY !== 0 && viewport) {
+      viewport.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: accumDY * 8,
+        deltaMode: 0,
+        bubbles: true,
+        cancelable: true,
+      }));
+      accumDY = 0;
+    }
+    rafId = requestAnimationFrame(flushScroll);
+  }
+
+  container.addEventListener('touchmove', function (e) {
+    if (!scrollActive || e.touches.length !== 1) return;
+    var dy = lastY - e.touches[0].clientY;
+    lastY = e.touches[0].clientY;
+    accumDY += dy;
+    // Dead zone: skip preventDefault for tiny movements so taps still
+    // synthesize click events for keyboard focus on mobile.
+    if (Math.abs(accumDY) < 4) return;
+    e.preventDefault();
+    if (!rafId) {
+      rafId = requestAnimationFrame(flushScroll);
+    }
+  }, { passive: false, capture: true });
+
+  container.addEventListener('touchend', function () {
+    scrollActive = false;
+    lastY = 0;
+    accumDY = 0;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  }, { passive: true, capture: true });
+
+  container.addEventListener('touchcancel', function () {
+    scrollActive = false;
+    lastY = 0;
+    accumDY = 0;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  }, { passive: true, capture: true });
 })();
 
 // ── Resize debounce ────────────────────────────────────────────────────
