@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "airprompt",
+  "description": "Remote control and voice dictation for Claude Code. Control sessions from your phone.",
+  "owner": { "name": "Farox", "url": "https://github.com/diegomanuel" },
+  "plugins": [{
+    "name": "airprompt",
+    "description": "Watch and control Claude Code sessions from mobile with voice dictation",
+    "source": "./",
+    "category": "productivity"
+  }]
+}

@@ -188,15 +188,29 @@ test('GET /api/sessions returns all sessions', { skip: !TMUX_AVAILABLE }, async 
   }
 });
 
-test('POST /api/sessions/unregister removes session', { skip: !TMUX_AVAILABLE }, async () => {
+test('POST /api/sessions/unregister removes session when tmux dead', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-unreg');
   try {
     await post('/api/sessions/register', { sessionId: 'test-unreg', cwd: '/tmp' });
+    // Kill tmux session first — server guard rejects unregister if tmux alive
+    killTmux('airprompt-test-unreg');
     const res = await post('/api/sessions/unregister', { sessionId: 'test-unreg' });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(sessions.has('test-unreg'), false);
   } finally {
     killTmux('airprompt-test-unreg');
+  }
+});
+
+test('POST /api/sessions/unregister refuses when tmux session alive', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-refuse');
+  try {
+    await post('/api/sessions/register', { sessionId: 'test-refuse', cwd: '/tmp' });
+    const res = await post('/api/sessions/unregister', { sessionId: 'test-refuse' });
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(sessions.has('test-refuse'), true);
+  } finally {
+    killTmux('airprompt-test-refuse');
   }
 });
 
@@ -284,6 +298,132 @@ test('WS switch_session for unknown id returns error', (t, done) => {
       done();
     }
   });
+});
+
+// ── Deactivate hook guard tests ─────────────────────────────────────
+
+const TEMP_DIR = (() => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-deactivate-test-'));
+  return dir;
+})();
+
+const DEACTIVATE_SCRIPT = require('path').join(__dirname, '..', '..', 'src', 'hooks', 'airprompt-deactivate.js');
+
+function runDeactivate(envOverrides = {}) {
+  const env = {
+    ...process.env,
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    AIRPROMPT_PORT: String(port),
+    CLAUDE_CONFIG_DIR: TEMP_DIR,
+    AIRPROMPT_NO_TLS: '1', // match test server
+    ...envOverrides,
+  };
+  const r = spawnSync(process.execPath, [DEACTIVATE_SCRIPT], {
+    env,
+    timeout: 10000,
+    encoding: 'utf8',
+  });
+  return { status: r.status, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
+}
+
+function cleanupMarkers() {
+  const fs = require('fs');
+  for (const f of ['.airprompt-active', '.airprompt-url', '.airprompt-session',
+                   '.airprompt-tmux-active', '.airprompt-tmux-session']) {
+    try { fs.unlinkSync(require('path').join(TEMP_DIR, f)); } catch (_) {}
+  }
+}
+
+test('deactivate hook exits clean when no session file', () => {
+  cleanupMarkers();
+  const r = runDeactivate();
+  assert.strictEqual(r.status, 0);
+  assert.strictEqual(r.stdout, '');
+});
+
+test('deactivate hook exits 0 when tmux session is alive (spurious Stop guard)', { skip: !TMUX_AVAILABLE }, async () => {
+  // Create a real tmux session that the deactivate guard will detect as alive
+  const aliveSession = 'airprompt-guard-alive';
+  createTmux(aliveSession);
+  try {
+    // Set up markers as if /airprompt on was run from that session
+    const fs = require('fs');
+    const path = require('path');
+    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-session'), 'test-guard-session\n');
+    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-active'), '');
+    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-url'), 'http://192.168.0.10:3210\n');
+    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-active'), aliveSession + '\n');
+    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-session'), aliveSession + '\n');
+
+    // Register the session first (so deactivate has something to unregister if guard fails)
+    await post('/api/sessions/register', { sessionId: 'test-guard-session', cwd: '/tmp' });
+
+    const r = runDeactivate();
+    // Guard should detect session is alive → exit 0 without unregistering
+    assert.strictEqual(r.status, 0);
+
+    // Session should STILL be registered (guard prevented cleanup)
+    assert.strictEqual(sessions.has('test-guard-session'), true);
+
+    // Clean up
+    sessions.delete('test-guard-session');
+  } finally {
+    killTmux(aliveSession);
+    cleanupMarkers();
+  }
+});
+
+test('deactivate hook proceeds with cleanup when tmux session is gone', { skip: !TMUX_AVAILABLE }, () => {
+  const deadSession = 'airprompt-guard-dead';
+  killTmux(deadSession);
+
+  const fs = require('fs');
+  const path = require('path');
+  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-session'), 'test-guard-dead-session\n');
+  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-active'), '');
+  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-url'), 'http://192.168.0.10:3210\n');
+  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-active'), deadSession + '\n');
+  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-session'), deadSession + '\n');
+
+  const r = runDeactivate();
+  assert.strictEqual(r.status, 0, 'deactivate exit code — stderr: ' + r.stderr);
+
+  // Markers removed (local cleanup always works)
+  assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-session')), false);
+  assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-active')), false);
+  assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-tmux-active')), false);
+  assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-tmux-session')), false);
+
+  cleanupMarkers();
+});
+
+test('deactivate hook exits 0 when tmux is not available (safe fallback)', { skip: !TMUX_AVAILABLE }, () => {
+  const aliveSession = 'airprompt-guard-tmuxless';
+  createTmux(aliveSession);
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-session'), 'test-tmuxless-session\n');
+    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-active'), '');
+    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-url'), 'http://192.168.0.10:3210\n');
+    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-active'), aliveSession + '\n');
+
+    const r = runDeactivate({ PATH: '/nonexistent' });
+    assert.strictEqual(r.status, 0, 'deactivate exit code — stderr: ' + r.stderr);
+
+    // Markers must survive (guard prevented cleanup)
+    assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-session')), true,
+      'session file must survive when tmux not available');
+    assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-tmux-active')), true,
+      'tmux-active file must survive when tmux not available');
+  } finally {
+    killTmux(aliveSession);
+    cleanupMarkers();
+  }
 });
 
 // ── PID file test ───────────────────────────────────────────────────

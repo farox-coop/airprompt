@@ -1,0 +1,23 @@
+{
+  "name": "airprompt",
+  "description": "Remote control and voice dictation for Claude Code via web terminal",
+  "author": { "name": "Farox", "url": "https://github.com/diegomanuel" },
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{
+        "type": "command",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/airprompt-activate.js\"",
+        "timeout": 10,
+        "statusMessage": "Registering AirPrompt session..."
+      }]
+    }],
+    "Stop": [{
+      "hooks": [{
+        "type": "command",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/airprompt-deactivate.js\"",
+        "timeout": 5,
+        "statusMessage": "Unregistering AirPrompt session..."
+      }]
+    }]
+  }
+}

@@ -3,13 +3,25 @@
   "version": "0.2.0",
   "description": "Remote control interface for Claude CLI with voice dictation",
   "main": "server.js",
+  "bin": {
+    "airprompt": "./bin/install.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "public/",
+    "server.js",
+    "install.sh",
+    "install.ps1",
+    ".claude-plugin/"
+  ],
   "scripts": {
     "start": "nohup node server.js > /tmp/airprompt.log 2>&1 & echo \"AirPrompt daemon started\"",
     "stop": "kill $$(cat ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid} 2>/dev/null) 2>/dev/null; rm -f ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}",
     "register": "bash bin/airprompt-register.sh",
     "unregister": "bash bin/airprompt-unregister.sh",
     "test": "node --test test/unit/*.test.js && bash test/integration/run.sh",
-    "lint": "node --check server.js && node --check public/client.js"
+    "lint": "node --check server.js && node --check public/client.js && node --check bin/install.js"
   },
   "author": "Farox",
   "license": "MIT",

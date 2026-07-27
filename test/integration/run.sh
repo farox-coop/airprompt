@@ -70,6 +70,10 @@ if $TMUX_OK; then
   LIST=$(curl -s "http://localhost:${PORT}/api/sessions")
   if echo "$LIST" | grep -q "$SESSION_ID"; then ok "list contains session"; else not_ok "list missing session: $LIST"; fi
 
+  # Kill tmux session first — server guard rejects unregister if tmux alive
+  tmux kill-session -t "airprompt-${SESSION_ID}" 2>/dev/null || true
+  sleep 0.2
+
   UNREG=$(curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
     -H "Content-Type: application/json" \
     -d "{\"sessionId\":\"${SESSION_ID}\"}")
@@ -103,6 +107,11 @@ if $TMUX_OK; then
     not_ok "missing sessions in list: $LIST"
   fi
 
+  # Kill tmux sessions — server guard rejects unregister if tmux alive
+  tmux kill-session -t "airprompt-${ID_A}" 2>/dev/null || true
+  tmux kill-session -t "airprompt-${ID_B}" 2>/dev/null || true
+  sleep 0.2
+
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
     -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_A}\"}" > /dev/null
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
@@ -121,6 +130,11 @@ if $TMUX_OK; then
   curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
     -H "Content-Type: application/json" \
     -d "{\"sessionId\":\"${ID_M}\",\"cwd\":\"${PROJECT_DIR}\"}" > /dev/null
+
+  # Kill tmux session — server guard rejects unregister if tmux alive
+  tmux kill-session -t "airprompt-${ID_M}" 2>/dev/null || true
+  sleep 0.2
+
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
     -H "Content-Type: application/json" \
     -d "{\"sessionId\":\"${ID_M}\"}" > /dev/null

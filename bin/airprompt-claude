@@ -1,0 +1,117 @@
+#!/bin/bash
+# airprompt-claude — Start Claude Code inside tmux so AirPrompt can
+# mirror it on your phone. Version-controlled in the AirPrompt repo.
+#
+# Usage:  airprompt-claude [claude-args...]
+#         airprompt-claude --continue
+#         airprompt-claude --continue <session_id>
+#         airprompt-claude --resume <session_id>
+#
+# --resume / --continue <id> accepts both:
+#   • tmux session name  (e.g. claude-149509-1785091896)
+#   • Claude session ID  (e.g. 3bc8beca-35eb-44ef-a75b-d6c07564ae25)
+# If <id> is not a tmux session, we create one and run claude --resume <id>.
+
+set -euo pipefail
+
+REAL_CLAUDE="$HOME/.local/bin/claude"
+SESSION_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.airprompt-tmux-session"
+
+if [ ! -x "$REAL_CLAUDE" ]; then
+  echo "Error: Claude not found at $REAL_CLAUDE" >&2
+  exit 1
+fi
+
+save_session_marker() {
+  local name="$1"
+  mkdir -p "$(dirname "$SESSION_FILE")" 2>/dev/null || true
+  echo "$name" > "$SESSION_FILE"
+}
+
+# ── Parse --resume / --continue <session_id> ─────────────────────────
+RESUME_SESSION=""
+RESUME_CLAUDE_ID=""   # set when <id> is a Claude session UUID, not tmux
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --resume)
+      if [ $# -lt 2 ]; then
+        echo "Error: --resume requires a session name or ID" >&2
+        echo "Usage: airprompt-claude --resume <session_id>" >&2
+        exit 1
+      fi
+      RESUME_SESSION="$2"
+      shift 2
+      ;;
+    --continue)
+      if [ $# -ge 2 ] && echo "$2" | grep -qv '^-'; then
+        RESUME_SESSION="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+# ── Resume path ──────────────────────────────────────────────────────
+if [ -n "$RESUME_SESSION" ]; then
+  save_session_marker "$RESUME_SESSION"
+
+  if tmux has-session -t "$RESUME_SESSION" 2>/dev/null; then
+    # ── Known tmux session — reuse it ────────────────────────────────
+    # Kill zombie pane (dead from previous /exit) silently, respawn fresh.
+    dead=$(tmux list-panes -t "$RESUME_SESSION" -F '#{pane_dead}' 2>/dev/null || true)
+    if echo "$dead" | tr -d '[:space:]' | grep -q '1'; then
+      tmux respawn-pane -k -t "$RESUME_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" "${args[@]}" 2>/dev/null || {
+        # respawn failed — kill zombie session and create new one
+        tmux kill-session -t "$RESUME_SESSION" 2>/dev/null || true
+        RESUME_CLAUDE_ID=""
+        RESUME_SESSION="claude-$$-$(date +%s)"
+        save_session_marker "$RESUME_SESSION"
+        tmux new-session -d -s "$RESUME_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" "${args[@]}"
+        tmux set-option -t "$RESUME_SESSION" focus-events on
+      }
+    fi
+    # Attach
+    if [ -n "${TMUX:-}" ]; then
+      exec tmux switch-client -t "$RESUME_SESSION"
+    else
+      exec tmux attach-session -t "$RESUME_SESSION"
+    fi
+  else
+    # ── Not a tmux session — treat as Claude session ID ──────────────
+    RESUME_CLAUDE_ID="$RESUME_SESSION"
+    TMUX_SESSION="claude-$$-$(date +%s)"
+    save_session_marker "$TMUX_SESSION"
+    tmux new-session -d -s "$TMUX_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" --resume "$RESUME_CLAUDE_ID"
+    tmux set-option -t "$TMUX_SESSION" focus-events on
+    if [ -n "${TMUX:-}" ]; then
+      exec tmux switch-client -t "$TMUX_SESSION"
+    else
+      exec tmux attach-session -t "$TMUX_SESSION"
+    fi
+  fi
+fi
+
+# ── Already inside tmux — just run real Claude, save session name ────
+if [ -n "${TMUX:-}" ]; then
+  SESSION_NAME=$(tmux display-message -p '#S' 2>/dev/null)
+  save_session_marker "$SESSION_NAME"
+  exec "$REAL_CLAUDE" "${args[@]}"
+fi
+
+# ── Not in tmux — create a tmux session and run Claude inside ────────
+SESSION="claude-$$-$(date +%s)"
+save_session_marker "$SESSION"
+
+# Bash wrapper runs Claude via "$@". When Claude exits (regardless of
+# exit code), prints the resume message that Claude outputs then waits
+# for Enter.
+tmux new-session -d -s "$SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" "${args[@]}"
+tmux set-option -t "$SESSION" focus-events on
+exec tmux attach-session -t "$SESSION"

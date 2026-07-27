@@ -12,6 +12,14 @@ const qrcode = require('qrcode-terminal');
 const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
 const STALE_CHECK_MS = 60_000;
+const DEBUG = process.env.AIRPROMPT_DEBUG === '1';
+
+function log(level, msg, extra) {
+  if (!DEBUG) return;
+  const ts = new Date().toISOString();
+  const extraStr = extra ? ' ' + JSON.stringify(extra) : '';
+  process.stderr.write(`[airprompt:${level}] ${ts} ${msg}${extraStr}\n`);
+}
 
 const CERT_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CERT_FILE = path.join(CERT_DIR, 'airprompt-cert.pem');
@@ -99,6 +107,7 @@ function createApp() {
       }
     }
     sessions.set(sessionId, { sessionId, cwd, tmuxSession: actualTmuxSession, createdAt: new Date().toISOString() });
+    log('info', 'session registered', { sessionId, tmuxSession: actualTmuxSession, cwd });
     broadcastSessionList(wss);
     res.json({ ok: true, sessionId });
   });
@@ -107,8 +116,34 @@ function createApp() {
     const { sessionId } = req.body || {};
     if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
     if (!sessions.has(sessionId)) return res.status(404).json({ error: 'Session not found' });
-    killTmuxSession(sessions.get(sessionId).tmuxSession);
+    const entry = sessions.get(sessionId);
+    // Guard: if the registered tmux session is still alive, refuse to unregister.
+    // This is a server-side safety net against spurious Stop hook invocations.
+    if (entry.tmuxSession && tmuxExists(entry.tmuxSession)) {
+      log('warn', 'unregister refused — tmux session still alive', { sessionId, tmuxSession: entry.tmuxSession });
+      return res.status(409).json({ error: 'Session still active', ok: false });
+    }
     sessions.delete(sessionId);
+    log('info', 'session unregistered', { sessionId, tmuxSession: entry.tmuxSession });
+    // Only kill tmux if no other registered entry shares it
+    if (entry.tmuxSession && !entry.tmuxSession.startsWith('airprompt-')) {
+      let shared = false;
+      for (const [, other] of sessions) {
+        if (other.tmuxSession === entry.tmuxSession) { shared = true; break; }
+      }
+      if (!shared) {
+        // session is a real Claude tmux session — never kill it
+        // (airprompt- prefixed sessions are ours and can be cleaned)
+      }
+    }
+    // Always clean airprompt- prefixed sessions when they're orphaned
+    if (entry.tmuxSession && entry.tmuxSession.startsWith('airprompt-')) {
+      let shared = false;
+      for (const [, other] of sessions) {
+        if (other.tmuxSession === entry.tmuxSession) { shared = true; break; }
+      }
+      if (!shared) killTmuxSession(entry.tmuxSession);
+    }
     broadcastSessionList(wss);
     res.json({ ok: true });
   });
@@ -121,8 +156,10 @@ function createApp() {
   wss.on('connection', (ws) => {
     let ptyProcess = null;
     let activeSessionId = null;
+    const clientId = Math.random().toString(36).slice(2, 8);
+    log('info', 'ws client connected', { clientId });
 
-    ws.on('error', () => { /* prevent crash */ });
+    ws.on('error', (e) => { log('warn', 'ws client error', { clientId, error: e.message }); });
 
     ws.send(JSON.stringify({
       type: 'session_list',
@@ -160,6 +197,7 @@ function createApp() {
         });
         ptyProcess._airpromptWebSession = webSession;
         ptyProcess._airpromptAlive = true;
+        log('info', 'pty spawned', { clientId, webSession, sessionId, cols: termCols, rows: termRows });
       } catch (e) {
         // Clean up orphaned webSession on spawn failure
         spawnSync('tmux', ['kill-session', '-t', webSession], { timeout: 1000 });
@@ -168,7 +206,8 @@ function createApp() {
       }
 
       ptyProcess.onData((data) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'output', data })); });
-      ptyProcess.onExit(() => {
+      ptyProcess.onExit(({ exitCode, signal }) => {
+        log('info', 'pty exited', { clientId, webSession, exitCode, signal: signal || 0 });
         // Guard: only notify if this ptyProcess is still the active one
         // (prevents stale onExit from old pty overwriting new pty's state)
         if (!ptyProcess || !ptyProcess._airpromptAlive) return;
@@ -183,6 +222,9 @@ function createApp() {
       try { msg = JSON.parse(raw.toString()); } catch (e) { return; }
 
       switch (msg.type) {
+        case 'debug':
+          log('debug', '[client] ' + (msg.msg || ''), { level: msg.level, extra: msg.extra });
+          break;
         case 'input':
           if (ptyProcess && msg.data) { try { ptyProcess.write(msg.data); } catch (e) { /* ok */ } }
           break;
@@ -203,6 +245,7 @@ function createApp() {
     });
 
     ws.on('close', () => {
+      log('info', 'ws client disconnected', { clientId, activeSessionId });
       if (ptyProcess) {
         const wsess = ptyProcess._airpromptWebSession;
         try { ptyProcess.kill(); } catch (e) { /* ok */ }
@@ -215,7 +258,7 @@ function createApp() {
   const staleInterval = setInterval(() => {
     let changed = false;
     for (const [id, entry] of sessions) {
-      if (!tmuxExists(entry.tmuxSession)) { sessions.delete(id); changed = true; }
+      if (!tmuxExists(entry.tmuxSession)) { sessions.delete(id); changed = true; log('warn', 'stale session removed', { id, tmuxSession: entry.tmuxSession }); }
     }
     if (changed) broadcastSessionList(wss);
   }, STALE_CHECK_MS);
@@ -239,6 +282,7 @@ if (require.main === module) {
   } catch (e) { /* ok */ }
 
   writePid();
+  log('info', 'daemon starting', { port: PORT, pid: process.pid, tls: TLS_ENABLED, debug: DEBUG });
   const { httpServer, tlsOptions: tls } = createApp();
 
   httpServer.listen(PORT, '0.0.0.0', () => {
@@ -252,16 +296,13 @@ if (require.main === module) {
   });
 
   httpServer.on('error', (err) => { console.error(`Server error: ${err.message}`); removePid(); process.exit(1); });
-  function gracefulShutdown() {
+  function gracefulShutdown(signal) {
+    log('info', 'daemon shutting down', { signal, sessions: sessions.size });
     removePid();
-    // Kill all web sessions to prevent orphan accumulation
-    const out = spawnSync('tmux', ['ls', '-F', '#{session_name}'], { timeout: 2000 }).stdout || '';
-    for (const name of out.toString().split('\n')) {
-      if (name.startsWith('airprompt-web-')) spawnSync('tmux', ['kill-session', '-t', name], { timeout: 1000 });
-    }
     process.exit(0);
   }
-  process.on('SIGINT', gracefulShutdown);
-  process.on('SIGTERM', gracefulShutdown);
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGHUP', () => gracefulShutdown('SIGHUP'));
   process.on('exit', () => removePid());
 }

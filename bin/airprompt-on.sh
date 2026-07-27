@@ -8,6 +8,8 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 MARKER="${CONFIG_DIR}/.airprompt-active"
 URL_FILE="${CONFIG_DIR}/.airprompt-url"
 SESSION_FILE="${CONFIG_DIR}/.airprompt-session"
+TMUX_ACTIVE_FILE="${CONFIG_DIR}/.airprompt-tmux-active"
+DEBUG="${AIRPROMPT_DEBUG:-1}"  # always debug during development
 
 # ── Dependency checks ───────────────────────────────────────────────
 for cmd in tmux node curl; do
@@ -20,19 +22,17 @@ done
 # ── Save original PWD before any cd ─────────────────────────────────
 ORIG_PWD="$PWD"
 
-# ── Generate session ID ─────────────────────────────────────────────
-SESSION_ID="$(date +%s)-$$-$(basename "$ORIG_PWD" | tr -cd 'a-zA-Z0-9-_')"
-
-# Detect which tmux session to mirror.
-# Priority: 1) $TMUX env var (if we're inside tmux)
-#            2) Marker file left by wrapper script (Claude unsets $TMUX)
-#            3) AIRPROMPT_TMUX_SESSION env var (manual override)
-#            4) Create a new tmux session (last resort)
+# ── Generate stable session ID (based on tmux, not shell PID) ────────
 TMUX_MARKER="${CONFIG_DIR}/.airprompt-tmux-session"
 
 if [ -n "${TMUX:-}" ]; then
   TMUX_SESSION=$(tmux display-message -p '#S' 2>/dev/null)
-elif [ -f "$TMUX_MARKER" ]; then
+  if echo "$TMUX_SESSION" | grep -q '^airprompt-web-'; then
+    echo "Warning: running inside web proxy session ($TMUX_SESSION), skipping" >&2
+    TMUX_SESSION=""
+  fi
+fi
+if [ -z "${TMUX_SESSION:-}" ] && [ -f "$TMUX_MARKER" ]; then
   TMUX_SESSION=$(head -c 128 "$TMUX_MARKER" 2>/dev/null | tr -d '\n\r')
   if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     echo "Warning: tmux session from marker ($TMUX_SESSION) not found" >&2
@@ -44,21 +44,23 @@ if [ -z "${TMUX_SESSION:-}" ]; then
   if [ -n "${AIRPROMPT_TMUX_SESSION:-}" ]; then
     TMUX_SESSION="$AIRPROMPT_TMUX_SESSION"
   else
-    TMUX_SESSION="airprompt-${SESSION_ID}"
+    TMUX_SESSION="airprompt-$$-$(date +%s)"
     if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
       tmux new-session -d -s "$TMUX_SESSION" -c "$ORIG_PWD"
     fi
   fi
 fi
+
+SESSION_ID="$(echo "$TMUX_SESSION" | tr -cd 'a-zA-Z0-9_-')"
+
 LAN_IP=""
 if command -v hostname &>/dev/null; then
   LAN_IP=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.' | grep -v '^10\.' | head -1)
 fi
-# Fallback to first IP if filtering removed all
 [ -z "$LAN_IP" ] && LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 [ -z "$LAN_IP" ] && LAN_IP="localhost"
 
-# ── Detect protocol (must be before daemon start) ────────────────────
+# ── Detect protocol ──────────────────────────────────────────────────
 CERT_FILE="${CONFIG_DIR}/airprompt-cert.pem"
 KEY_FILE="${CONFIG_DIR}/airprompt-key.pem"
 PROTO="http"
@@ -77,20 +79,37 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 if [ ! -f "$PID_FILE" ]; then
+  echo "Starting daemon..."
   cd "$DAEMON_DIR"
-  node server.js > /tmp/airprompt.log 2>&1 &
+  # tmux: daemon owned by tmux server (immortal process), not this shell.
+  # Avoids process-group death when the Bash tool/script shell exits.
+  if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
+    tmux new-session -d -s airprompt-daemon "AIRPROMPT_DEBUG=$DEBUG node server.js 2>&1 | tee /tmp/airprompt.log"
+  else
+    tmux respawn-pane -k -t airprompt-daemon "AIRPROMPT_DEBUG=$DEBUG node server.js 2>&1 | tee /tmp/airprompt.log" 2>/dev/null || true
+  fi
   for i in $(seq 1 20); do
     if curl -s $CURL_OPTS "${PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
       break
     fi
-    if ! kill -0 $! 2>/dev/null; then
-      echo "Error: server process died. Check /tmp/airprompt.log" >&2
+    if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
+      echo "Error: daemon died. Check /tmp/airprompt.log" >&2
       cd "$ORIG_PWD"
       exit 1
     fi
     sleep 0.5
   done
   cd "$ORIG_PWD"
+fi
+
+# ── Idempotency: skip if already registered (same tmux session) ──────
+if [ -f "$MARKER" ] && [ -f "$SESSION_FILE" ] && [ -f "$TMUX_ACTIVE_FILE" ]; then
+  ACTIVE_TMUX=$(head -c 128 "$TMUX_ACTIVE_FILE" 2>/dev/null | tr -d '\n\r')
+  if [ "$ACTIVE_TMUX" = "$TMUX_SESSION" ]; then
+    echo "AirPrompt already active for this session."
+    echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
+    exit 0
+  fi
 fi
 
 # ── Register with daemon ────────────────────────────────────────────
@@ -102,9 +121,24 @@ if echo "$RESP" | grep -q '"ok":true'; then
   mkdir -p "$CONFIG_DIR"
   echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
   echo "$SESSION_ID" > "$SESSION_FILE"
+  echo "$TMUX_SESSION" > "$TMUX_ACTIVE_FILE"
   touch "$MARKER"
   echo "AirPrompt session registered: $SESSION_ID"
   echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
+elif echo "$RESP" | grep -q '"already registered"'; then
+  mkdir -p "$CONFIG_DIR"
+  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
+  echo "$SESSION_ID" > "$SESSION_FILE"
+  echo "$TMUX_SESSION" > "$TMUX_ACTIVE_FILE"
+  touch "$MARKER"
+  echo "AirPrompt already registered for this session."
+elif echo "$RESP" | grep -q '"Session already registered"'; then
+  mkdir -p "$CONFIG_DIR"
+  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
+  echo "$SESSION_ID" > "$SESSION_FILE"
+  echo "$TMUX_SESSION" > "$TMUX_ACTIVE_FILE"
+  touch "$MARKER"
+  echo "AirPrompt already registered for this session."
 else
   echo "Registration failed: $RESP" >&2
   exit 1

@@ -1,4 +1,4 @@
-.PHONY: setup cert start stop clean refresh logs lint test-unit test-integration test-all
+.PHONY: setup cert start stop clean refresh logs lint test-unit test-integration test-all install-plugin uninstall-plugin
 
 LOG_FILE := /tmp/airprompt.log
 PID_FILE := /tmp/airprompt-server.pid
@@ -36,6 +36,8 @@ logs:
 lint:
 	@node --check server.js
 	@node --check public/client.js
+	@node --check bin/install.js
+	@node --check bin/lib/settings.js
 
 test-unit:
 	@node --test test/unit/*.test.js
@@ -45,3 +47,9 @@ test-integration:
 	@bash test/integration/run.sh
 
 test-all: test-unit test-integration
+
+install-plugin:
+	@node bin/install.js
+
+uninstall-plugin:
+	@node bin/install.js --uninstall

@@ -1,7 +1,22 @@
+// ── Debug logging (enable with ?debug=1 in URL) ─────────────────────
+const urlParams = new URLSearchParams(window.location.search);
+const DEBUG = urlParams.get('debug') === '1';
+function log(level, msg, extra) {
+  if (!DEBUG) return;
+  const ts = new Date().toISOString();
+  const extraStr = extra ? ' ' + JSON.stringify(extra) : '';
+  console.log(`[airprompt:${level}] ${ts} ${msg}${extraStr}`);
+  // Forward to server so it appears in server logs too
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    send({ type: 'debug', level, msg, extra, ts });
+  }
+}
+
 // ── Terminal ─────────────────────────────────────────────────────────
 const term = new window.Terminal({
   cursorBlink: true,
   fontSize: 14,
+  scrollback: 10000,
   allowTransparency: false,
   theme: {
     background: '#0d1117',
@@ -60,12 +75,24 @@ let activeSessionId = null;
 // ── WebSocket ───────────────────────────────────────────────────────
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${protocol}//${window.location.host}`);
+log('info', 'ws connecting', { url: `${protocol}//${window.location.host}` });
 
 function send(msg) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
   }
 }
+
+ws.onopen = () => {
+  log('info', 'ws connected');
+  // Dismiss disconnect banner on reconnect
+  if (window._airpromptDiscBanner) {
+    if (window._airpromptDiscBanner.parentNode) {
+      window._airpromptDiscBanner.remove();
+    }
+    window._airpromptDiscBanner = null;
+  }
+};
 
 ws.onmessage = (event) => {
   let msg;
@@ -94,19 +121,23 @@ ws.onmessage = (event) => {
 };
 
 ws.onclose = () => {
+  log('warn', 'ws disconnected');
   term.write('\r\n\x1b[31m[AirPrompt: disconnected]\x1b[0m\r\n');
-  // Flash overlay banner — impossible to miss on mobile
+  // Overlay banner — stays until clicked or reconnected
   const banner = document.createElement('div');
-  banner.textContent = '⚠️ DISCONNECTED';
+  banner.textContent = '⚠️ DISCONNECTED — Tap to dismiss';
   Object.assign(banner.style, {
     position: 'fixed', top: '0', left: '0', right: '0',
     background: '#dc2626', color: '#fff', textAlign: 'center',
     padding: '14px 8px', fontSize: '16px', fontWeight: '700',
-    zIndex: '300', animation: '0.3s ease-out',
+    zIndex: '300', cursor: 'pointer',
+  });
+  banner.addEventListener('click', () => {
+    if (banner.parentNode) banner.remove();
   });
   document.body.appendChild(banner);
-  // Auto-remove after 5s
-  setTimeout(() => { if (banner.parentNode) banner.remove(); }, 5000);
+  // Save ref so ws.onopen can dismiss on reconnect
+  window._airpromptDiscBanner = banner;
 };
 
 // ── Session UI ──────────────────────────────────────────────────────
@@ -142,6 +173,7 @@ function updateUI() {
 }
 
 function selectSession(id) {
+  log('info', 'switching session', { from: activeSessionId, to: id });
   activeSessionId = id;
   send({ type: 'switch_session', sessionId: id });
   closeModal();
@@ -230,6 +262,47 @@ function stopDictation(e) {
 micBtn.addEventListener('pointerdown', startDictation);
 micBtn.addEventListener('pointerup', stopDictation);
 micBtn.addEventListener('pointercancel', stopDictation);
+
+// ── Touch scroll through terminal history ───────────────────────────
+const termContainer = document.getElementById('terminal-container');
+let touchScrollStartY = 0;
+let touchScrollStartX = 0;
+let touchScrollActive = false;
+const SCROLL_DEADZONE = 8;
+
+termContainer.addEventListener('touchstart', (e) => {
+  if (e.touches.length !== 1) { touchScrollActive = false; return; }
+  touchScrollStartY = e.touches[0].clientY;
+  touchScrollStartX = e.touches[0].clientX;
+  touchScrollActive = true;
+}, { passive: true });
+
+termContainer.addEventListener('touchmove', (e) => {
+  if (!touchScrollActive || e.touches.length !== 1) return;
+  const dy = e.touches[0].clientY - touchScrollStartY;
+  const dx = Math.abs(e.touches[0].clientX - touchScrollStartX);
+
+  // Swipe is not vertical enough — let xterm handle (text selection etc.)
+  if (Math.abs(dy) < dx || Math.abs(dy) < SCROLL_DEADZONE) return;
+
+  // If at top of scrollback AND swiping down, let pull-to-refresh fire
+  if (dy > 0 && term.buffer.active.viewportY <= 0) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+  // Positive dy = finger down → scroll UP through history
+  // scrollLines(-) = scroll up, scrollLines(+) = scroll down
+  const lines = Math.round(-dy / 20);
+  if (lines !== 0) {
+    try { term.scrollLines(lines); } catch (_) {}
+  }
+  touchScrollStartY = e.touches[0].clientY;
+  touchScrollStartX = e.touches[0].clientX;
+}, { passive: false });
+
+termContainer.addEventListener('touchend', () => {
+  touchScrollActive = false;
+});
 
 // ── Pull-to-refresh ─────────────────────────────────────────────────
 const pullIndicator = document.getElementById('pull-indicator');
