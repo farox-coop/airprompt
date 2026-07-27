@@ -11,8 +11,21 @@ TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 export CLAUDE_CONFIG_DIR="$TMPDIR"
-MARKER="${TMPDIR}/.airprompt-active"
-URL_FILE="${TMPDIR}/.airprompt-url"
+SESSIONS_DIR="${TMPDIR}/.airprompt-sessions"
+
+# Resolve real tmux session name to create matching per-session dir
+CURRENT_TMUX=""
+if [ -n "${TMUX:-}" ]; then
+  CURRENT_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
+  if echo "$CURRENT_TMUX" | grep -q '^airprompt-web-'; then
+    CURRENT_TMUX=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r')
+  fi
+fi
+# Sanitize (same as statusline.sh)
+SAFE_NAME=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
+MY_DIR="${SESSIONS_DIR}/${SAFE_NAME}"
+URL_FILE="${MY_DIR}/url"
+NAME_FILE="${MY_DIR}/name"
 
 STDIN_JSON='{"effort":{"level":"high"},"model":{"display_name":"deepseek-v4-pro[1m]"}}'
 
@@ -22,47 +35,52 @@ ok() { echo "  PASS: $1"; pass=$((pass + 1)); }
 not_ok() { echo "  FAIL: $1"; fail=$((fail + 1)); }
 
 echo "=== Statusline Hook Tests ==="
+echo "(tmux=$CURRENT_TMUX safe=$SAFE_NAME)"
 
-# 1: No badge when marker absent
-echo "[1/6] No badge when marker absent"
-rm -f "$MARKER" "$URL_FILE"
+# 1: No badge when no per-session url
+echo "[1/6] No badge when no per-session url"
+rm -rf "$MY_DIR"
 OUT=$(printf '%s' "$STDIN_JSON" | bash "$HOOK" 2>/dev/null || true)
 if [ -z "$OUT" ]; then ok "empty output"; else not_ok "expected empty, got: $OUT"; fi
 
-# 2: Badge when marker present
-echo "[2/6] Badge when marker present"
-touch "$MARKER"
+# 2: Badge when url present
+echo "[2/6] Badge when url present"
+mkdir -p "$MY_DIR"
 echo "http://192.168.1.100:3210" > "$URL_FILE"
+rm -f "$NAME_FILE"
 OUT=$(printf '%s' "$STDIN_JSON" | bash "$HOOK" 2>/dev/null || true)
 if echo "$OUT" | grep -q 'http://192.168.1.100:3210'; then ok "badge rendered"; else not_ok "no badge in: $OUT"; fi
 
 # 3: Badge includes full URL (port comes from URL file, not hardcoded)
 echo "[3/6] Badge includes URL from file"
-touch "$MARKER"
 echo "http://10.0.0.1:9999" > "$URL_FILE"
+rm -f "$NAME_FILE"
 OUT=$(printf '%s' "$STDIN_JSON" | bash "$HOOK" 2>/dev/null || true)
 if echo "$OUT" | grep -q '10.0.0.1:9999'; then ok "custom port preserved"; else not_ok "URL missing in: $OUT"; fi
 
-# 4: Refuses symlink marker
-echo "[4/6] Refuses symlink marker"
-rm -f "$MARKER" "$URL_FILE"
-ln -sf "$URL_FILE" "$MARKER"
+# 4: Refuses symlink url
+echo "[4/6] Refuses symlink url"
+rm -rf "$MY_DIR"
+mkdir -p "$MY_DIR"
+ln -sf /etc/hostname "$URL_FILE"
 OUT=$(printf '%s' "$STDIN_JSON" | bash "$HOOK" 2>/dev/null || true)
 if [ -z "$OUT" ]; then ok "empty for symlink"; else not_ok "expected empty for symlink, got: $OUT"; fi
 
-# 5: Refuses symlink URL file
-echo "[5/6] Refuses symlink URL file"
-rm -f "$MARKER" "$URL_FILE"
-touch "$MARKER"
-ln -sf /etc/hostname "$URL_FILE"
+# 5: Refuses symlink name file (still shows badge without name)
+echo "[5/6] Refuses symlink name file"
+rm -rf "$MY_DIR"
+mkdir -p "$MY_DIR"
+echo "http://192.168.1.100:3210" > "$URL_FILE"
+ln -sf /etc/hostname "$NAME_FILE"
 OUT=$(printf '%s' "$STDIN_JSON" | bash "$HOOK" 2>/dev/null || true)
-if [ -z "$OUT" ]; then ok "empty for URL symlink"; else not_ok "expected empty for URL symlink, got: $OUT"; fi
+if echo "$OUT" | grep -q 'AirPrompt: http://192.168.1.100:3210'; then ok "badge without name"; else not_ok "expected badge without name, got: $OUT"; fi
 
 # 6: Strips control characters from URL
 echo "[6/6] Strips control characters"
-rm -f "$MARKER" "$URL_FILE"
-touch "$MARKER"
+rm -rf "$MY_DIR"
+mkdir -p "$MY_DIR"
 printf 'http://192.168.1.1:3210\x01\x02\x03' > "$URL_FILE"
+rm -f "$NAME_FILE"
 OUT=$(printf '%s' "$STDIN_JSON" | bash "$HOOK" 2>/dev/null || true)
 if ! echo "$OUT" | grep -q $'\x01'; then ok "no control chars"; else not_ok "control chars leaked in: $OUT"; fi
 if echo "$OUT" | grep -q '192.168.1.1:3210'; then ok "clean URL preserved"; else not_ok "URL corrupted"; fi

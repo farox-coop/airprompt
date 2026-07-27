@@ -60,21 +60,7 @@ if [ -d "$SESSIONS_DIR" ]; then
   rmdir "$SESSIONS_DIR" 2>/dev/null || true
 fi
 
-# 4. Remove legacy global markers
-for f in \
-  "$CONFIG_DIR/.airprompt-active" \
-  "$CONFIG_DIR/.airprompt-url" \
-  "$CONFIG_DIR/.airprompt-session" \
-  "$CONFIG_DIR/.airprompt-tmux-active" \
-  "$CONFIG_DIR/.airprompt-tmux-session" \
-  "$CONFIG_DIR/.airprompt-name"; do
-  if [ -f "$f" ]; then
-    rm -f "$f"
-    MARKERS_REMOVED=$((MARKERS_REMOVED + 1))
-  fi
-done
-
-# 5. Remove logs
+# 4. Remove logs
 rm -f "$LOG_FILE"
 
 echo "  markers removed: $MARKERS_REMOVED"

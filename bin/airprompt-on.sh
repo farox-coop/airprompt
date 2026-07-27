@@ -16,13 +16,6 @@ PID_FILE="/tmp/airprompt-server.pid"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
 
-# Legacy global marker paths (cleaned up during migration)
-MARKER="${CONFIG_DIR}/.airprompt-active"
-URL_FILE="${CONFIG_DIR}/.airprompt-url"
-SESSION_FILE="${CONFIG_DIR}/.airprompt-session"
-TMUX_ACTIVE_FILE="${CONFIG_DIR}/.airprompt-tmux-active"
-TMUX_MARKER="${CONFIG_DIR}/.airprompt-tmux-session"
-
 DEBUG="${AIRPROMPT_DEBUG:-1}"  # always debug during development
 
 # ── Dependency checks ───────────────────────────────────────────────
@@ -49,13 +42,6 @@ if [ -n "${TMUX:-}" ]; then
       echo "Warning: running inside web proxy session ($TMUX_SESSION), skipping" >&2
       TMUX_SESSION=""
     fi
-  fi
-fi
-if [ -z "${TMUX_SESSION:-}" ] && [ -f "$TMUX_MARKER" ]; then
-  TMUX_SESSION=$(head -c 128 "$TMUX_MARKER" 2>/dev/null | tr -d '\n\r')
-  if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    echo "Warning: tmux session from marker ($TMUX_SESSION) not found" >&2
-    TMUX_SESSION=""
   fi
 fi
 
@@ -122,7 +108,9 @@ if [ ! -f "$PID_FILE" ]; then
 fi
 
 # ── Per-session directory ────────────────────────────────────────────
-MY_DIR="${SESSIONS_DIR}/${TMUX_SESSION}"
+# Sanitize tmux name to match statusline lookups (same as tr -cd 'a-zA-Z0-9_.-')
+SAFE_TMUX=$(printf '%s' "$TMUX_SESSION" | tr -cd 'a-zA-Z0-9_.-')
+MY_DIR="${SESSIONS_DIR}/${SAFE_TMUX}"
 ACTIVE_FILE="${MY_DIR}/active"
 
 # ── Idempotency: skip if already registered (same tmux session) ──────
@@ -180,27 +168,30 @@ else
   exit 1
 fi
 
-# ── Migration: clean up legacy global marker files ──────────────────
-rm -f "$MARKER" "$URL_FILE" "$SESSION_FILE" "$TMUX_ACTIVE_FILE" "$TMUX_MARKER" "${CONFIG_DIR}/.airprompt-name"
-
 # ── Cleanup: sweep dead session dirs ─────────────────────────────────
 if [ -d "$SESSIONS_DIR" ]; then
   for d in "$SESSIONS_DIR"/*/; do
     [ -d "$d" ] || continue
     DN=$(basename "$d")
-    [ "$DN" = "$TMUX_SESSION" ] && continue
-    tmux has-session -t "$DN" 2>/dev/null; HAS_SESSION_RC=$?
+    [ "$DN" = "$SAFE_TMUX" ] && continue
+    # Read real tmux name from dir — dir name is sanitized,
+    # real name may differ (e.g. "My Session!" vs "MySession").
+    REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r')
+    [ -z "$REAL_TMUX" ] && REAL_TMUX="$DN"
+    tmux has-session -t "$REAL_TMUX" 2>/dev/null; HAS_SESSION_RC=$?
     if [ $HAS_SESSION_RC -eq 0 ]; then
       : # session alive — skip
     elif [ $HAS_SESSION_RC -eq 1 ]; then
       # Only delete if tmux explicitly says "no session" (exit code 1).
       # Other non-zero codes = tmux error/timeout — don't touch (safe).
       echo "Cleaning up dead session dir: $DN" >&2
-      rm -rf "$d"
-      DEAD_ID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
+      # Read session ID from the session file (not from dir name)
+      SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r')
+      [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
       curl -s $CURL_OPTS -X POST "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
-        -d "{\"sessionId\":\"${DEAD_ID}\"}" > /dev/null 2>&1 || true
+        -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
+      rm -rf "$d"
     fi
   done
 fi

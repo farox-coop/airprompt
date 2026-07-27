@@ -250,6 +250,26 @@ async function installClaude(ctx) {
     note('  dependencies already installed');
   }
 
+  // 2b. Create ~/.local/bin/airprompt symlink (PATH lookup for /airprompt command)
+  {
+    const localBin = path.join(os.homedir(), '.local', 'bin');
+    const linkPath = path.join(localBin, 'airprompt');
+    const targetScript = path.join(targetDir, 'bin', 'airprompt');
+    if (!opts.dryRun) {
+      try {
+        fs.mkdirSync(localBin, { recursive: true });
+        // Remove existing symlink or stale file before creating new one
+        try { fs.unlinkSync(linkPath); } catch (_) {}
+        fs.symlinkSync(targetScript, linkPath);
+        process.stdout.write(`  symlink: ${linkPath} → ${targetScript}\n`);
+      } catch (e) {
+        note(`  could not create ${linkPath}: ${e.message} (non-fatal)`);
+      }
+    } else {
+      note(`  would symlink ${linkPath} → ${targetScript}`);
+    }
+  }
+
   // 3. Claude Code plugin install (idempotent unless --force)
   let alreadyInstalled = false;
   if (!opts.force && hasCmd('claude')) {
@@ -492,6 +512,24 @@ function uninstall(ctx) {
     }
   }
 
+  // 3b. Remove ~/.local/bin/airprompt symlink
+  {
+    const linkPath = path.join(os.homedir(), '.local', 'bin', 'airprompt');
+    if (fs.existsSync(linkPath)) {
+      try {
+        const st = fs.lstatSync(linkPath);
+        if (st.isSymbolicLink()) {
+          if (!opts.dryRun) { try { fs.unlinkSync(linkPath); } catch (_) {} }
+          note(`  removed symlink ${linkPath}`);
+        } else {
+          note(`  ${linkPath} is not a symlink — skipping (manual installation?)`);
+        }
+      } catch (_) {
+        if (!opts.dryRun) { try { fs.unlinkSync(linkPath); } catch (_) {} }
+      }
+    }
+  }
+
   // 4. Remove skill + command files
   for (const type of ['commands', 'skills']) {
     const dest = path.join(configDir, type, 'airprompt.md');
@@ -512,16 +550,7 @@ function uninstall(ctx) {
     }
   }
 
-  // 6. Remove legacy marker files
-  for (const f of ['.airprompt-active', '.airprompt-url', '.airprompt-session', '.airprompt-tmux-active', '.airprompt-tmux-session', '.airprompt-name']) {
-    const p = path.join(configDir, f);
-    if (fs.existsSync(p)) {
-      if (!opts.dryRun) { try { fs.unlinkSync(p); } catch (_) {} }
-      note(`  removed ${p}`);
-    }
-  }
-
-  // 6b. Remove per-session directories
+  // 6. Remove per-session directories
   const sessionsDir = path.join(configDir, '.airprompt-sessions');
   if (fs.existsSync(sessionsDir)) {
     if (!opts.dryRun) {

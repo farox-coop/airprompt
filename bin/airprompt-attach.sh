@@ -39,9 +39,7 @@ done
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-MARKER="${CONFIG_DIR}/.airprompt-active"
-URL_FILE="${CONFIG_DIR}/.airprompt-url"
-SESSION_FILE="${CONFIG_DIR}/.airprompt-session"
+SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
 
 # ── Detect protocol ─────────────────────────────────────────────────
 CERT_FILE="${CONFIG_DIR}/airprompt-cert.pem"
@@ -121,9 +119,12 @@ if echo "$RESP" | grep -q '"ok":true'; then
   LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
   [ -z "$LAN_IP" ] && LAN_IP="localhost"
 
-  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "$URL_FILE"
-  echo "$SESSION_ID" > "$SESSION_FILE"
-  touch "$MARKER"
+  MY_DIR="${SESSIONS_DIR}/${TMUX_SESSION}"
+  mkdir -p "$MY_DIR"
+  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
+  echo "$SESSION_ID" > "${MY_DIR}/session"
+  echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
+  touch "${MY_DIR}/active"
   echo ""
   echo "AirPrompt session registered: $SESSION_ID"
   echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"

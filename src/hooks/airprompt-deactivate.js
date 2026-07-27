@@ -5,8 +5,7 @@
 //
 // Guards against spurious Stop hook invocations by checking
 // whether the registered tmux session is still alive before cleaning up.
-//
-// Per-session isolation: reads from ~/.claude/.airprompt-sessions/{tmux}/
+// Per-session isolation: reads ~/.claude/.airprompt-sessions/{safe-tmux}/
 
 'use strict';
 
@@ -22,18 +21,9 @@ const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.cl
 const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
 const PID_FILE = '/tmp/airprompt-server.pid';
 
-// Legacy paths (fallback)
-const SESSION_FILE = path.join(CONFIG_DIR, '.airprompt-session');
-const MARKER = path.join(CONFIG_DIR, '.airprompt-active');
-const URL_FILE = path.join(CONFIG_DIR, '.airprompt-url');
-const NAME_FILE = path.join(CONFIG_DIR, '.airprompt-name');
-const TMUX_ACTIVE_FILE = path.join(CONFIG_DIR, '.airprompt-tmux-active');
-const TMUX_SESSION_FILE = path.join(CONFIG_DIR, '.airprompt-tmux-session');
-
 const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');
 const KEY_FILE = path.join(CONFIG_DIR, 'airprompt-key.pem');
 const TLS = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
-const API = `${TLS ? 'https' : 'http'}://localhost:${PORT}`;
 
 const DEBUG = process.env.AIRPROMPT_DEBUG === '1';
 
@@ -46,7 +36,12 @@ function dlog(msg) {
   } catch (_) {}
 }
 
-dlog(`INVOKED CONFIG_DIR=${CONFIG_DIR} PORT=${PORT} TLS=${TLS} HOME=${process.env.HOME} TMUX=${process.env.TMUX || '(unset)'}`);
+dlog(`INVOKED CONFIG_DIR=${CONFIG_DIR} PORT=${PORT} TLS=${TLS} TMUX=${process.env.TMUX || '(unset)'}`);
+
+// Same sanitization as statusline.sh and activate.js
+function safeDirName(name) {
+  return name.replace(/[^a-zA-Z0-9_.-]/g, '');
+}
 
 // ── Resolve current tmux session ──────────────────────────────────────
 function resolveCurrentTmux() {
@@ -65,45 +60,48 @@ function resolveCurrentTmux() {
 
 // ── Find my per-session dir ───────────────────────────────────────────
 function findMyDir(currentTmux) {
-  // Primary: per-session dir matching current tmux
-  if (currentTmux && fs.existsSync(path.join(SESSIONS_DIR, currentTmux, 'active'))) {
-    return path.join(SESSIONS_DIR, currentTmux);
+  if (!fs.existsSync(SESSIONS_DIR)) return null;
+
+  // Primary: per-session dir matching sanitized current tmux
+  if (currentTmux) {
+    const safeName = safeDirName(currentTmux);
+    const dir = path.join(SESSIONS_DIR, safeName);
+    if (fs.existsSync(path.join(dir, 'active'))) return dir;
   }
-  // Fallback: scan per-session dirs for one whose tmux matches
-  try {
-    if (fs.existsSync(SESSIONS_DIR)) {
+
+  // Fallback: scan per-session dirs for one whose registered tmux is dead.
+  // The deactivate hook fires when session ends — if our tmux is already
+  // dead, the dir belongs to us and is safe to clean.
+  if (!currentTmux) {
+    try {
       for (const name of fs.readdirSync(SESSIONS_DIR)) {
         const d = path.join(SESSIONS_DIR, name);
         if (!fs.statSync(d).isDirectory()) continue;
-        const tmuxName = name;
-        if (tmuxName === currentTmux && fs.existsSync(path.join(d, 'active'))) {
-          return d;
+        let dirTmux = '';
+        try { dirTmux = fs.readFileSync(path.join(d, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
+        if (!dirTmux) continue;
+        const r = spawnSync('tmux', ['has-session', '-t', dirTmux], { timeout: 2000 });
+        if (r.status === 1 && fs.existsSync(path.join(d, 'active'))) {
+          return d; // Dead session — this is ours
         }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
+
   return null;
 }
 
-// ── Read session ID from per-session dir or legacy ────────────────────
+// ── Read session ID from per-session dir ──────────────────────────────
 function readSessionId(myDir) {
-  if (myDir) {
-    try { return fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
-  }
-  // Legacy fallback
-  try { return fs.readFileSync(SESSION_FILE, 'utf8').trim().slice(0, 128); } catch (_) {}
+  if (!myDir) return '';
+  try { return fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
   return '';
 }
 
-// ── Read registered tmux from per-session dir or legacy ───────────────
+// ── Read registered tmux from per-session dir ─────────────────────────
 function readRegisteredTmux(myDir) {
-  if (myDir) {
-    try { return fs.readFileSync(path.join(myDir, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
-  }
-  // Legacy fallback
-  for (const f of [TMUX_ACTIVE_FILE, TMUX_SESSION_FILE]) {
-    try { const v = fs.readFileSync(f, 'utf8').trim().slice(0, 128); if (v) return v; } catch (_) {}
-  }
+  if (!myDir) return '';
+  try { return fs.readFileSync(path.join(myDir, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
   return '';
 }
 
@@ -113,7 +111,7 @@ async function main() {
 
   // 1. Read session ID
   let sessionId = readSessionId(myDir);
-  dlog(`sessionId='${sessionId}' myDir=${myDir || 'none'}`);
+  dlog(`sessionId='${sessionId}' myDir=${myDir || 'none'} currentTmux='${currentTmux}'`);
   if (!sessionId) { dlog('sessionId empty — exit 0'); process.exit(0); }
 
   // 2. Guard: check if the registered tmux session is still alive.
@@ -182,15 +180,7 @@ async function main() {
     try { fs.rmSync(myDir, { recursive: true, force: true }); } catch (_) {}
   }
 
-  // 5. Remove legacy marker files
-  try { fs.unlinkSync(MARKER); } catch (_) {}
-  try { fs.unlinkSync(URL_FILE); } catch (_) {}
-  try { fs.unlinkSync(SESSION_FILE); } catch (_) {}
-  try { fs.unlinkSync(NAME_FILE); } catch (_) {}
-  try { fs.unlinkSync(TMUX_ACTIVE_FILE); } catch (_) {}
-  try { fs.unlinkSync(TMUX_SESSION_FILE); } catch (_) {}
-
-  // 6. Stop daemon if no sessions remain
+  // 5. Stop daemon if no sessions remain
   try {
     const resp = await get('/api/sessions');
     const sessions = Array.isArray(resp) ? resp : [];
@@ -205,11 +195,11 @@ async function main() {
   }
 }
 
-function post(path, body) {
+function post(p, body) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const opts = {
-      hostname: 'localhost', port: PORT, path, method: 'POST',
+      hostname: 'localhost', port: PORT, path: p, method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
       timeout: 3000,
     };
@@ -229,9 +219,9 @@ function post(path, body) {
   });
 }
 
-function get(path) {
+function get(p) {
   return new Promise((resolve, reject) => {
-    const opts = { hostname: 'localhost', port: PORT, path, method: 'GET', timeout: 3000 };
+    const opts = { hostname: 'localhost', port: PORT, path: p, method: 'GET', timeout: 3000 };
     const mod = TLS ? https : http;
     if (TLS) opts.rejectUnauthorized = false;
     const req = mod.request(opts, (res) => {

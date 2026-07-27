@@ -76,8 +76,10 @@ except: print('  (parse error)')
   echo ""
 
   # ── Local status ──────────────────────────────────────────────────
-  if [ -n "$CURRENT_TMUX" ] && [ -d "${SESSIONS_DIR}/${CURRENT_TMUX}" ]; then
-    MY_DIR="${SESSIONS_DIR}/${CURRENT_TMUX}"
+  # Sanitize to match dir name created by airprompt-on / activate (same: tr -cd 'a-zA-Z0-9_.-')
+  SAFE_NAME=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
+  if [ -n "$SAFE_NAME" ] && [ -d "${SESSIONS_DIR}/${SAFE_NAME}" ]; then
+    MY_DIR="${SESSIONS_DIR}/${SAFE_NAME}"
     LOCAL_SESSION=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
     echo "This session: $LOCAL_SESSION"
     if [ -f "${MY_DIR}/active" ]; then
@@ -88,11 +90,6 @@ except: print('  (parse error)')
     if [ -f "${MY_DIR}/name" ]; then
       echo "Name:        $(cat "${MY_DIR}/name")"
     fi
-  elif [ -f "${CONFIG_DIR}/.airprompt-session" ]; then
-    # Legacy fallback
-    LOCAL_SESSION=$(head -c 128 "${CONFIG_DIR}/.airprompt-session" 2>/dev/null | tr -d '\n\r')
-    echo "This session: $LOCAL_SESSION (legacy)"
-    echo "Register with: /airprompt on"
   else
     echo "This session: NOT REGISTERED"
     echo "Register with: /airprompt on"

@@ -2,7 +2,7 @@
 // airprompt-activate.js — SessionStart hook.
 // Ensures the AirPrompt daemon is running and registers this Claude session.
 // Runs on every Claude Code session start. Idempotent — re-register is safe.
-// Per-session isolation: writes to ~/.claude/.airprompt-sessions/{tmux-name}/
+// Per-session isolation: writes to ~/.claude/.airprompt-sessions/{safe-name}/
 // Multiple Claude sessions can coexist without fighting over global files.
 
 'use strict';
@@ -19,16 +19,6 @@ const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.cl
 const AIRPROMPT_DIR = path.join(os.homedir(), '.airprompt');
 const PID_FILE = '/tmp/airprompt-server.pid';
 const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
-
-// Legacy global markers (cleaned up during migration)
-const OLD_MARKERS = [
-  path.join(CONFIG_DIR, '.airprompt-active'),
-  path.join(CONFIG_DIR, '.airprompt-url'),
-  path.join(CONFIG_DIR, '.airprompt-session'),
-  path.join(CONFIG_DIR, '.airprompt-tmux-active'),
-  path.join(CONFIG_DIR, '.airprompt-tmux-session'),
-  path.join(CONFIG_DIR, '.airprompt-name'),
-];
 
 // Resolve install dir — prefer CLAUDE_PLUGIN_ROOT (plugin installed),
 // fallback to ~/.airprompt/ (standalone manual install).
@@ -91,6 +81,11 @@ function post(p, body) {
   });
 }
 
+// Same sanitization as statusline.sh: `tr -cd 'a-zA-Z0-9_.-'`
+function safeDirName(name) {
+  return name.replace(/[^a-zA-Z0-9_.-]/g, '');
+}
+
 // Detect current tmux session, resolving web proxy sessions to parent group
 function detectTmux() {
   let tmux = '';
@@ -115,10 +110,19 @@ function sweepDeadSessions() {
   for (const entry of entries) {
     const full = path.join(SESSIONS_DIR, entry);
     if (!fs.statSync(full).isDirectory()) continue;
-    const r = spawnSync('tmux', ['has-session', '-t', entry], { timeout: 2000 });
+    // Read real tmux session name from dir — dir name is sanitized,
+    // real name may differ (e.g. "My Session!" vs "MySession").
+    let realTmux = entry;
+    try { realTmux = fs.readFileSync(path.join(full, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
+    const r = spawnSync('tmux', ['has-session', '-t', realTmux], { timeout: 2000 });
     // Only delete if tmux explicitly says session doesn't exist (exit code 1).
     // status null = timeout/error → don't touch (safe).
     if (r.status === 1) {
+      // Best-effort unregister from daemon before deleting local dir
+      try {
+        const sid = fs.readFileSync(path.join(full, 'session'), 'utf8').trim().slice(0, 128);
+        if (sid) post('/api/sessions/unregister', { sessionId: sid, force: true }).catch(() => {});
+      } catch (_) {}
       try { fs.rmSync(full, { recursive: true, force: true }); } catch (_) {}
     }
   }
@@ -154,13 +158,12 @@ async function main() {
   // Daemon recovers state from on-disk markers on startup, so a simple
   // file check is sufficient — no need to double-check with daemon API.
   if (currentTmux) {
-    const myDir = path.join(SESSIONS_DIR, currentTmux);
+    const safeName = safeDirName(currentTmux);
+    const myDir = path.join(SESSIONS_DIR, safeName);
     const activeFile = path.join(myDir, 'active');
     if (fs.existsSync(activeFile)) {
       process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
-      // Still sweep dead sessions and old markers — housekeeping
       sweepDeadSessions();
-      OLD_MARKERS.forEach(f => { try { fs.unlinkSync(f); } catch (_) {} });
       return;
     }
   }
@@ -181,20 +184,31 @@ async function main() {
   try {
     const resp = await post('/api/sessions/register', { sessionId, cwd, tmuxSession });
     if (resp && resp.ok) {
-      // Write per-session markers
-      const myDir = path.join(SESSIONS_DIR, tmuxSession);
-      fs.mkdirSync(myDir, { recursive: true });
+      // Write per-session markers (wrapped in try-catch for disk errors)
+      const safeName = safeDirName(tmuxSession);
+      const myDir = path.join(SESSIONS_DIR, safeName);
       const lanIp = getLanIp();
       const url = `${TLS ? 'https' : 'http'}://${lanIp}:${PORT}`;
-      fs.writeFileSync(path.join(myDir, 'url'), url + '\n');
-      fs.writeFileSync(path.join(myDir, 'session'), sessionId + '\n');
-      fs.writeFileSync(path.join(myDir, 'tmux'), tmuxSession + '\n');
-      fs.writeFileSync(path.join(myDir, 'active'), '');
+
+      let markersWritten = false;
+      try {
+        fs.mkdirSync(myDir, { recursive: true });
+        fs.writeFileSync(path.join(myDir, 'url'), url + '\n');
+        fs.writeFileSync(path.join(myDir, 'session'), sessionId + '\n');
+        fs.writeFileSync(path.join(myDir, 'tmux'), tmuxSession + '\n');
+        fs.writeFileSync(path.join(myDir, 'active'), '');
+        markersWritten = true;
+      } catch (e) {
+        process.stderr.write(`airprompt: marker write failed: ${e.message}\n`);
+        // Daemon registration succeeded but local markers failed.
+        // Try to unregister to avoid orphaned daemon entry.
+        try { await post('/api/sessions/unregister', { sessionId, force: true }); } catch (_) {}
+        return;
+      }
+
       process.stdout.write(`airprompt: registered ${sessionId}\n`);
       process.stdout.write(`airprompt: mobile URL ${url}\n`);
 
-      // Housekeeping: clean legacy global markers and dead session dirs
-      OLD_MARKERS.forEach(f => { try { fs.unlinkSync(f); } catch (_) {} });
       sweepDeadSessions();
     } else {
       process.stderr.write(`airprompt: registration failed: ${JSON.stringify(resp)}\n`);

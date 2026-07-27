@@ -32,14 +32,11 @@ fi
 # ── Resolve per-session dir and session ID ───────────────────────────
 MY_DIR=""
 SESSION_ID=""
-if [ -n "$CURRENT_TMUX" ] && [ -d "${SESSIONS_DIR}/${CURRENT_TMUX}" ]; then
-  MY_DIR="${SESSIONS_DIR}/${CURRENT_TMUX}"
+# Sanitize to match dir name created by airprompt-on / activate (same: tr -cd 'a-zA-Z0-9_.-')
+SAFE_NAME=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
+if [ -n "$SAFE_NAME" ] && [ -d "${SESSIONS_DIR}/${SAFE_NAME}" ]; then
+  MY_DIR="${SESSIONS_DIR}/${SAFE_NAME}"
   SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
-fi
-
-# Legacy fallback
-if [ -z "$SESSION_ID" ] && [ -f "${CONFIG_DIR}/.airprompt-session" ]; then
-  SESSION_ID=$(head -c 128 "${CONFIG_DIR}/.airprompt-session" 2>/dev/null | tr -d '\n\r')
 fi
 
 if [ -z "$SESSION_ID" ]; then

@@ -322,6 +322,9 @@ function runDeactivate(envOverrides = {}) {
     AIRPROMPT_NO_TLS: '1', // match test server
     ...envOverrides,
   };
+  // Unset TMUX so deactivate doesn't detect the real Claude session
+  // (tests create their own mock tmux sessions)
+  delete env.TMUX;
   const r = spawnSync(process.execPath, [DEACTIVATE_SCRIPT], {
     env,
     timeout: 10000,
@@ -332,9 +335,16 @@ function runDeactivate(envOverrides = {}) {
 
 function cleanupMarkers() {
   const fs = require('fs');
+  const path = require('path');
+  // Legacy flat files
   for (const f of ['.airprompt-active', '.airprompt-url', '.airprompt-session',
-                   '.airprompt-tmux-active', '.airprompt-tmux-session']) {
-    try { fs.unlinkSync(require('path').join(TEMP_DIR, f)); } catch (_) {}
+                   '.airprompt-tmux-active', '.airprompt-tmux-session', '.airprompt-name']) {
+    try { fs.unlinkSync(path.join(TEMP_DIR, f)); } catch (_) {}
+  }
+  // Per-session dirs
+  const sessionsDir = path.join(TEMP_DIR, '.airprompt-sessions');
+  if (fs.existsSync(sessionsDir)) {
+    try { fs.rmSync(sessionsDir, { recursive: true, force: true }); } catch (_) {}
   }
 }
 
@@ -350,14 +360,16 @@ test('deactivate hook exits 0 when tmux session is alive (spurious Stop guard)',
   const aliveSession = 'airprompt-guard-alive';
   createTmux(aliveSession);
   try {
-    // Set up markers as if /airprompt on was run from that session
+    // Set up per-session dir as if /airprompt on was run from that session
     const fs = require('fs');
     const path = require('path');
-    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-session'), 'test-guard-session\n');
-    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-active'), '');
-    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-url'), 'http://192.168.0.10:3210\n');
-    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-active'), aliveSession + '\n');
-    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-session'), aliveSession + '\n');
+    const sessionsDir = path.join(TEMP_DIR, '.airprompt-sessions');
+    const myDir = path.join(sessionsDir, aliveSession);
+    fs.mkdirSync(myDir, { recursive: true });
+    fs.writeFileSync(path.join(myDir, 'session'), 'test-guard-session\n');
+    fs.writeFileSync(path.join(myDir, 'tmux'), aliveSession + '\n');
+    fs.writeFileSync(path.join(myDir, 'active'), '');
+    fs.writeFileSync(path.join(myDir, 'url'), 'http://192.168.0.10:3210\n');
 
     // Register the session first (so deactivate has something to unregister if guard fails)
     await post('/api/sessions/register', { sessionId: 'test-guard-session', cwd: '/tmp' });
@@ -369,6 +381,9 @@ test('deactivate hook exits 0 when tmux session is alive (spurious Stop guard)',
     // Session should STILL be registered (guard prevented cleanup)
     assert.strictEqual(sessions.has('test-guard-session'), true);
 
+    // Per-session dir must survive (guard prevented cleanup)
+    assert.strictEqual(fs.existsSync(path.join(myDir, 'active')), true);
+
     // Clean up
     sessions.delete('test-guard-session');
   } finally {
@@ -377,26 +392,33 @@ test('deactivate hook exits 0 when tmux session is alive (spurious Stop guard)',
   }
 });
 
-test('deactivate hook proceeds with cleanup when tmux session is gone', { skip: !TMUX_AVAILABLE }, () => {
+test('deactivate hook proceeds with cleanup when tmux session is gone', { skip: !TMUX_AVAILABLE }, async () => {
   const deadSession = 'airprompt-guard-dead';
   killTmux(deadSession);
 
   const fs = require('fs');
   const path = require('path');
-  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-session'), 'test-guard-dead-session\n');
-  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-active'), '');
-  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-url'), 'http://192.168.0.10:3210\n');
-  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-active'), deadSession + '\n');
-  fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-session'), deadSession + '\n');
+  // New per-session dir structure — deactivate.js checks here first
+  const sessionsDir = path.join(TEMP_DIR, '.airprompt-sessions');
+  const myDir = path.join(sessionsDir, deadSession);
+  fs.mkdirSync(myDir, { recursive: true });
+  fs.writeFileSync(path.join(myDir, 'session'), 'test-guard-dead-session\n');
+  fs.writeFileSync(path.join(myDir, 'tmux'), deadSession + '\n');
+  fs.writeFileSync(path.join(myDir, 'active'), '');
+  fs.writeFileSync(path.join(myDir, 'url'), 'http://192.168.0.10:3210\n');
+
+  // Register session with server so unregister works, then kill tmux
+  await post('/api/sessions/register', { sessionId: 'test-guard-dead-session', cwd: '/tmp' });
+  // Server auto-creates airprompt-<sessionId> when no tmuxSession given.
+  // Kill it so the server-side guard passes.
+  killTmux('airprompt-test-guard-dead-session');
 
   const r = runDeactivate();
   assert.strictEqual(r.status, 0, 'deactivate exit code — stderr: ' + r.stderr);
 
-  // Markers removed (local cleanup always works)
-  assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-session')), false);
-  assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-active')), false);
-  assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-tmux-active')), false);
-  assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-tmux-session')), false);
+  // Per-session dir removed (local cleanup)
+  assert.strictEqual(fs.existsSync(myDir), false,
+    'per-session dir must be removed — stderr: ' + r.stderr);
 
   cleanupMarkers();
 });
@@ -407,19 +429,21 @@ test('deactivate hook exits 0 when tmux is not available (safe fallback)', { ski
   try {
     const fs = require('fs');
     const path = require('path');
-    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-session'), 'test-tmuxless-session\n');
-    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-active'), '');
-    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-url'), 'http://192.168.0.10:3210\n');
-    fs.writeFileSync(path.join(TEMP_DIR, '.airprompt-tmux-active'), aliveSession + '\n');
+    // Per-session dir structure
+    const sessionsDir = path.join(TEMP_DIR, '.airprompt-sessions');
+    const myDir = path.join(sessionsDir, aliveSession);
+    fs.mkdirSync(myDir, { recursive: true });
+    fs.writeFileSync(path.join(myDir, 'session'), 'test-tmuxless-session\n');
+    fs.writeFileSync(path.join(myDir, 'tmux'), aliveSession + '\n');
+    fs.writeFileSync(path.join(myDir, 'active'), '');
+    fs.writeFileSync(path.join(myDir, 'url'), 'http://192.168.0.10:3210\n');
 
     const r = runDeactivate({ PATH: '/nonexistent' });
     assert.strictEqual(r.status, 0, 'deactivate exit code — stderr: ' + r.stderr);
 
-    // Markers must survive (guard prevented cleanup)
-    assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-session')), true,
-      'session file must survive when tmux not available');
-    assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, '.airprompt-tmux-active')), true,
-      'tmux-active file must survive when tmux not available');
+    // Per-session dir must survive (guard prevented cleanup — tmux not available)
+    assert.strictEqual(fs.existsSync(path.join(myDir, 'active')), true,
+      'per-session dir must survive when tmux not available');
   } finally {
     killTmux(aliveSession);
     cleanupMarkers();

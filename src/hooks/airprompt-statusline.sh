@@ -29,7 +29,7 @@ if [ -n "$CURRENT_TMUX" ]; then
     URL=$(head -c 256 "$URL_FILE" 2>/dev/null | tr -d '\n\r' | tr -d '\000-\037\177')
     if [ -n "$URL" ]; then
       if [ -f "$NAME_FILE" ] && [ ! -L "$NAME_FILE" ]; then
-        NAME=$(head -c 64 "$NAME_FILE" 2>/dev/null | tr -d '\n\r')
+        NAME=$(head -c 64 "$NAME_FILE" 2>/dev/null | tr -d '\n\r' | tr -d '\000-\037\177')
         [ -n "$NAME" ] && printf '\033[33m[%s@%s]\033[0m' "$NAME" "$URL" || printf '\033[33m[AirPrompt: %s]\033[0m' "$URL"
       else
         printf '\033[33m[AirPrompt: %s]\033[0m' "$URL"
@@ -39,18 +39,3 @@ if [ -n "$CURRENT_TMUX" ]; then
   fi
 fi
 
-# ── Fallback: legacy global markers (backward compat) ────────────────
-MARKER="${CONFIG_DIR}/.airprompt-active"
-URL_FILE="${CONFIG_DIR}/.airprompt-url"
-NAME_FILE="${CONFIG_DIR}/.airprompt-name"
-if [ -f "$MARKER" ] && [ -f "$URL_FILE" ] && [ ! -L "$MARKER" ] && [ ! -L "$URL_FILE" ]; then
-  URL=$(head -c 256 "$URL_FILE" 2>/dev/null | tr -d '\n\r' | tr -d '\000-\037\177')
-  if [ -n "$URL" ]; then
-    if [ -f "$NAME_FILE" ] && [ ! -L "$NAME_FILE" ]; then
-      NAME=$(head -c 64 "$NAME_FILE" 2>/dev/null | tr -d '\n\r')
-      [ -n "$NAME" ] && printf '\033[33m[%s@%s]\033[0m' "$NAME" "$URL" || printf '\033[33m[AirPrompt: %s]\033[0m' "$URL"
-    else
-      printf '\033[33m[AirPrompt: %s]\033[0m' "$URL"
-    fi
-  fi
-fi
