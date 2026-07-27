@@ -1,6 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
+# ── Help guard ─────────────────────────────────────────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: bin/airprompt off"
+  echo ""
+  echo "  Unregister current session from daemon, remove local markers,"
+  echo "  and stop daemon if no sessions remain."
+  echo ""
+  echo "This is an internal script. Use 'bin/airprompt off' directly."
+  exit 0
+fi
+
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"

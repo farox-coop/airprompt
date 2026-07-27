@@ -224,6 +224,128 @@ test('POST /api/sessions/unregister rejects missing id', async () => {
   assert.strictEqual(res.status, 400);
 });
 
+// ── Name endpoint tests ──────────────────────────────────────────────
+
+function put(path, body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request({
+      hostname: 'localhost', port, path, method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+    }, (res) => {
+      let buf = '';
+      res.on('data', (c) => buf += c);
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, body: JSON.parse(buf) }); }
+        catch (e) { resolve({ status: res.statusCode, body: buf }); }
+      });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+test('PUT /api/sessions/name sets name on registered session', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-name1');
+  try {
+    await post('/api/sessions/register', { sessionId: 'test-name1', cwd: '/tmp' });
+    const res = await put('/api/sessions/name', { sessionId: 'test-name1', name: 'My Session' });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.ok, true);
+    assert.strictEqual(res.body.name, 'My Session');
+    assert.strictEqual(sessions.get('test-name1').name, 'My Session');
+  } finally {
+    killTmux('airprompt-test-name1');
+  }
+});
+
+test('PUT /api/sessions/name clears name with empty string', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-name2');
+  try {
+    await post('/api/sessions/register', { sessionId: 'test-name2', cwd: '/tmp' });
+    await put('/api/sessions/name', { sessionId: 'test-name2', name: 'Temp Name' });
+    const res = await put('/api/sessions/name', { sessionId: 'test-name2', name: '' });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.name, null);
+    assert.strictEqual(sessions.get('test-name2').name, null);
+  } finally {
+    killTmux('airprompt-test-name2');
+  }
+});
+
+test('PUT /api/sessions/name rejects missing sessionId', async () => {
+  const res = await put('/api/sessions/name', { name: 'test' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('PUT /api/sessions/name rejects invalid name (special chars)', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-name3');
+  try {
+    await post('/api/sessions/register', { sessionId: 'test-name3', cwd: '/tmp' });
+    const res = await put('/api/sessions/name', { sessionId: 'test-name3', name: 'bad@chars!' });
+    assert.strictEqual(res.status, 400);
+  } finally {
+    killTmux('airprompt-test-name3');
+  }
+});
+
+test('PUT /api/sessions/name rejects name too long', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-name4');
+  try {
+    await post('/api/sessions/register', { sessionId: 'test-name4', cwd: '/tmp' });
+    const res = await put('/api/sessions/name', { sessionId: 'test-name4', name: 'x'.repeat(65) });
+    assert.strictEqual(res.status, 400);
+  } finally {
+    killTmux('airprompt-test-name4');
+  }
+});
+
+test('PUT /api/sessions/name returns 404 for unknown session', async () => {
+  const res = await put('/api/sessions/name', { sessionId: 'nonexistent', name: 'test' });
+  assert.strictEqual(res.status, 404);
+});
+
+test('POST /api/sessions/register with valid name', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-reg-name');
+  try {
+    const res = await post('/api/sessions/register', { sessionId: 'test-reg-name', cwd: '/tmp', name: 'My Label' });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(sessions.get('test-reg-name').name, 'My Label');
+  } finally {
+    killTmux('airprompt-test-reg-name');
+  }
+});
+
+test('POST /api/sessions/register rejects invalid name', async () => {
+  const res = await post('/api/sessions/register', { sessionId: 'test-badname', cwd: '/tmp', name: 'bad@chars!' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('POST /api/sessions/register stores null name when omitted', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-no-name');
+  try {
+    await post('/api/sessions/register', { sessionId: 'test-no-name', cwd: '/tmp' });
+    assert.strictEqual(sessions.get('test-no-name').name, null);
+  } finally {
+    killTmux('airprompt-test-no-name');
+  }
+});
+
+test('GET /api/sessions returns name field', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-getname');
+  try {
+    await post('/api/sessions/register', { sessionId: 'test-getname', cwd: '/tmp', name: 'Visible' });
+    const res = await get('/api/sessions');
+    assert.strictEqual(res.status, 200);
+    const session = res.body.find((s) => s.id === 'test-getname');
+    assert.ok(session);
+    assert.strictEqual(session.name, 'Visible');
+  } finally {
+    killTmux('airprompt-test-getname');
+  }
+});
+
 // ── WebSocket tests ─────────────────────────────────────────────────
 
 test('WS receives session_list on connect', (t, done) => {

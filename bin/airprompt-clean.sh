@@ -3,6 +3,18 @@
 # Use: /airprompt clean
 set -euo pipefail
 
+# ── Help guard ─────────────────────────────────────────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: bin/airprompt clean"
+  echo ""
+  echo "  Full teardown: kill daemon, remove all airprompt tmux sessions,"
+  echo "  delete all per-session marker directories and logs."
+  echo "  WARNING: destructive — removes everything AirPrompt-related."
+  echo ""
+  echo "This is an internal script. Use 'bin/airprompt clean' directly."
+  exit 0
+fi
+
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
 PID_FILE="/tmp/airprompt-server.pid"

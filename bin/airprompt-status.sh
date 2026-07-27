@@ -1,6 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
+# ── Help guard ─────────────────────────────────────────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: bin/airprompt status"
+  echo ""
+  echo "  Show daemon status, registered sessions, and current session info."
+  echo ""
+  echo "This is an internal script. Use 'bin/airprompt status' directly."
+  exit 0
+fi
+
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"

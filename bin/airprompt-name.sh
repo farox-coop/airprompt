@@ -4,6 +4,17 @@
 #      /airprompt name         (clears name)
 set -euo pipefail
 
+# ── Help guard ─────────────────────────────────────────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: bin/airprompt name [<text>]"
+  echo ""
+  echo "  Set display name for current session (shown in web UI session list)."
+  echo "  Empty text clears the name."
+  echo ""
+  echo "This is an internal script. Use 'bin/airprompt name <text>' directly."
+  exit 0
+fi
+
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
@@ -46,15 +57,16 @@ fi
 
 # ── Set name via API ──────────────────────────────────────────────────
 API_URL="${PROTO}://localhost:${DAEMON_PORT}"
-RESP=$(curl $CURL_OPTS -X PUT "${API_URL}/api/sessions/name" \
+ESC_NAME=$(printf '%s' "$NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
+RESP=$(curl $CURL_OPTS -s -X PUT "${API_URL}/api/sessions/name" \
   -H "Content-Type: application/json" \
-  -d "{\"sessionId\":\"${SESSION_ID}\",\"name\":\"${NAME}\"}")
+  -d "{\"sessionId\":\"${SESSION_ID}\",\"name\":\"${ESC_NAME}\"}")
 
 if echo "$RESP" | grep -q '"ok":true'; then
-  NEW_NAME=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('name','') or '')" 2>/dev/null || echo "")
+  NEW_NAME=$(echo "$RESP" | grep -o '"name":"[^"]*"' | head -1 | sed 's/"name":"//;s/"$//')
   if [ -n "$NEW_NAME" ]; then
     if [ -n "$MY_DIR" ]; then
-      echo "$NEW_NAME" > "${MY_DIR}/name"
+      printf '%s\n' "$NEW_NAME" > "${MY_DIR}/name"
     fi
     echo "AirPrompt: session named '$NEW_NAME'"
   else

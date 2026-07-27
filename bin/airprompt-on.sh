@@ -1,6 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
+# ── Help guard ─────────────────────────────────────────────────────────
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: bin/airprompt on [--name <name>]"
+  echo ""
+  echo "  Start AirPrompt daemon and register current Claude session."
+  echo "  --name <name>  Optional display name shown in web UI session list."
+  echo ""
+  echo "This is an internal script. Use 'bin/airprompt on' directly."
+  exit 0
+fi
+
 # ── Argument parsing ──────────────────────────────────────────────────
 SESSION_NAME=""
 while [ $# -gt 0 ]; do
@@ -117,6 +128,22 @@ ACTIVE_FILE="${MY_DIR}/active"
 # Daemon recovers state from on-disk markers on startup, so a simple
 # file check is sufficient — no need to double-check with daemon API.
 if [ -f "$ACTIVE_FILE" ]; then
+  if [ -n "$SESSION_NAME" ]; then
+    # Update name even when session is already active
+    MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
+    if [ -n "$MY_SID" ]; then
+      ESC_NAME=$(printf '%s' "$SESSION_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
+      PUT_RESP=$(curl -s $CURL_OPTS -X PUT "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/name" \
+        -H "Content-Type: application/json" \
+        -d "{\"sessionId\":\"${MY_SID}\",\"name\":\"${ESC_NAME}\"}" 2>/dev/null || echo "")
+      if echo "$PUT_RESP" | grep -q '"ok":true'; then
+        printf '%s\n' "$SESSION_NAME" > "${MY_DIR}/name"
+        echo "Session name: $SESSION_NAME"
+      else
+        echo "Warning: failed to update session name (daemon unreachable)" >&2
+      fi
+    fi
+  fi
   echo "AirPrompt already active for this session."
   echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
   exit 0

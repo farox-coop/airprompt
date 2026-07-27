@@ -1,14 +1,14 @@
 #!/bin/bash
 # airprompt — Unified dispatch for multi-word arguments.
-# /airprompt on my project → bash airprompt-on.sh --name "my project"
-# /airprompt on             → bash airprompt-on.sh
-# /airprompt name something → bash airprompt-name.sh "something"
+# /airprompt on "my project" → bash airprompt-on.sh --name "my project"
+# /airprompt on --name foo    → bash airprompt-on.sh --name foo
+# /airprompt on               → bash airprompt-on.sh
+# /airprompt name something   → bash airprompt-name.sh "something"
 set -euo pipefail
 
-ARGS="$*"
 CMD="${1:-}"
-shift 2>/dev/null || true
-REST="${*:-}"
+shift || true
+# Remaining positional args in "$@" after shift
 
 # Resolve install dir
 for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
@@ -20,19 +20,40 @@ for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
     status) SUB="$d/bin/airprompt-status.sh";;
     clean)  SUB="$d/bin/airprompt-clean.sh";;
     name)   SUB="$d/bin/airprompt-name.sh";;
-    *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, name" >&2; exit 1 ;;
+    help|-h|--help)
+      echo "AirPrompt — remote mobile access and voice dictation for Claude sessions"
+      echo ""
+      echo "Usage: /airprompt <command>"
+      echo ""
+      echo "Commands:"
+      echo "  on [<name>]         Start daemon + register session (optional name)"
+      echo "  on --name <name>    Same, explicit flag form"
+      echo "  off                 Unregister session + hide statusline badge"
+      echo "  status              Show daemon status and active sessions"
+      echo "  clean               Full teardown — kill all sessions, remove markers"
+      echo "  name [<text>]       Set or clear session name (empty clears)"
+      echo "  help                Show this help"
+      echo ""
+      echo "Entrypoint: always use 'bin/airprompt <command>' — never call bin/airprompt-*.sh directly."
+      exit 0
+      ;;
+    *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, name, help" >&2; exit 1 ;;
   esac
   if [ -x "$SUB" ]; then
     case "$CMD" in
       on)
-        if [ -n "$REST" ]; then
-          exec bash "$SUB" --name "$REST"
+        if [ $# -gt 0 ] && [ "$1" = "--name" ]; then
+          exec bash "$SUB" "$@"      # user passed --name explicitly
+        elif [ $# -gt 0 ] && [ "$1" = "--help" -o "$1" = "-h" ]; then
+          exec bash "$SUB" --help    # delegate to sub-script help
+        elif [ $# -gt 0 ]; then
+          exec bash "$SUB" --name "$1"  # convenience: first positional → name
         else
           exec bash "$SUB"
         fi
         ;;
       name)
-        exec bash "$SUB" "$REST"
+        exec bash "$SUB" "$@"
         ;;
       *)
         exec bash "$SUB"
