@@ -1,0 +1,122 @@
+* { box-sizing: border-box; }
+body, html {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  background-color: #0d1117; color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* ── Session bar ─────────────────────────────── */
+#session-bar {
+  height: 44px; background: #0d1117; border-bottom: 1px solid #30363d;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px; flex-shrink: 0; cursor: pointer;
+  overflow: visible;
+}
+#session-bar:active { background: #161b22; }
+#session-label {
+  font-size: 16px; color: #58a6ff; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; flex: 1;
+  display: flex; flex-direction: column; gap: 0;
+}
+#session-label .name { color: #58a6ff; }
+#session-label .cwd { color: #c9d1d9; font-size: 11px; }
+#session-label.no-session { color: #8b949e; }
+#dictate-btn {
+  background: #1f6feb; color: #fff; border: 1px solid #388bfd;
+  border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+  flex-shrink: 0; margin-left: 8px; height: 32px;
+  display: flex; align-items: center; gap: 8px;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation; font-weight: 700;
+  box-shadow: 0 0 12px rgba(56, 139, 253, 0.7), 0 0 24px rgba(56, 139, 253, 0.3);
+  position: relative; z-index: 1;
+}
+#dictate-btn:active { background: #388bfd; box-shadow: 0 0 18px rgba(56, 139, 253, 0.8), 0 0 32px rgba(56, 139, 253, 0.4); }
+#dictate-btn.recording {
+  background: #dc2626; color: #fff; border-color: #dc2626;
+  box-shadow: 0 0 14px rgba(220, 38, 38, 0.7), 0 0 28px rgba(220, 38, 38, 0.35);
+}
+#dictate-btn:disabled {
+  background: #21262d; color: #8b949e; border-color: #30363d;
+  box-shadow: none; cursor: default;
+}
+
+/* ── Session modal ──────────────────────────── */
+#session-modal {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.8); z-index: 100;
+  flex-direction: column; align-items: center; justify-content: center;
+}
+#session-modal.open { display: flex; }
+#session-modal-content {
+  background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+  width: 90%; max-height: 70vh; overflow-y: auto; padding: 16px;
+}
+#session-modal-content h3 {
+  margin: 0 0 12px 0; font-size: 16px; color: #c9d1d9;
+}
+.session-item {
+  display: block; width: 100%; background: #21262d; border: 1px solid #30363d;
+  border-radius: 8px; padding: 14px; margin-bottom: 8px; cursor: pointer;
+  text-align: left; color: #c9d1d9; font-size: 16px;
+}
+.session-item:active { background: #30363d; }
+.session-item.active { border-color: #58a6ff; }
+.session-item .name { font-weight: 600; font-size: 18px; }
+.session-item .cwd { font-size: 14px; }
+.session-item .time { font-size: 13px; color: #8b949e; margin-top: 4px; }
+.session-empty { color: #8b949e; text-align: center; padding: 24px; }
+#modal-close {
+  display: block; width: 100%; background: #21262d; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 6px; padding: 10px;
+  font-size: 14px; cursor: pointer; margin-top: 8px;
+}
+
+/* ── Terminal ────────────────────────────────── */
+#terminal-container {
+  flex: 1; width: 100%; padding: 4px; overflow: hidden;
+}
+#terminal-container .xterm {
+  padding: 4px;
+}
+/* Force visible text on every renderer path (canvas + DOM) */
+#terminal-container .xterm-rows,
+#terminal-container .xterm-rows > div,
+#terminal-container .xterm-rows span,
+#terminal-container .xterm-screen {
+  color: #c9d1d9 !important;
+}
+/* Canvas fallback: light background behind canvas */
+#terminal-container .xterm canvas {
+  background-color: #0d1117 !important;
+}
+#terminal-container .xterm-text-layer {
+  color: #c9d1d9 !important;
+  mix-blend-mode: normal !important;
+}
+
+#mic-error {
+  color: #f85149; font-size: 11px; text-align: center;
+  margin-top: 4px; display: none;
+}
+
+/* ── Pull-to-refresh indicator ─────────────── */
+#pull-indicator {
+  position: fixed; top: 0; left: 0; right: 0; height: 0;
+  background: #0d1117; z-index: 200;
+  display: flex; align-items: flex-end; justify-content: center;
+  overflow: hidden; transition: height 0.2s;
+  pointer-events: none; touch-action: none;
+}
+#pull-indicator.showing { height: 56px; }
+#pull-indicator.refreshing { height: 56px; }
+#pull-spinner {
+  width: 24px; height: 24px; border: 2px solid #30363d;
+  border-top-color: #58a6ff; border-radius: 50%;
+  margin-bottom: 10px; opacity: 0;
+  transition: opacity 0.15s;
+}
+#pull-indicator.showing #pull-spinner,
+#pull-indicator.refreshing #pull-spinner { opacity: 1; }
+#pull-indicator.refreshing #pull-spinner { animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

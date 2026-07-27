@@ -57,7 +57,7 @@ done
 echo "Server running (PID $SERVER_PID)"
 
 # ── Test 1: Register → List → Unregister ────────────────────────────
-echo "[1/5] Full register → list → unregister"
+echo "[1/6] Full register → list → unregister"
 if $TMUX_OK; then
   SESSION_ID="integtest-$(date +%s)-$$-full"
   tmux new-session -d -s "airprompt-${SESSION_ID}" 2>/dev/null || true
@@ -86,7 +86,7 @@ else
 fi
 
 # ── Test 2: Two sessions, both visible ──────────────────────────────
-echo "[2/5] Two sessions register, both visible"
+echo "[2/6] Two sessions register, both visible"
 if $TMUX_OK; then
   ID_A="integtest-$(date +%s)-$$-a"
   ID_B="integtest-$(date +%s)-$$-b"
@@ -122,7 +122,7 @@ else
 fi
 
 # ── Test 3: Session unregistered on exit ────────────────────────────
-echo "[3/5] Session unregister removes from list"
+echo "[3/6] Session unregister removes from list"
 if $TMUX_OK; then
   ID_M="integtest-$(date +%s)-$$-marker"
   tmux new-session -d -s "airprompt-${ID_M}" 2>/dev/null || true
@@ -146,7 +146,7 @@ else
 fi
 
 # ── Test 4: Server survives invalid requests (no tmux needed) ───────
-echo "[4/5] Server survives invalid requests"
+echo "[4/6] Server survives invalid requests"
 INVALID=$(curl -s -o /dev/null -w "%{http_code}" \
   -X POST "http://localhost:${PORT}/api/sessions/register" \
   -H "Content-Type: application/json" \
@@ -161,7 +161,7 @@ else
 fi
 
 # ── Test 5: Duplicate registration rejected ─────────────────────────
-echo "[5/5] Duplicate registration rejected"
+echo "[5/6] Duplicate registration rejected"
 if $TMUX_OK; then
   ID_D="integtest-$(date +%s)-$$-dup"
   tmux new-session -d -s "airprompt-${ID_D}" 2>/dev/null || true
@@ -184,6 +184,41 @@ if $TMUX_OK; then
     -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_D}\"}" > /dev/null
 else
   skipped "tmux not available"
+fi
+
+# ── Test 6: Name update on already-registered session ───────────────
+echo "[6/6] Name update on already-registered session"
+if $TMUX_OK; then
+  ID_N="integtest-$(date +%s)-$$-name"
+  tmux new-session -d -s "airprompt-${ID_N}" 2>/dev/null || true
+
+  # Register with initial name
+  REG_N=$(curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"${ID_N}\",\"cwd\":\"${PROJECT_DIR}\",\"name\":\"first\"}")
+  if echo "$REG_N" | grep -q '"ok":true'; then ok "register with initial name"; else not_ok "register: $REG_N"; fi
+
+  # Verify initial name in GET
+  LIST_N=$(curl -s "http://localhost:${PORT}/api/sessions")
+  if echo "$LIST_N" | grep -q '"name":"first"'; then ok "initial name in list"; else not_ok "first name not in list: $LIST_N"; fi
+
+  # Simulate already-registered name update (what _name_update does)
+  PUT_N=$(curl -s -X PUT "http://localhost:${PORT}/api/sessions/name" \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"${ID_N}\",\"name\":\"second\"}")
+  if echo "$PUT_N" | grep -q '"ok":true'; then ok "name updated via PUT"; else not_ok "PUT name: $PUT_N"; fi
+
+  # Verify updated name in GET
+  LIST_N2=$(curl -s "http://localhost:${PORT}/api/sessions")
+  if echo "$LIST_N2" | grep -q '"name":"second"'; then ok "updated name in list"; else not_ok "updated name not in list: $LIST_N2"; fi
+
+  # Cleanup: kill tmux first (server guard rejects unregister if tmux alive)
+  tmux kill-session -t "airprompt-${ID_N}" 2>/dev/null || true
+  sleep 0.2
+  curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
+    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_N}\"}" > /dev/null
+else
+  skipped "tmux not available — 4 subtests skipped"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────

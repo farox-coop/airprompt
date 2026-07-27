@@ -74,8 +74,10 @@ const modalClose = document.getElementById('modal-close');
 const micError = document.getElementById('mic-error');
 
 // ── State ───────────────────────────────────────────────────────────
+const SESSION_STORAGE_KEY = 'airprompt-active-session';
 let sessions = [];
-let activeSessionId = null;
+let activeSessionId = localStorage.getItem(SESSION_STORAGE_KEY) || null;
+let _needPtySpawn = true;  // true when WS (re)connects — PTY not yet spawned
 
 // ── WebSocket with auto-reconnect ────────────────────────────────────
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -94,6 +96,7 @@ function connect() {
   ws.onopen = () => {
     log('info', 'ws connected');
     reconnectAttempts = 0;
+    _needPtySpawn = true;  // new connection — PTY must be re-spawned
     // Dismiss disconnect banner on reconnect
     if (window._airpromptDiscBanner) {
       if (window._airpromptDiscBanner.parentNode) {
@@ -164,14 +167,27 @@ function wsMessageHandler(event) {
     case 'session_list':
       sessions = msg.sessions || [];
       updateUI();
-      // Auto-select first session if none active
-      if (!activeSessionId && sessions.length > 0) {
+
+      // Valid active session with PTY already spawned — nothing to do
+      if (activeSessionId && sessions.some((s) => s.id === activeSessionId) && !_needPtySpawn) {
+        break;
+      }
+
+      // Try restore persisted session, else fall back to first
+      const storedId = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (storedId && sessions.some((s) => s.id === storedId)) {
+        selectSession(storedId);
+      } else if (sessions.length > 0) {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
         selectSession(sessions[0].id);
       }
       break;
     case 'error':
       console.error('Server error:', msg.message);
-      if (msg.message === 'Session not found') activeSessionId = null;
+      if (msg.message === 'Session not found') {
+        activeSessionId = null;
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+      }
       updateUI();
       break;
     default:
@@ -226,6 +242,8 @@ function updateUI() {
 function selectSession(id) {
   log('info', 'switching session', { from: activeSessionId, to: id });
   activeSessionId = id;
+  localStorage.setItem(SESSION_STORAGE_KEY, id);
+  _needPtySpawn = false;  // switch_session will trigger server-side PTY spawn
   send({ type: 'switch_session', sessionId: id });
   closeModal();
   updateUI();

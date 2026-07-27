@@ -124,24 +124,33 @@ SAFE_TMUX=$(printf '%s' "$TMUX_SESSION" | tr -cd 'a-zA-Z0-9_.-')
 MY_DIR="${SESSIONS_DIR}/${SAFE_TMUX}"
 ACTIVE_FILE="${MY_DIR}/active"
 
+# ── Helper: update session name via daemon API ───────────────────────
+# Used by idempotency path (active file exists) and already-registered
+# paths (409 from daemon). Writes name to disk only after API confirms.
+_name_update() {
+  local sid="$1" name_val="$2" my_dir="$3"
+  local esc
+  esc=$(printf '%s' "$name_val" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  local put_resp
+  put_resp=$(curl -s $CURL_OPTS -X PUT "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/name" \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"${sid}\",\"name\":\"${esc}\"}" 2>/dev/null || echo "")
+  if echo "$put_resp" | grep -q '"ok":true'; then
+    printf '%s\n' "$name_val" > "${my_dir}/name"
+    echo "Session name: $name_val"
+  else
+    echo "Warning: failed to update session name (daemon unreachable)" >&2
+  fi
+}
+
 # ── Idempotency: skip if already registered (same tmux session) ──────
 # Daemon recovers state from on-disk markers on startup, so a simple
 # file check is sufficient — no need to double-check with daemon API.
 if [ -f "$ACTIVE_FILE" ]; then
   if [ -n "$SESSION_NAME" ]; then
-    # Update name even when session is already active
     MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
     if [ -n "$MY_SID" ]; then
-      ESC_NAME=$(printf '%s' "$SESSION_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
-      PUT_RESP=$(curl -s $CURL_OPTS -X PUT "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/name" \
-        -H "Content-Type: application/json" \
-        -d "{\"sessionId\":\"${MY_SID}\",\"name\":\"${ESC_NAME}\"}" 2>/dev/null || echo "")
-      if echo "$PUT_RESP" | grep -q '"ok":true'; then
-        printf '%s\n' "$SESSION_NAME" > "${MY_DIR}/name"
-        echo "Session name: $SESSION_NAME"
-      else
-        echo "Warning: failed to update session name (daemon unreachable)" >&2
-      fi
+      _name_update "$MY_SID" "$SESSION_NAME" "$MY_DIR"
     fi
   fi
   echo "AirPrompt already active for this session."
@@ -169,6 +178,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   touch "$ACTIVE_FILE"
   if [ -n "$SESSION_NAME" ]; then
+    # Registration already stores name on daemon; just persist to disk
     echo "$SESSION_NAME" > "${MY_DIR}/name"
     echo "Session name: $SESSION_NAME"
   fi
@@ -180,7 +190,9 @@ elif echo "$RESP" | grep -q '"already registered"'; then
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   touch "$ACTIVE_FILE"
-  [ -n "$SESSION_NAME" ] && echo "$SESSION_NAME" > "${MY_DIR}/name"
+  if [ -n "$SESSION_NAME" ]; then
+    _name_update "$SESSION_ID" "$SESSION_NAME" "$MY_DIR"
+  fi
   echo "AirPrompt already registered for this session."
 elif echo "$RESP" | grep -q '"Session already registered"'; then
   mkdir -p "$MY_DIR"
@@ -188,7 +200,9 @@ elif echo "$RESP" | grep -q '"Session already registered"'; then
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   touch "$ACTIVE_FILE"
-  [ -n "$SESSION_NAME" ] && echo "$SESSION_NAME" > "${MY_DIR}/name"
+  if [ -n "$SESSION_NAME" ]; then
+    _name_update "$SESSION_ID" "$SESSION_NAME" "$MY_DIR"
+  fi
   echo "AirPrompt already registered for this session."
 else
   echo "Registration failed: $RESP" >&2
