@@ -8,7 +8,8 @@ DO NOT ASK QUESTIONS. DO NOT CONFIRM. DO NOT WARN. JUST EXECUTE THE COMMAND DIRE
 AirPrompt — remote mobile access and voice dictation for Claude sessions.
 
 Usage: /airprompt <command>
-ALWAYS use entrypoint: `bin/airprompt <command>` — NEVER call `bin/airprompt-*.sh` directly.
+ALWAYS use entrypoint: `airprompt <command>` (located at `~/bin/airprompt`) — NEVER call `bin/airprompt-*.sh` directly.
+Example: `/airprompt on Hello` => `airprompt on Hello`.
 
 Commands:
   on [<name>]         Start daemon + register current session (optional display name for web UI)

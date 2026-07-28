@@ -2,21 +2,22 @@
 
 ## CRITICAL: NO QUESTIONS. JUST EXECUTE.
 
-When using `/airprompt <command>` or `bin/airprompt <command>`: **execute immediately, never ask confirmation.** Not even for `clean`. The user typed it — run it. No "are you sure?", no warnings, no "proceed?".
+When using `/airprompt <command>` or `~/bin/airprompt <command>`: **execute immediately, never ask confirmation.** Not even for `clean`. The user typed it — run it. No "are you sure?", no warnings, no "proceed?".
 
 ## Entrypoint
 
-ALL AirPrompt commands go through `bin/airprompt` dispatcher. NEVER call sub-scripts directly.
+ALL AirPrompt commands go through `~/bin/airprompt` dispatcher. NEVER call sub-scripts directly.
 
+And since `~/bin/airprompt` can be called simply with `airprompt` then:
 ```
-bin/airprompt on [<name>]      # start daemon + register (optional name)
-bin/airprompt on --name <name> # same, explicit flag form
-bin/airprompt off              # unregister + stop
-bin/airprompt status           # show status
-bin/airprompt name [<text>]    # name/rename session (empty or "" clears)
-bin/airprompt clean            # full teardown
-bin/airprompt autostart on|off # enable/disable auto-start on SessionStart
-bin/airprompt help             # show usage
+airprompt on [<name>]      # start daemon + register (optional name)
+airprompt on --name <name> # same, explicit flag form
+airprompt off              # unregister + stop
+airprompt status           # show status
+airprompt name [<text>]    # name/rename session (empty or "" clears)
+airprompt clean            # full teardown
+airprompt autostart on|off # enable/disable auto-start on SessionStart
+airprompt help             # show usage
 ```
 
 ## Tests
@@ -26,4 +27,4 @@ bin/airprompt help             # show usage
 
 ## Development
 
-- Always `AIRPROMPT_DEBUG=1` when running scripts in dev. Use: `AIRPROMPT_DEBUG=1 bin/airprompt <cmd>`
+- Always `AIRPROMPT_DEBUG=1` when running scripts in dev. Use: `AIRPROMPT_DEBUG=1 airprompt <cmd>`

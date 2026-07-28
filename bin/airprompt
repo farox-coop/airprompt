@@ -38,7 +38,7 @@ for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
       echo "  autostart on|off    Auto-start AirPrompt on Claude session start"
       echo "  help                Show this help"
       echo ""
-      echo "Entrypoint: always use 'bin/airprompt <command>' — never call bin/airprompt-*.sh directly."
+      echo "Entrypoint: always use 'airprompt <command>' — never call bin/airprompt-*.sh directly."
       exit 0
       ;;
     *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, name, autostart, help" >&2; exit 1 ;;

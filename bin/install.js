@@ -250,23 +250,29 @@ async function installClaude(ctx) {
     note('  dependencies already installed');
   }
 
-  // 2b. Create ~/.local/bin/airprompt symlink (PATH lookup for /airprompt command)
+  // 2b. Create ~/bin/airprompt + ~/bin/airprompt-claude symlinks
   {
-    const localBin = path.join(os.homedir(), '.local', 'bin');
-    const linkPath = path.join(localBin, 'airprompt');
-    const targetScript = path.join(targetDir, 'bin', 'airprompt');
+    const homeBin = path.join(os.homedir(), 'bin');
+    const entries = [
+      { name: 'airprompt',        target: path.join(targetDir, 'bin', 'airprompt') },
+      { name: 'airprompt-claude',  target: path.join(targetDir, 'bin', 'airprompt-claude') },
+    ];
     if (!opts.dryRun) {
       try {
-        fs.mkdirSync(localBin, { recursive: true });
-        // Remove existing symlink or stale file before creating new one
-        try { fs.unlinkSync(linkPath); } catch (_) {}
-        fs.symlinkSync(targetScript, linkPath);
-        process.stdout.write(`  symlink: ${linkPath} → ${targetScript}\n`);
+        fs.mkdirSync(homeBin, { recursive: true });
+        for (const { name, target } of entries) {
+          const linkPath = path.join(homeBin, name);
+          try { fs.unlinkSync(linkPath); } catch (_) {}
+          fs.symlinkSync(target, linkPath);
+          process.stdout.write(`  symlink: ${linkPath} → ${target}\n`);
+        }
       } catch (e) {
-        note(`  could not create ${linkPath}: ${e.message} (non-fatal)`);
+        note(`  could not create ~/bin symlinks: ${e.message} (non-fatal)`);
       }
     } else {
-      note(`  would symlink ${linkPath} → ${targetScript}`);
+      for (const { name, target } of entries) {
+        note(`  would symlink ${path.join(homeBin, name)} → ${target}`);
+      }
     }
   }
 
@@ -512,10 +518,13 @@ function uninstall(ctx) {
     }
   }
 
-  // 3b. Remove ~/.local/bin/airprompt symlink
+  // 3b. Remove ~/bin/airprompt + ~/bin/airprompt-claude symlinks
   {
-    const linkPath = path.join(os.homedir(), '.local', 'bin', 'airprompt');
-    if (fs.existsSync(linkPath)) {
+    const homeBin = path.join(os.homedir(), 'bin');
+    const entries = ['airprompt', 'airprompt-claude'];
+    for (const name of entries) {
+      const linkPath = path.join(homeBin, name);
+      if (!fs.existsSync(linkPath)) continue;
       try {
         const st = fs.lstatSync(linkPath);
         if (st.isSymbolicLink()) {

@@ -36,7 +36,7 @@ tmux new-session -s claude && claude
 
 ## Commands
 
-All commands go through the unified dispatcher: `bin/airprompt <command>` (`/airprompt <command>` inside Claude Code).
+All commands go through the unified dispatcher: `airprompt <command>` (`/airprompt <command>` inside Claude Code).
 
 | Command | Action |
 |---|---|
@@ -49,7 +49,7 @@ All commands go through the unified dispatcher: `bin/airprompt <command>` (`/air
 | `autostart on|off` | Auto-start AirPrompt on Claude session start |
 | `help` | Print usage |
 
-**Always use `bin/airprompt <command>`** — never call `bin/airprompt-*.sh` directly. Those are internal scripts.
+**Always use `airprompt <command>`** — never call `bin/airprompt-*.sh` directly. Those are internal scripts.
 
 ## Make Targets
 
