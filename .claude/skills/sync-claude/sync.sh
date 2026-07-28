@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="/home/diego/projects/airprompt"
-CACHE_BASE="$HOME/.claude/plugins/cache/diegomanuel-airprompt/airprompt"
+REPO="$(git rev-parse --show-toplevel 2>/dev/null || { echo "ERROR: not inside a git repo" >&2; exit 1; })"
+CACHE_BASE=$(set +o pipefail; ls -d "$HOME/.claude/plugins/cache/"*-airprompt/airprompt 2>/dev/null | head -1 || true)
+
+if [ -z "$CACHE_BASE" ]; then
+  echo "FAIL: no plugin cache found at \$HOME/.claude/plugins/cache/*-airprompt/airprompt" >&2
+  echo "       Install the plugin first: claude plugin marketplace add <publisher>/airprompt" >&2
+  exit 1
+fi
 
 # Discover cache dirs
 CACHES=($(ls -d "$CACHE_BASE"/*/ 2>/dev/null || true))

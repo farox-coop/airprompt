@@ -42,6 +42,7 @@ lint:
 test-unit:
 	@node --test test/unit/*.test.js
 	@bash test/unit/statusline.test.sh
+	@bash test/unit/sync.test.sh
 
 test-integration:
 	@bash test/integration/run.sh

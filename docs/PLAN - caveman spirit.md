@@ -483,12 +483,12 @@ npm install -g airprompt && airprompt install
 ## Implementation Steps (Ordered)
 
 ### Step 1: Copy `install.sh` + `install.ps1` from caveman
-- Copy `/home/diego/projects/caveman/install.sh` → `install.sh`
-- Copy `/home/diego/projects/caveman/install.ps1` → `install.ps1`
+- Copy `../caveman/install.sh` → `install.sh`
+- Copy `../caveman/install.ps1` → `install.ps1`
 - Change 3 things in each: `REPO`/`$Repo`, curl-pipe fallback (npx → git clone + exec), error prefix (`caveman:` → `airprompt:`)
 
 ### Step 2: Copy `bin/lib/settings.js` from caveman
-- Copy `/home/diego/projects/caveman/bin/lib/settings.js` → `bin/lib/settings.js`
+- Copy `../caveman/bin/lib/settings.js` → `bin/lib/settings.js`
 - Change `MANAGED_HOOK_BASENAMES` Set to airprompt's hook filenames
 - Everything else stays verbatim — JSONC parser, atomic writes, validateHookFields, pruneOrphanedManagedHooks. All already tested.
 

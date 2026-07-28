@@ -11,7 +11,7 @@ Sync AirPrompt source files from this repo to `~/.claude/hooks/`, `~/.claude/com
 Run:
 
 ```bash
-bash /home/diego/projects/airprompt/.claude/skills/sync-claude/sync.sh
+bash .claude/skills/sync-claude/sync.sh
 ```
 
 ## What it syncs

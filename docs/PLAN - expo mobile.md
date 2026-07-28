@@ -217,7 +217,7 @@ Replicates `index.html` terminal + controls:
 
 ```
 ┌─────────────────────────────┐
-│ SessionBar: /home/diego/... │ ← tap opens SessionModal
+│ SessionBar: ~/projects/...  │ ← tap opens SessionModal
 ├─────────────────────────────┤
 │                             │
 │ TerminalView                │
