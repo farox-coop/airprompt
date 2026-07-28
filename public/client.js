@@ -419,28 +419,156 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 let recognition = null;
 let isListening = false;
 
+// ── Language management ──────────────────────────────────────────────
+const BASE_LANGS = [
+  { code: 'en-US', name: 'English (US)' },
+  { code: 'es-AR', name: 'Español (AR)' },
+];
+
+const dictateInterim = document.getElementById('dictate-interim');
+const dictateFlag   = document.getElementById('dictate-flag');
+const langDropdown  = document.getElementById('lang-dropdown');
+const langList      = document.getElementById('lang-list');
+const langCancel    = document.getElementById('lang-cancel');
+
+function langToFlag(code) {
+  const parts = code.split('-');
+  const region = parts[parts.length - 1].toUpperCase();
+  if (!region || region.length !== 2) return code.toUpperCase();
+  try {
+    return String.fromCodePoint(
+      0x1F1E6 + region.charCodeAt(0) - 65,
+      0x1F1E6 + region.charCodeAt(1) - 65
+    );
+  } catch {
+    return code.toUpperCase();
+  }
+}
+
+function normalizeLang(code) {
+  if (!code || !code.includes('-')) {
+    const map = { en: 'en-US', es: 'es-AR', fr: 'fr-FR', de: 'de-DE',
+                  pt: 'pt-BR', it: 'it-IT', ja: 'ja-JP', zh: 'zh-CN', ko: 'ko-KR' };
+    code = map[code] || (code || 'en-US');
+  }
+  return code;
+}
+
+let currentLang = normalizeLang(
+  localStorage.getItem('airprompt-lang') || navigator.language || 'en-US'
+);
+
+function resolveLanguageList() {
+  const langs = [...BASE_LANGS];
+  const addIfMissing = (code) => {
+    if (!langs.some(l => l.code === code)) {
+      langs.unshift({ code, name: code + ' (browser)' });
+    }
+  };
+  const browserLang = navigator.language;
+  if (browserLang) addIfMissing(normalizeLang(browserLang));
+  // Also include currentLang if it came from localStorage and differs
+  if (currentLang && !langs.some(l => l.code === currentLang)) {
+    langs.unshift({ code: currentLang, name: currentLang + ' (saved)' });
+  }
+  return langs;
+}
+
+function buildLangList() {
+  const langs = resolveLanguageList();
+  langList.innerHTML = '';
+  langs.forEach(lang => {
+    const el = document.createElement('div');
+    el.className = 'lang-option' + (lang.code === currentLang ? ' active' : '');
+    el.innerHTML = '<span class="lang-flag">' + langToFlag(lang.code) +
+                   '</span> ' + lang.name;
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setLang(lang.code);
+      hideLangDropdown();
+    });
+    langList.appendChild(el);
+  });
+}
+
+function updateFlag() {
+  dictateFlag.textContent = langToFlag(currentLang);
+}
+
+let _langSwitchGen = 0;
+
+function setLang(code) {
+  currentLang = code;
+  localStorage.setItem('airprompt-lang', code);
+  const wasListening = isListening;
+  const gen = ++_langSwitchGen;
+  if (wasListening) {
+    isListening = false;
+    recognition.stop();
+  }
+  recognition.lang = code;
+  updateFlag();
+  buildLangList();
+  if (wasListening) {
+    setTimeout(() => {
+      // Only restart if no newer lang switch happened
+      if (gen !== _langSwitchGen) return;
+      isListening = true;
+      recognition.start();
+      dictateBtn.classList.add('recording');
+      dictateIcon.textContent = '🔴';
+      dictateLabel.textContent = 'Recording';
+    }, 200);
+  }
+}
+
+function showLangDropdown() {
+  buildLangList();
+  langDropdown.classList.remove('dropdown-hidden');
+}
+
+function hideLangDropdown() {
+  langDropdown.classList.add('dropdown-hidden');
+}
+
+// ── Recognition setup ───────────────────────────────────────────────
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
-  recognition.lang = 'en-US';
-  recognition.interimResults = false;
+  recognition.lang = currentLang;
+  recognition.interimResults = true;
   recognition.continuous = true;
 
   recognition.onresult = (event) => {
-    const transcript = event.results[event.results.length - 1][0].transcript;
-    if (transcript.trim()) {
-      send({ type: 'input', data: transcript });
+    const result = event.results[event.results.length - 1];
+    const transcript = result[0].transcript;
+    if (result.isFinal) {
+      if (transcript.trim()) {
+        send({ type: 'input', data: transcript });
+      }
+      dictateInterim.textContent = '';
+      dictateInterim.classList.remove('visible');
+    } else {
+      dictateInterim.textContent = transcript;
+      dictateInterim.classList.add('visible');
     }
   };
 
   recognition.onerror = (e) => {
     isListening = false;
     dictateBtn.classList.remove('recording');
+    dictateInterim.textContent = '';
+    dictateInterim.classList.remove('visible');
     if (e.error === 'not-allowed') {
       dictateBtn.disabled = true;
       dictateIcon.textContent = '🔇';
       dictateLabel.textContent = 'Dictate';
       micError.style.display = 'block';
       micError.textContent = 'Voice needs HTTPS or localhost. Chrome blocks mic on HTTP LAN IP. Use keyboard below.';
+    } else if (e.error === 'language-not-supported') {
+      setLang('en-US');
+      micError.style.display = 'block';
+      micError.textContent = 'Language not supported. Falling back to English.';
+      setTimeout(() => { micError.style.display = 'none'; }, 3000);
     } else {
       dictateIcon.textContent = '🎤';
       dictateLabel.textContent = 'Dictate';
@@ -450,6 +578,9 @@ if (SpeechRecognition) {
   recognition.onend = () => {
     if (isListening) recognition.start();
   };
+
+  updateFlag();
+  buildLangList();
 } else {
   dictateIcon.textContent = '🚫';
   dictateLabel.textContent = 'Dictate';
@@ -459,13 +590,18 @@ if (SpeechRecognition) {
 function toggleDictation(e) {
   if (e) { e.preventDefault(); e.stopPropagation(); }
   if (!recognition) return;
+  hideLangDropdown();
 
   if (isListening) {
     isListening = false;
+    const pending = dictateInterim.textContent.trim();
     recognition.stop();
     dictateBtn.classList.remove('recording');
     dictateIcon.textContent = '🎤';
     dictateLabel.textContent = 'Dictate';
+    dictateInterim.textContent = '';
+    dictateInterim.classList.remove('visible');
+    if (pending) send({ type: 'input', data: pending });
   } else {
     isListening = true;
     recognition.start();
@@ -475,7 +611,41 @@ function toggleDictation(e) {
   }
 }
 
-dictateBtn.addEventListener('click', toggleDictation);
+// ── Pointer events: tap=toggle, long-press=language menu ────────────
+let longPressTimer = null;
+let longPressFired = false;
+
+dictateBtn.addEventListener('pointerdown', (e) => {
+  longPressFired = false;
+  clearTimeout(longPressTimer);
+  longPressTimer = setTimeout(() => {
+    longPressFired = true;
+    if (navigator.vibrate) navigator.vibrate(15);
+    showLangDropdown();
+  }, 500);
+});
+
+dictateBtn.addEventListener('pointerup', (e) => {
+  clearTimeout(longPressTimer);
+  if (!longPressFired) toggleDictation(e);
+});
+
+dictateBtn.addEventListener('pointerleave', () => clearTimeout(longPressTimer));
+dictateBtn.addEventListener('pointercancel', () => clearTimeout(longPressTimer));
+
+// Close dropdown on outside click
+document.addEventListener('click', (e) => {
+  if (!langDropdown.classList.contains('dropdown-hidden') &&
+      !dictateBtn.contains(e.target) &&
+      !langDropdown.contains(e.target)) {
+    hideLangDropdown();
+  }
+});
+
+langCancel.addEventListener('click', (e) => {
+  e.stopPropagation();
+  hideLangDropdown();
+});
 
 
 // ── Refresh button ────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ body, html {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 12px; flex-shrink: 0; cursor: pointer;
   overflow: visible;
+  position: relative;
 }
 #session-bar:active { background: #161b22; }
 #session-label {
@@ -119,6 +120,77 @@ body, html {
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+#dictate-flag {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 0 2px rgba(0,0,0,0.5);
+  z-index: 2;
+}
+
+/* ── Language dropdown ─────────────────────────── */
+#lang-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  min-width: 180px;
+  z-index: 200;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  transition: opacity 0.15s, transform 0.15s;
+}
+#lang-dropdown.dropdown-hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+}
+#lang-list { max-height: 240px; overflow-y: auto; }
+.lang-option {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 10px 14px; cursor: pointer;
+  font-size: 14px; color: #c9d1d9; border: none;
+  background: transparent; text-align: left;
+  user-select: none; -webkit-user-select: none;
+}
+.lang-option:active, .lang-option:hover { background: #1f6feb; }
+.lang-option.active { background: #1f6feb33; border-left: 3px solid #58a6ff; }
+.lang-flag { font-size: 16px; }
+#lang-cancel {
+  display: block; width: 100%; background: #21262d; color: #8b949e;
+  border: none; border-top: 1px solid #30363d; padding: 10px;
+  font-size: 13px; cursor: pointer;
+}
+#lang-cancel:active { background: #30363d; }
+
+/* ── Dictation interim text ────────────────────── */
+#dictate-interim {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(13, 17, 23, 0.95);
+  color: #c9d1d9;
+  padding: 10px 16px;
+  font-size: 14px;
+  text-align: center;
+  z-index: 300;
+  opacity: 0;
+  transform: translateY(100%);
+  transition: opacity 0.2s, transform 0.2s;
+  min-height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  border-top: 1px solid #30363d;
+}
+#dictate-interim.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
 
 #mic-error {
   color: #f85149; font-size: 11px; text-align: center;
