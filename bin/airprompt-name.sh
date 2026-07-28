@@ -9,7 +9,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "Usage: bin/airprompt name [<text>]"
   echo ""
   echo "  Set display name for current session (shown in web UI session list)."
-  echo "  Empty text clears the name."
+  echo "  Empty text or \"\" clears the name."
   echo ""
   echo "This is an internal script. Use 'bin/airprompt name <text>' directly."
   exit 0
@@ -20,6 +20,10 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
 
 NAME="${1:-}"
+# Handle explicit empty-string marker: /airprompt name "" → clear
+if [ "$NAME" = '""' ]; then
+  NAME=""
+fi
 
 # ── Detect protocol ──────────────────────────────────────────────────
 CERT_FILE="${CONFIG_DIR}/airprompt-cert.pem"

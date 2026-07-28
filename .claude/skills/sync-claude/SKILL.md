@@ -25,7 +25,7 @@ fi
 echo "=== Syncing to ${#CACHES[@]} cache dirs + ~/.claude/hooks/ + ~/.claude/commands/ ==="
 
 HOOKS=(airprompt-activate.js airprompt-deactivate.js airprompt-statusline.sh)
-BINS=(airprompt airprompt-on.sh airprompt-off.sh airprompt-name.sh airprompt-clean.sh airprompt-status.sh airprompt-attach.sh install.js)
+BINS=(airprompt airprompt-on.sh airprompt-off.sh airprompt-name.sh airprompt-clean.sh airprompt-status.sh airprompt-attach.sh airprompt-autostart.sh install.js)
 
 # Copy to caches
 for d in "${CACHES[@]}"; do

@@ -44,8 +44,9 @@ All commands go through the unified dispatcher: `bin/airprompt <command>` (`/air
 | `on --name <name>` | Same, explicit flag form |
 | `off` | Unregister current session + hide statusline badge |
 | `status` | Show daemon status and all active sessions |
-| `name [<text>]` | Set display name for current session (empty clears it) |
+| `name [<text>]` | Set display name for current session (empty or "" clears it) |
 | `clean` | Full teardown — kill daemon, remove all tmux sessions and markers |
+| `autostart on|off` | Auto-start AirPrompt on Claude session start |
 | `help` | Print usage |
 
 **Always use `bin/airprompt <command>`** — never call `bin/airprompt-*.sh` directly. Those are internal scripts.
@@ -74,9 +75,10 @@ Chrome/Android block `SpeechRecognition` over plain HTTP to LAN IPs. AirPrompt a
 
 - `/airprompt on` — Register session and enable remote access
 - `/airprompt off` — Unregister session and hide statusline badge
-- `/airprompt status` — List all active sessions
-- `/airprompt name <text>` — Set session display name
-- `/airprompt clean` — Full teardown, start fresh
+- `/airprompt status` — Show daemon status and all active sessions
+- `/airprompt name <text>` — Set session display name (empty or "" clears)
+- `/airprompt autostart on|off` — Auto-start on Claude session start
+- `/airprompt clean` — Full teardown: kill daemon, remove all sessions and markers
 - `/airprompt help` — Print usage
 
 ## License

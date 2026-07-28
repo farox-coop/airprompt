@@ -21,8 +21,11 @@ const PID_FILE = '/tmp/airprompt-server.pid';
 const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
 
 // Resolve install dir — prefer CLAUDE_PLUGIN_ROOT (plugin installed),
-// fallback to ~/.airprompt/ (standalone manual install).
-const INSTALL_DIR = process.env.CLAUDE_PLUGIN_ROOT || AIRPROMPT_DIR;
+// fallback to ~/.airprompt/ (standalone manual install),
+// then ~/projects/airprompt/ (dev checkout, same as dispatcher and autostart).
+const DEV_DIR = path.join(os.homedir(), 'projects', 'airprompt');
+const INSTALL_DIR = process.env.CLAUDE_PLUGIN_ROOT
+  || (fs.existsSync(path.join(AIRPROMPT_DIR, 'server.js')) ? AIRPROMPT_DIR : DEV_DIR);
 
 // Detect TLS
 const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');

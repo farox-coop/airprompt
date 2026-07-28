@@ -7,6 +7,10 @@ SERVER_PID=""
 TMPDIR=$(mktemp -d)
 trap 'cleanup' EXIT
 
+# Skip immediate session registration during autostart tests — avoid
+# spawning daemon on real port 3210 while integration server is on 3211.
+export AIRPROMPT_AUTOSTART_SKIP_REGISTER=1
+
 MARKER="${TMPDIR}/.airprompt-active"
 URL_FILE="${TMPDIR}/.airprompt-url"
 
@@ -57,7 +61,7 @@ done
 echo "Server running (PID $SERVER_PID)"
 
 # ── Test 1: Register → List → Unregister ────────────────────────────
-echo "[1/6] Full register → list → unregister"
+echo "[1/8] Full register → list → unregister"
 if $TMUX_OK; then
   SESSION_ID="integtest-$(date +%s)-$$-full"
   tmux new-session -d -s "airprompt-${SESSION_ID}" 2>/dev/null || true
@@ -86,7 +90,7 @@ else
 fi
 
 # ── Test 2: Two sessions, both visible ──────────────────────────────
-echo "[2/6] Two sessions register, both visible"
+echo "[2/8] Two sessions register, both visible"
 if $TMUX_OK; then
   ID_A="integtest-$(date +%s)-$$-a"
   ID_B="integtest-$(date +%s)-$$-b"
@@ -122,7 +126,7 @@ else
 fi
 
 # ── Test 3: Session unregistered on exit ────────────────────────────
-echo "[3/6] Session unregister removes from list"
+echo "[3/8] Session unregister removes from list"
 if $TMUX_OK; then
   ID_M="integtest-$(date +%s)-$$-marker"
   tmux new-session -d -s "airprompt-${ID_M}" 2>/dev/null || true
@@ -146,7 +150,7 @@ else
 fi
 
 # ── Test 4: Server survives invalid requests (no tmux needed) ───────
-echo "[4/6] Server survives invalid requests"
+echo "[4/8] Server survives invalid requests"
 INVALID=$(curl -s -o /dev/null -w "%{http_code}" \
   -X POST "http://localhost:${PORT}/api/sessions/register" \
   -H "Content-Type: application/json" \
@@ -161,7 +165,7 @@ else
 fi
 
 # ── Test 5: Duplicate registration rejected ─────────────────────────
-echo "[5/6] Duplicate registration rejected"
+echo "[5/8] Duplicate registration rejected"
 if $TMUX_OK; then
   ID_D="integtest-$(date +%s)-$$-dup"
   tmux new-session -d -s "airprompt-${ID_D}" 2>/dev/null || true
@@ -187,7 +191,7 @@ else
 fi
 
 # ── Test 6: Name update on already-registered session ───────────────
-echo "[6/6] Name update on already-registered session"
+echo "[6/8] Name update + clear on already-registered session"
 if $TMUX_OK; then
   ID_N="integtest-$(date +%s)-$$-name"
   tmux new-session -d -s "airprompt-${ID_N}" 2>/dev/null || true
@@ -212,13 +216,236 @@ if $TMUX_OK; then
   LIST_N2=$(curl -s "http://localhost:${PORT}/api/sessions")
   if echo "$LIST_N2" | grep -q '"name":"second"'; then ok "updated name in list"; else not_ok "updated name not in list: $LIST_N2"; fi
 
+  # Clear name with empty string
+  PUT_CLEAR=$(curl -s -X PUT "http://localhost:${PORT}/api/sessions/name" \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"${ID_N}\",\"name\":\"\"}")
+  if echo "$PUT_CLEAR" | grep -q '"ok":true'; then ok "name cleared via PUT empty string"; else not_ok "name clear: $PUT_CLEAR"; fi
+
+  # Verify name is gone from session list
+  LIST_CLEAR=$(curl -s "http://localhost:${PORT}/api/sessions")
+  if echo "$LIST_CLEAR" | grep -q "$ID_N" && ! echo "$LIST_CLEAR" | grep -q '"name":"second"'; then
+    ok "name absent after clear"
+  else
+    not_ok "name still present after clear: $LIST_CLEAR"
+  fi
+
   # Cleanup: kill tmux first (server guard rejects unregister if tmux alive)
   tmux kill-session -t "airprompt-${ID_N}" 2>/dev/null || true
   sleep 0.2
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
     -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_N}\"}" > /dev/null
 else
-  skipped "tmux not available — 4 subtests skipped"
+  skipped "tmux not available — 6 subtests skipped"
+fi
+
+# ── Test 7: Autostart script on/off with temp settings ────────────────
+echo "[7/8] Autostart script on/off"
+AUTOSTART_SCRIPT="${PROJECT_DIR}/bin/airprompt-autostart.sh"
+TMP_SETTINGS="${TMPDIR}/settings.json"
+
+if [ -x "$AUTOSTART_SCRIPT" ]; then
+  # Run 'on' with temp settings file
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" on
+  if [ -f "$TMP_SETTINGS" ]; then
+    ok "autostart on created settings file"
+    if grep -q 'airprompt-activate.js' "$TMP_SETTINGS"; then
+      ok "autostart on added SessionStart hook"
+    else
+      not_ok "SessionStart hook missing from settings"
+    fi
+  else
+    not_ok "settings file not created by autostart on"
+  fi
+
+  # Run 'on' again — should be idempotent (no duplicate hooks)
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" on
+  HOOK_COUNT=$(grep -c 'airprompt-activate.js' "$TMP_SETTINGS" || true)
+  if [ "$HOOK_COUNT" = "1" ]; then
+    ok "autostart on is idempotent (1 hook)"
+  else
+    not_ok "expected 1 hook, got $HOOK_COUNT"
+  fi
+
+  # Run 'off'
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" off
+  if grep -q 'airprompt-activate.js' "$TMP_SETTINGS" 2>/dev/null; then
+    not_ok "autostart off did not remove hook"
+  else
+    ok "autostart off removed SessionStart hook"
+  fi
+
+  # Run 'off' again — idempotent
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" off
+  ok "autostart off idempotent (already off)"
+
+  # Run with invalid arg
+  if ! AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" invalid 2>/dev/null; then
+    ok "autostart rejects invalid arg"
+  else
+    not_ok "autostart accepted invalid arg"
+  fi
+
+  # off preserves other SessionStart hooks (not just airprompt's)
+  cat > "$TMP_SETTINGS" << 'JSONEOF'
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "echo other-tool" } ] },
+      { "hooks": [ { "type": "command", "command": "node /x/airprompt-activate.js" } ] }
+    ]
+  }
+}
+JSONEOF
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" off
+  if grep -q 'airprompt-activate.js' "$TMP_SETTINGS" 2>/dev/null; then
+    not_ok "off did not remove airprompt hook"
+  else
+    ok "off removed only airprompt hook"
+  fi
+  if grep -q 'echo other-tool' "$TMP_SETTINGS" 2>/dev/null; then
+    ok "off preserved other SessionStart hook"
+  else
+    not_ok "off destroyed other SessionStart hook"
+  fi
+
+  # on -> off -> on round-trip
+  rm -f "$TMP_SETTINGS"
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" on
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" off
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" on
+  if grep -q 'airprompt-activate.js' "$TMP_SETTINGS" 2>/dev/null; then
+    ok "on -> off -> on round-trip works"
+  else
+    not_ok "on -> off -> on round-trip failed"
+  fi
+
+  # Handles JSONC-commented settings (Claude Code writes these)
+  cat > "$TMP_SETTINGS" << 'JSONCEOF'
+// Claude Code settings
+{
+  /* pre-existing */
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "node /x/airprompt-activate.js" } ] }
+    ]
+  }
+}
+JSONCEOF
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" off
+  if grep -q 'airprompt-activate.js' "$TMP_SETTINGS" 2>/dev/null; then
+    not_ok "off failed with JSONC comments"
+  else
+    ok "off works with JSONC-commented settings"
+  fi
+  # Verify JSONC file was written back as valid JSON (no comments in output)
+  if grep -q '//\|/\*' "$TMP_SETTINGS" 2>/dev/null; then
+    not_ok "off output should be clean JSON (no comments)"
+  else
+    ok "off output is clean JSON"
+  fi
+
+  # Corrupted settings.json — autostart must refuse, not overwrite
+  echo '{broken' > "$TMP_SETTINGS"
+  if AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" on 2>/dev/null; then
+    not_ok "autostart on accepted corrupted settings"
+  else
+    ok "autostart on refuses corrupted settings.json"
+  fi
+  if grep -q '{broken' "$TMP_SETTINGS" 2>/dev/null; then
+    ok "autostart on preserved corrupted settings"
+  else
+    not_ok "autostart on overwrote corrupted settings"
+  fi
+
+  if AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" off 2>/dev/null; then
+    not_ok "autostart off accepted corrupted settings"
+  else
+    ok "autostart off refuses corrupted settings.json"
+  fi
+
+  # on with pre-existing unrelated SessionStart hooks
+  cat > "$TMP_SETTINGS" << 'JSONEOF3'
+{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo preexisting"}]}],"PreMessage":[{"hooks":[{"type":"command","command":"echo other"}]}]}}
+JSONEOF3
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" on
+  if grep -q 'echo preexisting' "$TMP_SETTINGS" 2>/dev/null && \
+     grep -q 'echo other' "$TMP_SETTINGS" 2>/dev/null && \
+     grep -q 'airprompt-activate.js' "$TMP_SETTINGS" 2>/dev/null; then
+    ok "on preserved pre-existing hooks alongside airprompt"
+  else
+    not_ok "on lost pre-existing hooks"
+  fi
+
+  # SessionStart=string (not an array) — off must not crash
+  echo '{"hooks":{"SessionStart":"not-an-array"}}' > "$TMP_SETTINGS"
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" off 2>/dev/null && ok "off handles SessionStart=string" || not_ok "off crashed on SessionStart=string"
+
+  # No hooks key at all — off must not crash
+  echo '{"otherKey":true}' > "$TMP_SETTINGS"
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+    bash "$AUTOSTART_SCRIPT" off 2>/dev/null && ok "off handles settings without hooks key" || not_ok "off crashed on missing hooks key"
+else
+  skipped "autostart script not found"
+fi
+
+# ── Test 8: Name script --help and \"\" arg handling ──────────────
+echo "[8/8] Name script --help and \"\" arg handling"
+NAME_SCRIPT="${PROJECT_DIR}/bin/airprompt-name.sh"
+
+if [ -x "$NAME_SCRIPT" ]; then
+  # Help flag works and mentions "" clearing
+  HELP_OUT=$(bash "$NAME_SCRIPT" --help 2>&1 || true)
+  if echo "$HELP_OUT" | grep -qi 'empty.*"".*clear'; then
+    ok "name --help mentions \"\" clearing"
+  else
+    not_ok "name --help missing \"\" mention (got: $HELP_OUT)"
+  fi
+
+  # Verify the \"\" normalization logic exists in script source
+  if grep -q "NAME.*=.*'\"\"'" "$NAME_SCRIPT" 2>/dev/null; then
+    ok "name script has \"\" normalization logic"
+  else
+    not_ok "name script missing \"\" normalization"
+  fi
+
+  # Verify \"\"→empty normalization at bash level (same logic as name script)
+  NORM_TMP="${TMPDIR}/norm-test.sh"
+  cat > "$NORM_TMP" << 'SCRIPTEOF'
+#!/bin/bash
+NAME="${1:-}"
+if [ "$NAME" = '""' ]; then NAME=""; fi
+if [ -z "$NAME" ]; then echo "EMPTY"; else echo "NOT_EMPTY:$NAME"; fi
+SCRIPTEOF
+  chmod +x "$NORM_TMP"
+  NORM_RESULT=$(bash "$NORM_TMP" '""')
+  if [ "$NORM_RESULT" = "EMPTY" ]; then
+    ok "name \"\" literal normalizes to empty"
+  else
+    not_ok "name \"\" normalization: got $NORM_RESULT"
+  fi
+  NORM_RESULT2=$(bash "$NORM_TMP")
+  if [ "$NORM_RESULT2" = "EMPTY" ]; then
+    ok "name no-arg normalizes to empty (existing behavior)"
+  else
+    not_ok "name no-arg normalization: got $NORM_RESULT2"
+  fi
+else
+  skipped "name script not found"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────

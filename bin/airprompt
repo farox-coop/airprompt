@@ -15,11 +15,12 @@ for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
   [ -d "$d" ] || continue
   SUB=""
   case "$CMD" in
-    on)     SUB="$d/bin/airprompt-on.sh";;
-    off)    SUB="$d/bin/airprompt-off.sh";;
-    status) SUB="$d/bin/airprompt-status.sh";;
-    clean)  SUB="$d/bin/airprompt-clean.sh";;
-    name)   SUB="$d/bin/airprompt-name.sh";;
+    on)        SUB="$d/bin/airprompt-on.sh";;
+    off)       SUB="$d/bin/airprompt-off.sh";;
+    status)    SUB="$d/bin/airprompt-status.sh";;
+    clean)     SUB="$d/bin/airprompt-clean.sh";;
+    name)      SUB="$d/bin/airprompt-name.sh";;
+    autostart) SUB="$d/bin/airprompt-autostart.sh";;
     help|-h|--help)
       echo "AirPrompt — remote mobile access and voice dictation for Claude sessions"
       echo ""
@@ -33,13 +34,14 @@ for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
       echo "  off                 Unregister session + hide statusline badge"
       echo "  status              Show daemon status and active sessions"
       echo "  clean               Full teardown — kill all sessions, remove markers"
-      echo "  name [<text>]       Set or clear session name (empty clears)"
+      echo "  name [<text>]       Set or clear session name (empty or \"\" clears)"
+      echo "  autostart on|off    Auto-start AirPrompt on Claude session start"
       echo "  help                Show this help"
       echo ""
       echo "Entrypoint: always use 'bin/airprompt <command>' — never call bin/airprompt-*.sh directly."
       exit 0
       ;;
-    *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, name, help" >&2; exit 1 ;;
+    *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, name, autostart, help" >&2; exit 1 ;;
   esac
   if [ -x "$SUB" ]; then
     case "$CMD" in
@@ -55,6 +57,9 @@ for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
         fi
         ;;
       name)
+        exec bash "$SUB" "$@"
+        ;;
+      autostart)
         exec bash "$SUB" "$@"
         ;;
       *)

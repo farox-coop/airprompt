@@ -1,3 +1,3 @@
 description = "AirPrompt — remote mobile access and voice dictation for Claude sessions"
-argument-hint = "[on|on <name>|on --name <name>|off|status|clean|name <name>|help]"
+argument-hint = "[on|on <name>|on --name <name>|off|status|clean|name <name>|name \"\"|autostart on|off|help]"
 prompt = "airprompt {{args}}"
