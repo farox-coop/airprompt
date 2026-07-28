@@ -60,11 +60,11 @@ function startDaemon() {
   return daemonRunning();
 }
 
-function post(p, body) {
+function request(method, p, body) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const opts = {
-      hostname: 'localhost', port: PORT, path: p, method: 'POST',
+      hostname: 'localhost', port: PORT, path: p, method,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
       timeout: 5000,
     };
@@ -82,6 +82,26 @@ function post(p, body) {
     req.write(payload);
     req.end();
   });
+}
+
+function post(p, body) { return request('POST', p, body); }
+
+function put(p, body) { return request('PUT', p, body); }
+
+// Auto-apply project name from global cwd→name mapping.
+// Called after session registration so autostart picks up saved names.
+function autoApplyName(sessionId, cwd, myDir) {
+  const namesFile = path.join(CONFIG_DIR, '.airprompt-project-names.json');
+  let map;
+  try { map = JSON.parse(fs.readFileSync(namesFile, 'utf8')); } catch (_) { return; }
+  const savedName = map[cwd];
+  if (!savedName) return;
+  put('/api/sessions/name', { sessionId, name: savedName }).then((resp) => {
+    if (resp && resp.ok) {
+      process.stdout.write(`airprompt: auto-named '${savedName}'\n`);
+      try { fs.writeFileSync(path.join(myDir, 'name'), savedName + '\n'); } catch (_) {}
+    }
+  }).catch(() => {});
 }
 
 // Same sanitization as statusline.sh: `tr -cd 'a-zA-Z0-9_.-'`
@@ -166,6 +186,10 @@ async function main() {
     const activeFile = path.join(myDir, 'active');
     if (fs.existsSync(activeFile)) {
       process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
+      // Still auto-apply project name mapping
+      let sid = '';
+      try { sid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
+      if (sid) autoApplyName(sid, process.cwd(), myDir);
       sweepDeadSessions();
       return;
     }
@@ -211,6 +235,9 @@ async function main() {
 
       process.stdout.write(`airprompt: registered ${sessionId}\n`);
       process.stdout.write(`airprompt: mobile URL ${url}\n`);
+
+      // Auto-apply saved project name
+      autoApplyName(sessionId, cwd, myDir);
 
       sweepDeadSessions();
     } else {

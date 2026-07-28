@@ -124,6 +124,19 @@ SAFE_TMUX=$(printf '%s' "$TMUX_SESSION" | tr -cd 'a-zA-Z0-9_.-')
 MY_DIR="${SESSIONS_DIR}/${SAFE_TMUX}"
 ACTIVE_FILE="${MY_DIR}/active"
 
+# ── Helper: persist cwd→name mapping for autostart reuse ────────────
+_persist_project_name() {
+  local name_val="$1"
+  local names_file="${CONFIG_DIR}/.airprompt-project-names.json"
+  PWD_VAL="$ORIG_PWD" NAME_VAL="$name_val" FILE_VAL="$names_file" node -e '
+    var fs = require("fs");
+    var map = {};
+    try { map = JSON.parse(fs.readFileSync(process.env.FILE_VAL, "utf8")); } catch (_) {}
+    map[process.env.PWD_VAL] = process.env.NAME_VAL;
+    fs.writeFileSync(process.env.FILE_VAL, JSON.stringify(map, null, 2) + "\n");
+  ' 2>/dev/null || true
+}
+
 # ── Helper: update session name via daemon API ───────────────────────
 # Used by idempotency path (active file exists) and already-registered
 # paths (409 from daemon). Writes name to disk only after API confirms.
@@ -137,6 +150,7 @@ _name_update() {
     -d "{\"sessionId\":\"${sid}\",\"name\":\"${esc}\"}" 2>/dev/null || echo "")
   if echo "$put_resp" | grep -q '"ok":true'; then
     printf '%s\n' "$name_val" > "${my_dir}/name"
+    _persist_project_name "$name_val"
     echo "Session name: $name_val"
   else
     echo "Warning: failed to update session name (daemon unreachable)" >&2
@@ -180,6 +194,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
   if [ -n "$SESSION_NAME" ]; then
     # Registration already stores name on daemon; just persist to disk
     echo "$SESSION_NAME" > "${MY_DIR}/name"
+    _persist_project_name "$SESSION_NAME"
     echo "Session name: $SESSION_NAME"
   fi
   echo "AirPrompt session registered: $SESSION_ID"

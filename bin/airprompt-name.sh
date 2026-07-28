@@ -18,6 +18,7 @@ fi
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
+PROJECT_NAMES_FILE="${CONFIG_DIR}/.airprompt-project-names.json"
 
 NAME="${1:-}"
 # Handle explicit empty-string marker: /airprompt name "" → clear
@@ -72,10 +73,28 @@ if echo "$RESP" | grep -q '"ok":true'; then
     if [ -n "$MY_DIR" ]; then
       printf '%s\n' "$NEW_NAME" > "${MY_DIR}/name"
     fi
+    # ── Persist cwd→name mapping for autostart reuse ───────────────
+    PWD_VAL="$PWD" NAME_VAL="$NEW_NAME" FILE_VAL="$PROJECT_NAMES_FILE" node -e '
+      var fs = require("fs");
+      var map = {};
+      try { map = JSON.parse(fs.readFileSync(process.env.FILE_VAL, "utf8")); } catch (_) {}
+      map[process.env.PWD_VAL] = process.env.NAME_VAL;
+      fs.writeFileSync(process.env.FILE_VAL, JSON.stringify(map, null, 2) + "\n");
+    ' 2>/dev/null || true
     echo "AirPrompt: session named '$NEW_NAME'"
   else
     if [ -n "$MY_DIR" ]; then
       rm -f "${MY_DIR}/name"
+    fi
+    # ── Clear cwd→name mapping on explicit clear ──────────────────
+    if [ -f "$PROJECT_NAMES_FILE" ]; then
+      PWD_VAL="$PWD" FILE_VAL="$PROJECT_NAMES_FILE" node -e '
+        var fs = require("fs");
+        var map;
+        try { map = JSON.parse(fs.readFileSync(process.env.FILE_VAL, "utf8")); } catch (_) { process.exit(0); }
+        delete map[process.env.PWD_VAL];
+        fs.writeFileSync(process.env.FILE_VAL, JSON.stringify(map, null, 2) + "\n");
+      ' 2>/dev/null || true
     fi
     echo "AirPrompt: session name cleared"
   fi
