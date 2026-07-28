@@ -14,7 +14,7 @@ const https = require('https');
 const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 
-const PORT = process.env.AIRPROMPT_PORT || 3210;
+const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const AIRPROMPT_DIR = path.join(os.homedir(), '.airprompt');
 const PID_FILE = '/tmp/airprompt-server.pid';

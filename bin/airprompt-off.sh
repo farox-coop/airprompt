@@ -95,20 +95,35 @@ if [ -d "$SESSIONS_DIR" ]; then
     # real name may differ (e.g. "My Session!" vs "MySession").
     REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r')
     [ -z "$REAL_TMUX" ] && REAL_TMUX="$DN"
-    tmux has-session -t "$REAL_TMUX" 2>/dev/null; HAS_RC=$?
+    tmux has-session -t "$REAL_TMUX" 2>/dev/null && HAS_RC=0 || HAS_RC=$?
     if [ $HAS_RC -eq 0 ]; then
       : # session alive — skip
     elif [ $HAS_RC -eq 1 ]; then
       # Only delete if tmux explicitly says "no session" (exit code 1).
       echo "Cleaning up dead session dir: $DN" >&2
+      SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r')
+      [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
+      curl -s $CURL_OPTS -X POST "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+        -H "Content-Type: application/json" \
+        -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
       rm -rf "$d"
     fi
   done
 fi
 
 # ── Stop daemon if no sessions remain ────────────────────────────────
+# Count with python3 if available, fallback to grep counting — safer
+# than defaulting to "0" which would kill daemon with active sessions.
 REMAINING=$(curl -s $CURL_OPTS "${PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "[]")
-REMAINING_COUNT=$(echo "$REMAINING" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+if command -v python3 &>/dev/null; then
+  REMAINING_COUNT=$(echo "$REMAINING" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "-1")
+elif command -v python &>/dev/null; then
+  REMAINING_COUNT=$(echo "$REMAINING" | python -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "-1")
+else
+  # No Python — count '"id":' occurrences as rough estimate.
+  # Overestimate is safe: daemon won't be killed spuriously.
+  REMAINING_COUNT=$(echo "$REMAINING" | grep -o '"id":"[^"]*"' | wc -l)
+fi
 if [ "$REMAINING_COUNT" = "0" ]; then
   if tmux has-session -t airprompt-daemon 2>/dev/null; then
     tmux kill-session -t airprompt-daemon 2>/dev/null || true

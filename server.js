@@ -88,14 +88,20 @@ function recoverSessionsFromDisk() {
   if (!fs.existsSync(sessionsDir)) return;
 
   let entries;
-  try { entries = fs.readdirSync(sessionsDir); } catch (_) { return; }
+  try { entries = fs.readdirSync(sessionsDir, { withFileTypes: true }); } catch (_) { return; }
 
   for (const entry of entries) {
-    const dir = path.join(sessionsDir, entry);
-    if (!fs.statSync(dir).isDirectory()) continue;
+    if (!entry.isDirectory()) continue;
+    const dir = path.join(sessionsDir, entry.name);
+
+    // Read REAL tmux session name from marker file.
+    // Directory name is sanitized (a-zA-Z0-9_.-), but the actual
+    // tmux session may have spaces or special characters.
+    let realTmux = entry.name;
+    try { realTmux = fs.readFileSync(path.join(dir, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
 
     // Check if tmux session is still alive
-    if (!tmuxExists(entry)) {
+    if (!tmuxExists(realTmux)) {
       // Dead session — clean up on-disk markers
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
       continue;
@@ -103,19 +109,21 @@ function recoverSessionsFromDisk() {
 
     // Read metadata from disk
     let sessionId, name;
-    try { sessionId = fs.readFileSync(path.join(dir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) { sessionId = entry; }
+    try { sessionId = fs.readFileSync(path.join(dir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) { sessionId = realTmux; }
+    // Validate format — must match registration endpoint regex
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) sessionId = realTmux;
     try { name = fs.readFileSync(path.join(dir, 'name'), 'utf8').trim().slice(0, 64) || null; } catch (_) { name = null; }
 
     // Derive cwd from tmux session
     let cwd = process.env.HOME || '/';
     try {
-      const r = spawnSync('tmux', ['display-message', '-t', entry, '-p', '#{pane_current_path}'], { timeout: 2000, encoding: 'utf8' });
+      const r = spawnSync('tmux', ['display-message', '-t', realTmux, '-p', '#{pane_current_path}'], { timeout: 2000, encoding: 'utf8' });
       if (r.status === 0 && r.stdout.trim()) cwd = r.stdout.trim();
     } catch (_) {}
 
     if (!sessions.has(sessionId)) {
-      sessions.set(sessionId, { sessionId, cwd, name, tmuxSession: entry, createdAt: new Date().toISOString() });
-      log('info', 'session recovered from disk', { sessionId, tmuxSession: entry, cwd, name });
+      sessions.set(sessionId, { sessionId, cwd, name, tmuxSession: realTmux, createdAt: new Date().toISOString() });
+      log('info', 'session recovered from disk', { sessionId, tmuxSession: realTmux, cwd, name });
     }
   }
 
@@ -151,6 +159,21 @@ function createApp() {
         }
       }
     }
+    // Dedupe by tmux session: two hooks may fire simultaneously with
+    // different sessionIds but the same tmux session (plugin + settings.json).
+    for (const [existingId, existing] of sessions) {
+      if (existing.tmuxSession === actualTmuxSession) {
+        // Update existing entry in-place — preserve original createdAt
+        existing.cwd = cwd;
+        existing.sessionId = sessionId;
+        if (name !== undefined) existing.name = name || null;
+        sessions.delete(existingId);
+        sessions.set(sessionId, existing);
+        log('info', 'session re-registered (deduped by tmux)', { oldId: existingId, newId: sessionId, tmuxSession: actualTmuxSession });
+        broadcastSessionList(wss);
+        return res.json({ ok: true, sessionId });
+      }
+    }
     sessions.set(sessionId, { sessionId, cwd, name: name || null, tmuxSession: actualTmuxSession, createdAt: new Date().toISOString() });
     log('info', 'session registered', { sessionId, tmuxSession: actualTmuxSession, cwd, name: name || null });
     broadcastSessionList(wss);
@@ -171,18 +194,7 @@ function createApp() {
     }
     sessions.delete(sessionId);
     log('info', 'session unregistered', { sessionId, tmuxSession: entry.tmuxSession });
-    // Only kill tmux if no other registered entry shares it
-    if (entry.tmuxSession && !entry.tmuxSession.startsWith('airprompt-')) {
-      let shared = false;
-      for (const [, other] of sessions) {
-        if (other.tmuxSession === entry.tmuxSession) { shared = true; break; }
-      }
-      if (!shared) {
-        // session is a real Claude tmux session — never kill it
-        // (airprompt- prefixed sessions are ours and can be cleaned)
-      }
-    }
-    // Always clean airprompt- prefixed sessions when they're orphaned
+    // Clean airprompt- prefixed sessions when orphaned
     if (entry.tmuxSession && entry.tmuxSession.startsWith('airprompt-')) {
       let shared = false;
       for (const [, other] of sessions) {
@@ -190,6 +202,7 @@ function createApp() {
       }
       if (!shared) killTmuxSession(entry.tmuxSession);
     }
+    // Non-airprompt tmux sessions are real Claude sessions — never kill them
     broadcastSessionList(wss);
     res.json({ ok: true });
   });
@@ -231,9 +244,14 @@ function createApp() {
     }));
 
     function spawnPty(sessionId) {
-      if (ptyProcess) {
-        const oldWeb = ptyProcess._airpromptWebSession;
-        try { ptyProcess.kill(); } catch (e) { /* ok */ }
+      // Capture old pty reference before killing — its onExit/onData
+      // callbacks fire asynchronously after kill(). Must compare by
+      // identity, not the shared ptyProcess variable, to avoid
+      // nullifying a newly-spawned pty.
+      const oldPty = ptyProcess;
+      if (oldPty) {
+        const oldWeb = oldPty._airpromptWebSession;
+        try { oldPty.kill(); } catch (e) { /* ok */ }
         ptyProcess = null;
         // Kill old webSession — prevents orphan session accumulation
         if (oldWeb) spawnSync('tmux', ['kill-session', '-t', oldWeb], { timeout: 1000 });
@@ -250,42 +268,50 @@ function createApp() {
       const rnd = Math.random().toString(36).slice(2, 6);
       const webSession = `airprompt-web-${sessionId}-${Date.now()}-${rnd}`;
 
-      spawnSync('tmux', ['new-session', '-d', '-t', entry.tmuxSession, '-s', webSession,
+      const r1 = spawnSync('tmux', ['new-session', '-d', '-t', entry.tmuxSession, '-s', webSession,
         '-x', String(termCols), '-y', String(termRows)], { timeout: 2000 });
+      if (r1.status !== 0) {
+        log('warn', 'tmux new-session failed', { clientId, webSession, status: r1.status, stderr: String(r1.stderr || '').trim() });
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'error', message: 'Failed to create terminal session' }));
+        return false;
+      }
       spawnSync('tmux', ['set-option', '-t', webSession, 'status', 'off'], { timeout: 1000 });
       spawnSync('tmux', ['set-option', '-t', webSession, 'pane-border-status', 'off'], { timeout: 1000 });
 
-      try {
-        ptyProcess = pty.spawn('tmux', ['attach-session', '-t', webSession], {
-          name: 'xterm-256color', cols: termCols, rows: termRows, cwd: entry.cwd, env: process.env,
-        });
-        ptyProcess._airpromptWebSession = webSession;
-        ptyProcess._airpromptAlive = true;
-        log('info', 'pty spawned', { clientId, webSession, sessionId, cols: termCols, rows: termRows });
-      } catch (e) {
-        // Clean up orphaned webSession on spawn failure
-        spawnSync('tmux', ['kill-session', '-t', webSession], { timeout: 1000 });
-        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'error', message: 'Failed to spawn: ' + e.message }));
-        return false;
-      }
+      const thisPty = pty.spawn('tmux', ['attach-session', '-t', webSession], {
+        name: 'xterm-256color', cols: termCols, rows: termRows, cwd: entry.cwd, env: process.env,
+      });
+      thisPty._airpromptWebSession = webSession;
+      ptyProcess = thisPty;
+      log('info', 'pty spawned', { clientId, webSession, sessionId, cols: termCols, rows: termRows });
 
-      ptyProcess.onData((data) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'output', data })); });
-      ptyProcess.onExit(({ exitCode, signal }) => {
+      thisPty.onData((data) => {
+        // Guard: only forward data from the currently-active pty
+        if (ptyProcess !== thisPty || ws.readyState !== 1) return;
+        ws.send(JSON.stringify({ type: 'output', data }));
+      });
+      thisPty.onExit(({ exitCode, signal }) => {
         log('info', 'pty exited', { clientId, webSession, exitCode, signal: signal || 0 });
-        // Guard: only notify if this ptyProcess is still the active one
-        // (prevents stale onExit from old pty overwriting new pty's state)
-        if (!ptyProcess || !ptyProcess._airpromptAlive) return;
+        // Guard: only clean up if THIS pty is still the active one
+        if (ptyProcess !== thisPty) return;
         if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'output', data: '\r\n\x1b[33m[AirPrompt: session ended]\x1b[0m\r\n' }));
         ptyProcess = null;
       });
+
+      // Notify client that PTY is ready
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pty_spawned', sessionId }));
       return true;
     }
 
     ws.on('message', (raw) => {
       let msg;
-      try { msg = JSON.parse(raw.toString()); } catch (e) { return; }
+      try { msg = JSON.parse(raw.toString()); } catch (e) {
+        log('debug', 'ws malformed message', { clientId, raw: String(raw).slice(0, 100) });
+        return;
+      }
 
       switch (msg.type) {
+        case 'ping': break;  // keepalive ack — no action needed
         case 'debug':
           log('debug', '[client] ' + (msg.msg || ''), { level: msg.level, extra: msg.extra });
           break;
@@ -347,11 +373,12 @@ if (require.main === module) {
 
   writePid();
   log('info', 'daemon starting', { port: PORT, pid: process.pid, tls: TLS_ENABLED, debug: DEBUG });
+  // Rebuild session registry from on-disk markers BEFORE listen
+  // so first WS client sees recovered sessions immediately.
+  recoverSessionsFromDisk();
   const { httpServer, tlsOptions: tls } = createApp();
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    // Rebuild session registry from on-disk markers (survives daemon restart)
-    recoverSessionsFromDisk();
     const lanIp = getLocalIp();
     const url = `${tls ? 'https' : 'http'}://${lanIp}:${PORT}`;
     console.log('\n' + '='.repeat(50));

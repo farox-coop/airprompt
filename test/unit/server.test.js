@@ -104,6 +104,36 @@ test('POST /api/sessions/register rejects duplicate', { skip: !TMUX_AVAILABLE },
   }
 });
 
+test('POST /api/sessions/register dedup by tmuxSession — same tmux, different sessionId', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-dedup');
+  try {
+    // Register first session
+    const r1 = await post('/api/sessions/register', {
+      sessionId: 'test-dedup-1', cwd: '/tmp',
+      tmuxSession: 'airprompt-test-dedup',
+    });
+    assert.strictEqual(r1.status, 200);
+    assert.strictEqual(sessions.has('test-dedup-1'), true);
+
+    // Register second session with SAME tmuxSession but DIFFERENT sessionId
+    const r2 = await post('/api/sessions/register', {
+      sessionId: 'test-dedup-2', cwd: '/tmp/a',
+      tmuxSession: 'airprompt-test-dedup',
+    });
+    // Should succeed (dedup, not duplicate) — updates existing entry
+    assert.strictEqual(r2.status, 200);
+    // Old sessionId removed, new one present
+    assert.strictEqual(sessions.has('test-dedup-1'), false);
+    assert.strictEqual(sessions.has('test-dedup-2'), true);
+    // Only ONE entry total (no duplicate)
+    assert.strictEqual(sessions.size, 1);
+    // cwd updated from second registration
+    assert.strictEqual(sessions.get('test-dedup-2').cwd, '/tmp/a');
+  } finally {
+    killTmux('airprompt-test-dedup');
+  }
+});
+
 test('POST /api/sessions/register rejects missing body', async () => {
   const res = await post('/api/sessions/register', {});
   assert.strictEqual(res.status, 400);

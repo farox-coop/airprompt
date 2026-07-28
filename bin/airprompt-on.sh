@@ -219,7 +219,7 @@ if [ -d "$SESSIONS_DIR" ]; then
     # real name may differ (e.g. "My Session!" vs "MySession").
     REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r')
     [ -z "$REAL_TMUX" ] && REAL_TMUX="$DN"
-    tmux has-session -t "$REAL_TMUX" 2>/dev/null; HAS_SESSION_RC=$?
+    tmux has-session -t "$REAL_TMUX" 2>/dev/null && HAS_SESSION_RC=0 || HAS_SESSION_RC=$?
     if [ $HAS_SESSION_RC -eq 0 ]; then
       : # session alive — skip
     elif [ $HAS_SESSION_RC -eq 1 ]; then

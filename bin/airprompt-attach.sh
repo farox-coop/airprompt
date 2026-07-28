@@ -97,10 +97,12 @@ fi
 if ! curl -s $CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then
   echo "Starting AirPrompt daemon..."
   cd "$DAEMON_DIR"
-  node server.js > /tmp/airprompt.log 2>&1 &
+  nohup node server.js > /tmp/airprompt.log 2>&1 &
+  DAEMON_PID=$!
+  disown "$DAEMON_PID" 2>/dev/null || true
   for i in $(seq 1 20); do
     if curl -s $CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then break; fi
-    if ! kill -0 $! 2>/dev/null; then
+    if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
       echo "Error: server process died. Check /tmp/airprompt.log" >&2
       exit 1
     fi

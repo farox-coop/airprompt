@@ -212,6 +212,8 @@ const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 let ws = null;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
+let pingTimer = null;
+const PING_INTERVAL_MS = 25_000;  // Keepalive — mobile browsers drop idle WS
 const MAX_RECONNECT_MS = 30_000;
 
 function wsUrl() { return `${protocol}//${window.location.host}`; }
@@ -234,6 +236,12 @@ function connect() {
     }
     // Re-send resize so server re-spawns pty with correct dimensions
     scheduleResize();
+    // Keepalive — ws library auto-responds to ping frames
+    pingTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
+      }
+    }, PING_INTERVAL_MS);
   };
 
   ws.onmessage = wsMessageHandler;
@@ -241,6 +249,8 @@ function connect() {
   ws.onclose = () => {
     log('warn', 'ws disconnected');
     term.write('\r\n\x1b[31m[AirPrompt: disconnected]\x1b[0m\r\n');
+    // Stop ping timer
+    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
     // Overlay banner — stays until clicked or reconnected
     if (!window._airpromptDiscBanner) {
       const banner = document.createElement('div');
@@ -253,6 +263,7 @@ function connect() {
       });
       banner.addEventListener('click', () => {
         if (banner.parentNode) banner.remove();
+        window._airpromptDiscBanner = null;
       });
       document.body.appendChild(banner);
       window._airpromptDiscBanner = banner;
@@ -294,6 +305,7 @@ function wsMessageHandler(event) {
       break;
     case 'session_list':
       sessions = msg.sessions || [];
+      hideLoadSpinner();  // Always hide spinner — even with zero sessions
       updateUI();
 
       // Valid active session with PTY already spawned — nothing to do
