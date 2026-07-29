@@ -1,0 +1,99 @@
+/* ── Keybar toggle button ────────────────────── */
+#keybar-toggle {
+  width: 32px; height: 32px; background: #21262d; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 6px; font-size: 18px;
+  cursor: pointer; flex-shrink: 0; margin-left: 8px;
+  display: flex; align-items: center; justify-content: center;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  padding: 0; line-height: 1;
+}
+#keybar-toggle:active { background: #30363d; }
+
+/* ── Keybar container ────────────────────────── */
+#keybar-container {
+  flex-shrink: 0;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  padding: 6px;
+  max-height: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: max-height 0.2s, padding 0.2s, opacity 0.2s;
+}
+#keybar-container.keybar-hidden {
+  max-height: 0;
+  padding-top: 0; padding-bottom: 0;
+  border-bottom: none;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* ── Row layout ──────────────────────────────── */
+.keybar-row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.keybar-row::-webkit-scrollbar { display: none; }
+
+/* ── Buttons ─────────────────────────────────── */
+.keybar-btn {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 4px 8px;
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.keybar-btn:active {
+  background: #388bfd;
+  border-color: #58a6ff;
+}
+
+/* ── Modifier keys ───────────────────────────── */
+.keybar-btn.keybar-modifier {
+  background: #30363d;
+  font-weight: 600;
+  font-size: 12px;
+  min-width: 32px;
+}
+.keybar-btn.keybar-sticky {
+  min-width: 36px;
+}
+
+/* ── Armed state (single-tap, waiting for next key) ── */
+.keybar-btn.armed {
+  background: #1f6feb;
+  border-color: #388bfd;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(56, 139, 253, 0.5);
+}
+
+/* ── Locked state (double-tap, modifier stays on) ── */
+.keybar-btn.locked {
+  background: #238636;
+  border-color: #3fb950;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(46, 160, 67, 0.5);
+}
+
+/* ── Arrow keys ──────────────────────────────── */
+.keybar-btn.keybar-arrow {
+  font-size: 18px;
+  min-width: 42px;
+}

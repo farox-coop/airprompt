@@ -25,6 +25,17 @@ airprompt help             # show usage
 - Run: `make test-all`
 - Tests are ISOLATED — never kill the real daemon. Unit tests use `createApp()` (fresh server, no PID file). Integration tests use port 3211 + `/tmp/airprompt-server-test.pid`. Tmux sessions: `airprompt-test-*` / `airprompt-integtest-*` — never match real daemon sessions.
 
+## Code organization
+
+**Extract, don't bloat.** When a single file accumulates too many responsibilities or a clear module boundary exists, extract dedicated code into a separate file. Never cram everything into one file when there's an obvious opportunity to split.
+
+Examples from this project:
+- Notification toasts → `public/notify.js` (not crammed into `client.js`)
+- Keyboard bar → `public/keybar.js` (already separated)
+- Session management could be `public/sessions.js`
+
+Smaller focused files > one giant file.
+
 ## Development
 
 - Always `AIRPROMPT_DEBUG=1` when running scripts in dev. Use: `AIRPROMPT_DEBUG=1 airprompt <cmd>`

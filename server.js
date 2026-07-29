@@ -208,6 +208,21 @@ function createApp() {
     res.json({ ok: true });
   });
 
+  app.post('/api/notify', (req, res) => {
+    const input = req.body || {};
+    if (!input.notification_type) return res.status(400).json({ error: 'Missing notification_type' });
+
+    log('info', 'notification received', { type: input.notification_type, session_id: input.session_id });
+    // Broadcast to all connected web clients
+    const msg = JSON.stringify({ ...input, type: 'notification' });
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) {
+        try { client.send(msg); } catch (e) { /* ok */ }
+      }
+    });
+    res.json({ ok: true });
+  });
+
   app.put('/api/sessions/name', (req, res) => {
     const { sessionId, name } = req.body || {};
     if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });

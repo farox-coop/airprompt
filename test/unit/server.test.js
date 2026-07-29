@@ -23,7 +23,7 @@ function post(path, body) {
     const data = JSON.stringify(body);
     const req = http.request({
       hostname: 'localhost', port, path, method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length, 'Connection': 'close' },
     }, (res) => {
       let buf = '';
       res.on('data', (c) => buf += c);
@@ -662,6 +662,52 @@ test('deactivate stopDaemon never targets production PID in test env', async () 
     threw = true; // Expected: file doesn't exist
   }
   assert.ok(threw, 'stopDaemon with test PID file must fail safely (no file)');
+});
+
+// ── Notification API tests ──────────────────────────────────────────
+
+test('POST /api/notify rejects missing notification_type', async () => {
+  const res = await post('/api/notify', {});
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Missing notification_type');
+});
+
+test('POST /api/notify returns ok with full payload', async () => {
+  const res = await post('/api/notify', {
+    notification_type: 'idle_prompt',
+    session_id: 'abc123',
+    cwd: '/home/user/my-project',
+    message: 'Claude is waiting for your input',
+    permission_mode: 'auto',
+    effort: { level: 'max' },
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.ok, true);
+});
+
+test('WS receives notification broadcast when POST /api/notify is called', (t, done) => {
+  const ws = new WebSocket(`ws://localhost:${port}`);
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type === 'session_list') {
+      post('/api/notify', {
+        notification_type: 'agent_completed',
+        session_id: 'test-notify',
+        cwd: '/tmp',
+        permission_mode: 'default',
+        effort: { level: 'medium' },
+      });
+    } else if (msg.type === 'notification') {
+      assert.strictEqual(msg.notification_type, 'agent_completed');
+      assert.strictEqual(msg.session_id, 'test-notify');
+      assert.strictEqual(msg.cwd, '/tmp');
+      assert.strictEqual(msg.permission_mode, 'default');
+      assert.deepStrictEqual(msg.effort, { level: 'medium' });
+      ws.close();
+      done();
+    }
+  });
+  ws.on('error', (e) => { assert.fail('WS error: ' + e.message); });
 });
 
 test('integration test sets CLAUDE_CONFIG_DIR for isolation', () => {

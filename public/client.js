@@ -294,6 +294,9 @@ function send(msg) {
   }
 }
 
+// Expose for keybar.js
+window._airpromptSend = send;
+
 // ── Message handler (detached for reconnect) ─────────────────────────
 function wsMessageHandler(event) {
   let msg;
@@ -302,6 +305,9 @@ function wsMessageHandler(event) {
   switch (msg.type) {
     case 'output':
       term.write(msg.data);
+      break;
+    case 'notification':
+      if (typeof showNotification === 'function') showNotification(msg);
       break;
     case 'session_list':
       sessions = msg.sessions || [];
@@ -405,6 +411,29 @@ function closeModal() {
 
 sessionBar.addEventListener('click', openModal);
 modalClose.addEventListener('click', closeModal);
+document.getElementById('keybar-toggle').addEventListener('click', function (e) {
+  e.stopPropagation();
+  window._airpromptKeybar && window._airpromptKeybar.toggle();
+  // Keybar has 0.2s CSS transition. Fit + scroll after it finishes.
+  var keybarEl = document.getElementById('keybar-container');
+  function refit() {
+    try { fitAddon.fit(); } catch (_) {}
+    // Force xterm canvas repaint — prevents "black screen" after resize
+    try { term.refresh(0, term.rows - 1); } catch (_) {}
+    var vp = document.querySelector('#terminal-container .xterm-viewport');
+    if (vp) { vp.scrollTop = vp.scrollHeight; }
+  }
+  if (keybarEl) {
+    keybarEl.addEventListener('transitionend', function () {
+      refit();
+    }, { once: true });
+  }
+  // Fallback: also fit after next paint cycle in case transitionend
+  // doesn't fire (e.g. prefers-reduced-motion disables transitions)
+  requestAnimationFrame(function () {
+    requestAnimationFrame(refit);
+  });
+});
 sessionModal.addEventListener('click', (e) => {
   if (e.target === sessionModal) closeModal();
 });
@@ -457,10 +486,12 @@ if (window.visualViewport) {
       var sessionBar = document.getElementById('session-bar');
       var barH = sessionBar ? sessionBar.offsetHeight : 44;
       var overlayH = dictateOverlay.classList.contains('dictate-hidden') ? 0 : dictateOverlay.offsetHeight;
+      var keybarEl = document.getElementById('keybar-container');
+      var keybarH = (keybarEl && !keybarEl.classList.contains('keybar-hidden')) ? keybarEl.offsetHeight : 0;
 
       // Only react to significant height drops (keyboard open)
       if (kbHeight > 80) {
-        var termH = vh - window.visualViewport.offsetTop - barH - overlayH;
+        var termH = vh - window.visualViewport.offsetTop - barH - overlayH - keybarH;
         termContainer.style.height = termH + 'px';
         termContainer.style.flex = 'none';
         try { fitAddon.fit(); } catch (_) {}
@@ -885,12 +916,13 @@ function acceptAndSend() {
     dictateLabel.textContent = tr('dictate');
   }
   if (text) {
-    // Send text and Enter as two separate writes — mimics real keystrokes.
-    // Sending them as a single string can cause PTY buffering quirks where
-    // the shell echoes the text but the \r gets consumed by readline without
-    // actually submitting the line.
     send({ type: 'input', data: text });
-    send({ type: 'input', data: '\r' });
+    // Small delay so PTY delivers text to shell before \r arrives.
+    // Without this, the two writes can merge in the PTY buffer — the
+    // shell echoes the text but readline doesn't process \r as submit.
+    setTimeout(function () {
+      send({ type: 'input', data: '\r' });
+    }, 50);
   }
   dictationAccumulator = '';
   dismissOverlay();
@@ -921,6 +953,7 @@ dictateCancel.addEventListener('click', function(e) {
 
 let longPressTimer = null;
 let longPressFired = false;
+let _pointerDownTime = 0;  // Timestamp of last pointerdown
 
 // Block click from bubbling to session-bar (would open modal)
 dictateBtn.addEventListener('click', (e) => { e.stopPropagation(); });
@@ -928,6 +961,7 @@ dictateBtn.addEventListener('click', (e) => { e.stopPropagation(); });
 dictateBtn.addEventListener('pointerdown', (e) => {
   e.stopPropagation();  // Prevent session-bar :active flash
   longPressFired = false;
+  _pointerDownTime = Date.now();
   clearTimeout(longPressTimer);
   longPressTimer = setTimeout(() => {
     longPressFired = true;
@@ -948,20 +982,41 @@ dictateBtn.addEventListener('pointerdown', (e) => {
 
 dictateBtn.addEventListener('pointerup', (e) => {
   e.stopPropagation();  // Prevent session-bar :active flash
-  clearTimeout(longPressTimer);
-  if (!longPressFired) {
-    if (isPaused) {
-      resumeDictation();
-    } else {
-      toggleDictation(e);
-    }
+  if (longPressFired) {
+    // Timer already fired (pause/resume/lang) — don't toggle.
+    return;
   }
-  // When longPressFired: the timeout already handled it (pause/resume/lang).
-  // Don't toggle — that would double-act on the same gesture.
+  // Android Chrome may fire pointerup BEFORE the 500ms timer on long press.
+  // If the user has been holding long enough, let the timer finish instead
+  // of treating this as a short tap.
+  if (Date.now() - _pointerDownTime >= 380) {
+    return;  // Too close to threshold — likely a long press, let timer fire
+  }
+  // Genuine short tap (< 380ms hold)
+  clearTimeout(longPressTimer);
+  if (isPaused) {
+    resumeDictation();
+  } else {
+    toggleDictation(e);
+  }
 });
 
-dictateBtn.addEventListener('pointerleave', () => clearTimeout(longPressTimer));
-dictateBtn.addEventListener('pointercancel', () => clearTimeout(longPressTimer));
+// When finger leaves the button before timer fires, cancel the long press.
+// But only if it hasn't been held long enough — avoid cancelling a pending
+// long press from Android's pointerleave-on-cancel behavior.
+dictateBtn.addEventListener('pointerleave', () => {
+  if (Date.now() - _pointerDownTime < 380) clearTimeout(longPressTimer);
+});
+// On Android Chrome, long press eventually fires pointercancel. Don't
+// cancel the timer — gate on elapsed time in pointerup/pointerleave instead.
+dictateBtn.addEventListener('pointercancel', () => {
+  /* no-op — timer survives, pointerup/pointerleave gate on elapsed time */ });
+
+// Prevent native context menu on long press (Chrome Android).
+// Without this, long press shows "select text" popup and fires pointercancel.
+dictateBtn.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+});
 
 // ── Pause / Resume ────────────────────────────────────────────────────
 
