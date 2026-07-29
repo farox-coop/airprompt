@@ -440,10 +440,6 @@ function selectSession(id) {
   hideLoadSpinner();
 }
 
-function escHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 // ── Modal ───────────────────────────────────────────────────────────
 function openModal() {
   sessionModal.classList.add('open');
@@ -557,9 +553,10 @@ if (window.visualViewport) {
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 let isListening = false;
-let isPaused = false;          // Long-press while recording → pause
+let isPaused = false;          // Long-tap while recording → pause
 let _stopPending = false;     // Guard: ignore taps while stop is in-flight
 let _pauseGen = 0;            // Prevents stale onend restart after pause→resume
+let _onendGen = 0;            // Prevents stale onend from pauseDictation() restarting
 let dictationAccumulator = '';   // Persists across recognition restarts (Chrome Android)
 
 // ── Dictation overlay DOM ────────────────────────────────────────────
@@ -858,8 +855,6 @@ if (SpeechRecognition) {
     }
   };
 
-  let _onendGen = 0;
-
   recognition.onend = () => {
     dictateOverlay.classList.remove('speaking');
     // Only restart if the recognition session created this onend is still
@@ -991,76 +986,92 @@ dictateCancel.addEventListener('click', function(e) {
 //   short tap stopped  → start recording
 //   short tap recording → stop + accept
 //   short tap paused    → resume recording
-//   long-press stopped  → language dropdown
-//   long-press recording → pause
-//   long-press paused    → resume
+//   long-tap stopped  → language dropdown
+//   long-tap recording → pause
+//   long-tap paused    → resume
 
-let longPressTimer = null;
-let longPressFired = false;
-let _pointerDownTime = 0;  // Timestamp of last pointerdown
+let longTapTimer = null;
+let longTapFired = false;
 
 // Block click from bubbling to session-bar (would open modal)
 dictateBtn.addEventListener('click', (e) => { e.stopPropagation(); });
 
-dictateBtn.addEventListener('pointerdown', (e) => {
-  e.stopPropagation();  // Prevent session-bar :active flash
-  longPressFired = false;
-  _pointerDownTime = Date.now();
-  clearTimeout(longPressTimer);
-  longPressTimer = setTimeout(() => {
-    longPressFired = true;
-    if (_stopPending) {
-      // Ignore — stop is in-flight
-    } else if (isListening) {
-      pauseDictation();
-    } else if (isPaused) {
-      // Long-press while paused → resume instead of language dropdown
-      resumeDictation();
-    } else {
-      // Long-press while idle → language dropdown
-      showLangDropdown();
-    }
-    if (navigator.vibrate) navigator.vibrate(12);
-  }, 500);
-});
+// ── Long-tap action (shared by touch + pointer branches) ──────────
+function onLongTap() {
+  longTapFired = true;
+  if (_stopPending) {
+    // Ignore — stop is in-flight
+  } else if (isListening) {
+    pauseDictation();
+  } else if (isPaused) {
+    resumeDictation();
+  } else {
+    showLangDropdown();
+  }
+  if (navigator.vibrate) navigator.vibrate(12);
+}
 
-dictateBtn.addEventListener('pointerup', (e) => {
-  e.stopPropagation();  // Prevent session-bar :active flash
-  if (longPressFired) {
-    // Timer already fired (pause/resume/lang) — don't toggle.
-    return;
-  }
-  // Android Chrome may fire pointerup BEFORE the 500ms timer on long press.
-  // If the user has been holding long enough, let the timer finish instead
-  // of treating this as a short tap.
-  if (Date.now() - _pointerDownTime >= 380) {
-    return;  // Too close to threshold — likely a long press, let timer fire
-  }
-  // Genuine short tap (< 380ms hold)
-  clearTimeout(longPressTimer);
+function onShortTap(e) {
   if (isPaused) {
     resumeDictation();
   } else {
     toggleDictation(e);
   }
-});
+}
 
-// When finger leaves the button before timer fires, cancel the long press.
-// But only if it hasn't been held long enough — avoid cancelling a pending
-// long press from Android's pointerleave-on-cancel behavior.
-dictateBtn.addEventListener('pointerleave', () => {
-  if (Date.now() - _pointerDownTime < 380) clearTimeout(longPressTimer);
-});
-// On Android Chrome, long press eventually fires pointercancel. Don't
-// cancel the timer — gate on elapsed time in pointerup/pointerleave instead.
-dictateBtn.addEventListener('pointercancel', () => {
-  /* no-op — timer survives, pointerup/pointerleave gate on elapsed time */ });
+var _useTouch = false;
+try { _useTouch = window.matchMedia('(pointer: coarse)').matches; } catch (_) {}
 
-// Prevent native context menu on long press (Chrome Android).
-// Without this, long press shows "select text" popup and fires pointercancel.
-dictateBtn.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-});
+if (_useTouch) {
+  // Mobile: touch events. touchcancel fires INSTEAD of touchend on
+  // Android long tap — clean separation. Pointer events are unreliable:
+  // Chrome fires pointerup BEFORE pointercancel on many devices, making
+  // it impossible to distinguish short tap from long tap.
+
+  dictateBtn.addEventListener('touchstart', function (e) {
+    e.stopPropagation();
+    longTapFired = false;
+    clearTimeout(longTapTimer);
+    longTapTimer = setTimeout(onLongTap, 500);
+  });
+
+  dictateBtn.addEventListener('touchend', function (e) {
+    e.stopPropagation();
+    if (longTapFired) return;
+    clearTimeout(longTapTimer);
+    onShortTap(e);
+  });
+
+  // Android long tap fires touchcancel — timer stays alive
+  dictateBtn.addEventListener('touchcancel', function () {
+    /* timer survives — longTapFired gate in touchend handles the rest */ });
+
+  dictateBtn.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+  });
+} else {
+  // Desktop: pointer events work correctly
+  dictateBtn.addEventListener('pointerdown', function (e) {
+    e.stopPropagation();
+    longTapFired = false;
+    clearTimeout(longTapTimer);
+    longTapTimer = setTimeout(onLongTap, 500);
+  });
+
+  dictateBtn.addEventListener('pointerup', function (e) {
+    e.stopPropagation();
+    if (longTapFired) return;
+    clearTimeout(longTapTimer);
+    onShortTap(e);
+  });
+
+  dictateBtn.addEventListener('pointerleave', function () {
+    clearTimeout(longTapTimer);
+  });
+  dictateBtn.addEventListener('pointercancel', function () {
+    clearTimeout(longTapTimer);
+  });
+}
 
 // ── Pause / Resume ────────────────────────────────────────────────────
 

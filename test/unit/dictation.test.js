@@ -371,11 +371,11 @@ test('overlay scroll — always scrolled to bottom after update', async (t) => {
   });
 });
 
-// ── longPress timer logic ─────────────────────────────────────────────
+// ── longTap timer logic ─────────────────────────────────────────────
 
 // Simulates the pointerdown timeout handler (500ms timer callback).
 // Mirrors client.js: dictateBtn pointerdown → setTimeout body.
-function simulateLongPress(isListening, isPaused, stopPending) {
+function simulateLongTap(isListening, isPaused, stopPending) {
   if (stopPending) {
     return { action: 'ignored' };
   } else if (isListening) {
@@ -387,30 +387,30 @@ function simulateLongPress(isListening, isPaused, stopPending) {
   }
 }
 
-test('longPress handler — decision tree', async (t) => {
-  await t.test('long-press while recording → pause', () => {
-    const r = simulateLongPress(true, false, false);
+test('longTap handler — decision tree', async (t) => {
+  await t.test('long-tap while recording → pause', () => {
+    const r = simulateLongTap(true, false, false);
     assert.strictEqual(r.action, 'pause');
   });
 
-  await t.test('long-press while paused → resume (not lang dropdown)', () => {
-    const r = simulateLongPress(false, true, false);
+  await t.test('long-tap while paused → resume (not lang dropdown)', () => {
+    const r = simulateLongTap(false, true, false);
     assert.strictEqual(r.action, 'resume');
   });
 
-  await t.test('long-press while idle → language dropdown', () => {
-    const r = simulateLongPress(false, false, false);
+  await t.test('long-tap while idle → language dropdown', () => {
+    const r = simulateLongTap(false, false, false);
     assert.strictEqual(r.action, 'langDropdown');
   });
 
-  await t.test('long-press while _stopPending → ignored', () => {
+  await t.test('long-tap while _stopPending → ignored', () => {
     // Even if recording, stopPending takes priority
-    const r = simulateLongPress(true, false, true);
+    const r = simulateLongTap(true, false, true);
     assert.strictEqual(r.action, 'ignored');
   });
 
-  await t.test('long-press while stopPending + paused → ignored', () => {
-    const r = simulateLongPress(false, true, true);
+  await t.test('long-tap while stopPending + paused → ignored', () => {
+    const r = simulateLongTap(false, true, true);
     assert.strictEqual(r.action, 'ignored');
   });
 });
