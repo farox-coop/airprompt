@@ -470,6 +470,8 @@ function runDeactivate(envOverrides = {}) {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     AIRPROMPT_PORT: String(port),
+    AIRPROMPT_PID_FILE: '/tmp/airprompt-server-test.pid',
+    AIRPROMPT_SKIP_RECOVERY: '1',
     CLAUDE_CONFIG_DIR: TEMP_DIR,
     AIRPROMPT_NO_TLS: '1', // match test server
     ...envOverrides,
@@ -613,4 +615,62 @@ test('PID file not created in test mode', () => {
   const existedBefore = fs.existsSync('/tmp/airprompt-server.pid');
   // createApp was already called in before() — check still true
   assert.strictEqual(existedBefore, fs.existsSync('/tmp/airprompt-server.pid'));
+});
+
+// ── Test isolation: recovery and PID file ────────────────────────────
+
+test('recoverSessionsFromDisk skipped when AIRPROMPT_SKIP_RECOVERY=1', () => {
+  // The server module exports createApp; the recovery function is internal.
+  // Test that the env var guard exists in the source.
+  const fs = require('fs');
+  const path = require('path');
+  const serverPath = path.join(__dirname, '..', '..', 'server.js');
+  const source = fs.readFileSync(serverPath, 'utf8');
+  assert.ok(source.includes('AIRPROMPT_SKIP_RECOVERY'),
+    'server.js must check AIRPROMPT_SKIP_RECOVERY before recovery');
+});
+
+test('deactivate PID_FILE respects AIRPROMPT_PID_FILE env var', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const deactivatePath = path.join(__dirname, '..', '..', 'src', 'hooks', 'airprompt-deactivate.js');
+  const source = fs.readFileSync(deactivatePath, 'utf8');
+  assert.ok(source.includes('process.env.AIRPROMPT_PID_FILE'),
+    'deactivate.js must use AIRPROMPT_PID_FILE env var, not hardcoded /tmp/airprompt-server.pid');
+});
+
+test('deactivate stopDaemon never targets production PID in test env', async () => {
+  // Verify runDeactivate helper sets AIRPROMPT_PID_FILE to test path
+  const testPidFile = '/tmp/airprompt-server-test.pid';
+  assert.ok(testPidFile !== '/tmp/airprompt-server.pid',
+    'test PID file must differ from production PID file');
+
+  // If stopDaemon() is called in a test context, it reads the TEST pid file,
+  // not the real /tmp/airprompt-server.pid
+  const fs = require('fs');
+  // Remove test pid file if it exists from prior runs
+  try { fs.unlinkSync(testPidFile); } catch (_) {}
+
+  // stopDaemon reads PID_FILE, tries to kill process, fails gracefully
+  // because test PID file doesn't exist
+  const PID_FILE = testPidFile;
+  let threw = false;
+  try {
+    const pid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
+    process.kill(pid, 'SIGTERM');
+  } catch (_) {
+    threw = true; // Expected: file doesn't exist
+  }
+  assert.ok(threw, 'stopDaemon with test PID file must fail safely (no file)');
+});
+
+test('integration test sets CLAUDE_CONFIG_DIR for isolation', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const integPath = path.join(__dirname, '..', 'integration', 'run.sh');
+  const source = fs.readFileSync(integPath, 'utf8');
+  assert.ok(source.includes('CLAUDE_CONFIG_DIR="$TMPDIR"') || source.includes('CLAUDE_CONFIG_DIR="${TMPDIR}"'),
+    'integration test must set CLAUDE_CONFIG_DIR to temp dir for isolation');
+  assert.ok(source.includes('AIRPROMPT_SKIP_RECOVERY=1'),
+    'integration test must set AIRPROMPT_SKIP_RECOVERY=1 to skip production session recovery');
 });

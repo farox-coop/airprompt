@@ -254,7 +254,7 @@ function connect() {
     // Overlay banner — stays until clicked or reconnected
     if (!window._airpromptDiscBanner) {
       const banner = document.createElement('div');
-      banner.textContent = '⚠️ DISCONNECTED — Tap to dismiss';
+      banner.textContent = tr('disconnected');
       Object.assign(banner.style, {
         position: 'fixed', top: '0', left: '0', right: '0',
         background: '#dc2626', color: '#fff', textAlign: 'center',
@@ -350,13 +350,13 @@ function updateUI() {
     }
     sessionLabel.classList.remove('no-session');
   } else {
-    sessionLabel.textContent = 'No session selected';
+    sessionLabel.textContent = tr('noSession');
     sessionLabel.classList.add('no-session');
   }
 
   // Session list in modal
   if (sessions.length === 0) {
-    sessionList.innerHTML = '<div class="session-empty">No active sessions</div>';
+    sessionList.innerHTML = '<div class="session-empty">' + tr('noActive') + '</div>';
   } else {
     sessionList.innerHTML = sessions
       .map((s) => {
@@ -409,6 +409,24 @@ sessionModal.addEventListener('click', (e) => {
   if (e.target === sessionModal) closeModal();
 });
 
+// Show :active feedback on session bar only for direct touches,
+// not when tapping Dictate/Refresh buttons inside it.
+// CSS :active propagates to ancestors — impossible to stop with JS.
+// We drive it manually instead.
+sessionBar.addEventListener('pointerdown', function(e) {
+  if (e.target === sessionBar || sessionBar.contains(e.target)) {
+    // Only show if the touch landed on the bar label/spacer, not a button
+    if (e.target.closest('button')) return;
+    sessionBar.classList.add('bar-active');
+  }
+});
+document.addEventListener('pointerup', function() {
+  sessionBar.classList.remove('bar-active');
+});
+sessionBar.addEventListener('pointerleave', function() {
+  sessionBar.classList.remove('bar-active');
+});
+
 // ── Terminal input → WebSocket ──────────────────────────────────────
 term.onData((data) => {
   send({ type: 'input', data });
@@ -418,6 +436,84 @@ term.onData((data) => {
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 let isListening = false;
+let isPaused = false;          // Long-press while recording → pause
+let _stopPending = false;     // Guard: ignore taps while stop is in-flight
+let _pauseGen = 0;            // Prevents stale onend restart after pause→resume
+let dictationAccumulator = '';   // Persists across recognition restarts (Chrome Android)
+
+// ── Dictation overlay DOM ────────────────────────────────────────────
+const dictateOverlay  = document.getElementById('dictate-overlay');
+const dictateText     = document.getElementById('dictate-text');
+const dictateAccept   = document.getElementById('dictate-accept');
+const dictateAcceptSend = document.getElementById('dictate-accept-send');
+const dictateCancel   = document.getElementById('dictate-cancel');
+
+// ── i18n: labels change with selected language ────────────────────────
+const T = {
+  'en-US': {
+    dictate: 'Dictate', recording: 'Recording', paused: 'Paused',
+    cancel: 'Cancel', accept: 'Accept', send: 'Send',
+    listening: 'Listening…', speaking: '● Speaking…',
+    noSession: 'No session selected', noActive: 'No active sessions',
+    activeSessions: 'Active Sessions', close: 'Close', refresh: 'Refresh',
+    micHttps: 'Voice needs HTTPS or localhost. Chrome blocks mic on HTTP LAN IP. Use keyboard below.',
+    langFallback: 'Language not supported. Falling back to English.',
+    disconnected: '⚠️ DISCONNECTED — Tap to dismiss',
+  },
+  'es-AR': {
+    dictate: 'Dictar', recording: 'Grabando', paused: 'Pausado',
+    cancel: 'Cancelar', accept: 'Aceptar', send: 'Enviar',
+    listening: 'Escuchando…', speaking: '● Hablando…',
+    noSession: 'Sin sesión', noActive: 'Sin sesiones activas',
+    activeSessions: 'Sesiones Activas', close: 'Cerrar', refresh: 'Recargar',
+    micHttps: 'El micrófono requiere HTTPS o localhost. Chrome bloquea el mic en IPs LAN HTTP.',
+    langFallback: 'Idioma no soportado. Cambiando a inglés.',
+    disconnected: '⚠️ DESCONECTADO — Tocar para cerrar',
+  },
+};
+
+function tr(key) {
+  return (T[currentLang] && T[currentLang][key]) || T['en-US'][key] || key;
+}
+
+function updateAllLabels() {
+  // Dictate button (stopped state)
+  if (!isListening && !isPaused) {
+    dictateLabel.textContent = tr('dictate');
+  } else if (isPaused) {
+    dictateLabel.textContent = tr('paused');
+  } else {
+    dictateLabel.textContent = tr('recording');
+  }
+  // Overlay buttons
+  dictateCancel.textContent = tr('cancel');
+  dictateAccept.textContent = tr('accept');
+  dictateAcceptSend.textContent = tr('send');
+  langCancel.textContent = tr('cancel');
+  // CSS pseudo-elements via custom properties
+  dictateText.style.setProperty('--listen-text', '"' + tr('listening') + '"');
+  dictateText.style.setProperty('--speak-text', '"' + tr('speaking') + '"');
+  // Modal
+  document.querySelector('#session-modal-content h3').textContent = tr('activeSessions');
+  document.getElementById('modal-close').textContent = tr('close');
+  // Refresh button title
+  document.getElementById('refresh-btn').title = tr('refresh');
+  // Session label (if no session)
+  if (sessionLabel.classList.contains('no-session')) {
+    sessionLabel.textContent = tr('noSession');
+  }
+  // Dictation disabled label
+  if (!SpeechRecognition) {
+    dictateLabel.textContent = tr('dictate');
+  }
+}
+
+// Update CSS placeholder texts via custom properties
+const _i18nStyle = document.createElement('style');
+_i18nStyle.textContent = '\n' +
+  '#dictate-text:empty::after { content: var(--listen-text, "Listening\\2026"); }\n' +
+  '#dictate-overlay.speaking #dictate-text:empty::after { content: var(--speak-text, "\\25cf Speaking\\2026"); }\n';
+document.head.appendChild(_i18nStyle);
 
 // ── Language management ──────────────────────────────────────────────
 const BASE_LANGS = [
@@ -425,7 +521,6 @@ const BASE_LANGS = [
   { code: 'es-AR', name: 'Español (AR)' },
 ];
 
-const dictateInterim = document.getElementById('dictate-interim');
 const dictateFlag   = document.getElementById('dictate-flag');
 const langDropdown  = document.getElementById('lang-dropdown');
 const langList      = document.getElementById('lang-list');
@@ -509,6 +604,7 @@ function setLang(code) {
   recognition.lang = code;
   updateFlag();
   buildLangList();
+  updateAllLabels();
   if (wasListening) {
     setTimeout(() => {
       // Only restart if no newer lang switch happened
@@ -517,7 +613,7 @@ function setLang(code) {
       recognition.start();
       dictateBtn.classList.add('recording');
       dictateIcon.textContent = '🔴';
-      dictateLabel.textContent = 'Recording';
+      dictateLabel.textContent = tr('recording');
     }, 200);
   }
 }
@@ -536,54 +632,116 @@ if (SpeechRecognition) {
   recognition = new SpeechRecognition();
   recognition.lang = currentLang;
   recognition.interimResults = true;
+  // Chrome Android ignores continuous:true (MDN bug #23458).
+  // It auto-stops after each utterance — our onend restarts it.
+  // onresult only fires after pauses, never during continuous speech.
   recognition.continuous = true;
 
   recognition.onresult = (event) => {
-    const result = event.results[event.results.length - 1];
-    const transcript = result[0].transcript;
-    if (result.isFinal) {
-      if (transcript.trim()) {
-        send({ type: 'input', data: transcript });
+    // Reconstruct from ALL results within this event.
+    let running = '';
+    let latestInterim = '';
+
+    for (let i = 0; i < event.results.length; i++) {
+      const result = event.results[i];
+      const transcript = result[0].transcript;
+
+      if (result.isFinal) {
+        if (result[0].confidence === 0) continue;
+        // Case-insensitive check — Chrome may change casing between results
+        if (running && transcript.length >= running.length && transcript.slice(0, running.length).localeCompare(running, undefined, { sensitivity: 'base' }) === 0) {
+          running = transcript;
+        } else {
+          running += transcript;
+        }
+      } else {
+        latestInterim = transcript;
       }
-      dictateInterim.textContent = '';
-      dictateInterim.classList.remove('visible');
-    } else {
-      dictateInterim.textContent = transcript;
-      dictateInterim.classList.add('visible');
     }
+
+    // Chrome Android ignores continuous:true — recognition restarts
+    // after each utterance via onend, losing prior text. Accumulate
+    // across sessions so user sees incremental progress.
+    if (running) {
+      if (dictationAccumulator && running.length >= dictationAccumulator.length && running.slice(0, dictationAccumulator.length).localeCompare(dictationAccumulator, undefined, { sensitivity: 'base' }) === 0) {
+        // Desktop Chrome: cumulative, already includes prior (case-insensitive)
+        dictationAccumulator = running;
+      } else if (dictationAccumulator) {
+        // Chrome Android: new segment after pause/restart — add comma
+        // and lowercase first char so sentence flows naturally
+        const lower = running.charAt(0).toLowerCase() + running.slice(1);
+        dictationAccumulator = (dictationAccumulator + ', ' + lower).trim();
+      } else {
+        // First utterance
+        dictationAccumulator = running;
+      }
+    }
+
+    // Skip if overlay was dismissed — prevents stale onresult from
+    // writing into hidden overlay after acceptDictation cleared it.
+    if (dictateOverlay.classList.contains('dictate-hidden')) return;
+
+    const displayText = latestInterim || dictationAccumulator;
+    if (displayText) {
+      dictateText.textContent = displayText;
+      dictateText.style.height = 'auto';
+      const h = dictateText.scrollHeight;
+      dictateText.style.height = Math.min(h, window.innerHeight * 0.3) + 'px';
+      // Always scroll to bottom so latest text is visible
+      dictateText.scrollTop = dictateText.scrollHeight;
+    }
+  };
+
+  // Chrome Android: these fire during active speech even though
+  // onresult only fires after pauses. Give real-time visual feedback.
+  recognition.onspeechstart = () => {
+    dictateOverlay.classList.add('speaking');
+  };
+  recognition.onspeechend = () => {
+    dictateOverlay.classList.remove('speaking');
   };
 
   recognition.onerror = (e) => {
-    isListening = false;
-    dictateBtn.classList.remove('recording');
-    dictateInterim.textContent = '';
-    dictateInterim.classList.remove('visible');
     if (e.error === 'not-allowed') {
+      // Fatal — dismiss everything
+      isListening = false;
+      _stopPending = false;
+      dismissOverlay();
+      dictateBtn.classList.remove('recording');
       dictateBtn.disabled = true;
       dictateIcon.textContent = '🔇';
-      dictateLabel.textContent = 'Dictate';
+      dictateLabel.textContent = tr('dictate');
       micError.style.display = 'block';
-      micError.textContent = 'Voice needs HTTPS or localhost. Chrome blocks mic on HTTP LAN IP. Use keyboard below.';
+      micError.textContent = tr('micHttps');
     } else if (e.error === 'language-not-supported') {
       setLang('en-US');
       micError.style.display = 'block';
-      micError.textContent = 'Language not supported. Falling back to English.';
+      micError.textContent = tr('langFallback');
       setTimeout(() => { micError.style.display = 'none'; }, 3000);
+      // Don't dismiss overlay — keep accumulating text
     } else {
-      dictateIcon.textContent = '🎤';
-      dictateLabel.textContent = 'Dictate';
+      // Transient (no-speech, audio-capture, network) — onend will restart
+      // Keep overlay visible, don't change isListening
     }
   };
 
+  let _onendGen = 0;
+
   recognition.onend = () => {
-    if (isListening) recognition.start();
+    dictateOverlay.classList.remove('speaking');
+    // Only restart if the recognition session created this onend is still
+    // the active one. Prevents stale onend from pauseDictation() restarting
+    // after resumeDictation() already started a fresh session.
+    const myGen = _onendGen;
+    if (isListening && myGen === _onendGen && !_stopPending) recognition.start();
   };
 
   updateFlag();
   buildLangList();
+  updateAllLabels();
 } else {
   dictateIcon.textContent = '🚫';
-  dictateLabel.textContent = 'Dictate';
+  dictateLabel.textContent = tr('dictate');
   dictateBtn.disabled = true;
 }
 
@@ -593,45 +751,175 @@ function toggleDictation(e) {
   hideLangDropdown();
 
   if (isListening) {
+    // STOP: let final onresult fire before accepting
     isListening = false;
-    const pending = dictateInterim.textContent.trim();
+    _stopPending = true;
     recognition.stop();
     dictateBtn.classList.remove('recording');
     dictateIcon.textContent = '🎤';
-    dictateLabel.textContent = 'Dictate';
-    dictateInterim.textContent = '';
-    dictateInterim.classList.remove('visible');
-    if (pending) send({ type: 'input', data: pending });
+    dictateLabel.textContent = tr('dictate');
+    // Defer accept — recognition.stop() queues final onresult async.
+    // We need that to update dictateText before reading it.
+    setTimeout(() => { _stopPending = false; acceptDictation(); }, 150);
+  } else if (_stopPending) {
+    // Ignore taps during stop → accept transition
+    return;
   } else {
+    // START: show empty overlay
     isListening = true;
+    dictationAccumulator = '';
+    dictateOverlay.classList.remove('dictate-hidden');
+    dictateText.textContent = '';
+    dictateText.style.height = '';
     recognition.start();
     dictateBtn.classList.add('recording');
     dictateIcon.textContent = '🔴';
-    dictateLabel.textContent = 'Recording';
+    dictateLabel.textContent = tr('recording');
   }
 }
 
-// ── Pointer events: tap=toggle, long-press=language menu ────────────
+function acceptDictation() {
+  _stopPending = false;
+  const text = dictateText.textContent.trim();
+  if (isListening) {
+    isListening = false;
+    recognition.abort();
+    dictateBtn.classList.remove('recording');
+    dictateIcon.textContent = '🎤';
+    dictateLabel.textContent = tr('dictate');
+  }
+  if (text) {
+    send({ type: 'input', data: text });
+  }
+  dictationAccumulator = '';
+  dismissOverlay();
+}
+
+function cancelDictation() {
+  _stopPending = false;
+  if (isListening) {
+    isListening = false;
+    recognition.abort();
+    dictateBtn.classList.remove('recording');
+    dictateIcon.textContent = '🎤';
+    dictateLabel.textContent = tr('dictate');
+  }
+  dictationAccumulator = '';
+  dismissOverlay();
+}
+
+function dismissOverlay() {
+  isPaused = false;
+  dictateBtn.classList.remove('paused');
+  dictateOverlay.classList.add('dictate-hidden');
+  dictateText.textContent = '';
+  dictateText.style.height = '';
+}
+
+function acceptAndSend() {
+  _stopPending = false;
+  const text = dictateText.textContent.trim();
+  if (isListening) {
+    isListening = false;
+    recognition.abort();
+    dictateBtn.classList.remove('recording');
+    dictateIcon.textContent = '🎤';
+    dictateLabel.textContent = tr('dictate');
+  }
+  if (text) {
+    send({ type: 'input', data: text + '\r' });
+  }
+  dictationAccumulator = '';
+  dismissOverlay();
+}
+
+dictateAccept.addEventListener('click', function(e) {
+  e.stopPropagation();
+  acceptDictation();
+});
+
+dictateAcceptSend.addEventListener('click', function(e) {
+  e.stopPropagation();
+  acceptAndSend();
+});
+
+dictateCancel.addEventListener('click', function(e) {
+  e.stopPropagation();
+  cancelDictation();
+});
+
+// Pointer events:
+//   short tap stopped  → start recording
+//   short tap recording → stop + accept
+//   short tap paused    → resume recording
+//   long-press stopped  → language dropdown
+//   long-press recording → pause
+//   long-press paused    → language dropdown
+
 let longPressTimer = null;
 let longPressFired = false;
 
+// Block click from bubbling to session-bar (would open modal)
+dictateBtn.addEventListener('click', (e) => { e.stopPropagation(); });
+
 dictateBtn.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();  // Prevent session-bar :active flash
   longPressFired = false;
   clearTimeout(longPressTimer);
   longPressTimer = setTimeout(() => {
     longPressFired = true;
-    if (navigator.vibrate) navigator.vibrate(15);
-    showLangDropdown();
+    if (_stopPending) {
+      // Ignore — stop is in-flight
+    } else if (isListening) {
+      // Long-press while recording → pause
+      pauseDictation();
+    } else {
+      // Long-press while stopped/paused → language dropdown
+      showLangDropdown();
+    }
+    if (navigator.vibrate) navigator.vibrate(12);
   }, 500);
 });
 
 dictateBtn.addEventListener('pointerup', (e) => {
+  e.stopPropagation();  // Prevent session-bar :active flash
   clearTimeout(longPressTimer);
-  if (!longPressFired) toggleDictation(e);
+  if (!longPressFired) {
+    if (isPaused) {
+      resumeDictation();
+    } else {
+      toggleDictation(e);
+    }
+  }
 });
 
 dictateBtn.addEventListener('pointerleave', () => clearTimeout(longPressTimer));
 dictateBtn.addEventListener('pointercancel', () => clearTimeout(longPressTimer));
+
+// ── Pause / Resume ────────────────────────────────────────────────────
+
+function pauseDictation() {
+  if (!isListening) return;
+  isListening = false;
+  isPaused = true;
+  _onendGen++;  // Mark this onend as stale
+  recognition.stop();
+  dictateBtn.classList.remove('recording');
+  dictateBtn.classList.add('paused');
+  dictateIcon.textContent = '⏸';
+  dictateLabel.textContent = tr('paused');
+}
+
+function resumeDictation() {
+  if (!isPaused) return;
+  isPaused = false;
+  isListening = true;
+  recognition.start();
+  dictateBtn.classList.remove('paused');
+  dictateBtn.classList.add('recording');
+  dictateIcon.textContent = '🔴';
+  dictateLabel.textContent = tr('recording');
+}
 
 // Close dropdown on outside click
 document.addEventListener('click', (e) => {

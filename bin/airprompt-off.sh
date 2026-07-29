@@ -128,7 +128,7 @@ if [ "$REMAINING_COUNT" = "0" ]; then
   if tmux has-session -t airprompt-daemon 2>/dev/null; then
     tmux kill-session -t airprompt-daemon 2>/dev/null || true
   fi
-  PID_FILE="/tmp/airprompt-server.pid"
+  PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
   if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
     if kill -0 "$PID" 2>/dev/null; then

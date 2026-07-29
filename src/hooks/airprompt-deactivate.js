@@ -19,7 +19,7 @@ const { spawnSync } = require('child_process');
 const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
-const PID_FILE = '/tmp/airprompt-server.pid';
+const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
 
 const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');
 const KEY_FILE = path.join(CONFIG_DIR, 'airprompt-key.pem');

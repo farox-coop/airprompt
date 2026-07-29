@@ -17,7 +17,7 @@ fi
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
-PID_FILE="/tmp/airprompt-server.pid"
+PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 LOG_FILE="/tmp/airprompt.log"
 
 echo "AirPrompt: tearing down everything..."

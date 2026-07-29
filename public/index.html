@@ -31,7 +31,14 @@
   </div>
 
   <div id="terminal-container"></div>
-  <div id="dictate-interim"></div>
+  <div id="dictate-overlay" class="dictate-hidden">
+    <div id="dictate-text"></div>
+    <div id="dictate-actions">
+      <button id="dictate-cancel">Cancel</button>
+      <button id="dictate-accept">Accept</button>
+      <button id="dictate-accept-send">Send</button>
+    </div>
+  </div>
   <div id="mic-error"></div>
 
   <script src="client.js"></script>

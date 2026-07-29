@@ -83,6 +83,7 @@ function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { 
 // Daemon restart loses in-memory state. On-disk markers survive.
 // Rebuild session registry from ~/.claude/.airprompt-sessions/{tmux}/
 function recoverSessionsFromDisk() {
+  if (process.env.AIRPROMPT_SKIP_RECOVERY === '1') return;
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const sessionsDir = path.join(configDir, '.airprompt-sessions');
   if (!fs.existsSync(sessionsDir)) return;

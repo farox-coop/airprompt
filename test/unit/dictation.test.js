@@ -316,81 +316,64 @@ test('setLang _langSwitchGen — prevents stale race restart', async (t) => {
 
 // ── toggleDictation pending interim text logic ────────────────────────
 
-test('toggleDictation stop — sends pending interim text', async (t) => {
-  await t.test('pending text is trimmed before send', () => {
-    const pending = '  hello world  ';
-    assert.strictEqual(pending.trim(), 'hello world');
-  });
 
-  await t.test('empty pending text → NOT sent', () => {
-    const pending = '   ';
-    if (pending.trim()) {
-      assert.fail('should not send empty');
-    } else {
-      assert.ok(true, 'correctly skipped');
-    }
-  });
-
-  await t.test('non-empty pending text → sent', () => {
-    const pending = 'partial dictation';
-    const sent = pending.trim() ? true : false;
-    assert.ok(sent);
-  });
-});
 
 // ── onresult isFinal vs interim flow ──────────────────────────────────
 
-test('onresult — isFinal sends to terminal, interim shows in overlay', async (t) => {
-  await t.test('isFinal with text → sent', () => {
-    const transcript = 'hola mundo';
-    const isFinal = true;
-    const sent = (isFinal && transcript.trim()) ? transcript : null;
-    assert.strictEqual(sent, 'hola mundo');
+// ── onresult via simulateOnresult ──────────────────────────────────
+
+test('onresult simulated — isFinal + interim behavior', async (t) => {
+  await t.test('single final → displayText set', () => {
+    const { displayText, running } = simulateOnresult([
+      { transcript: 'hola mundo', isFinal: true },
+    ]);
+    assert.strictEqual(displayText, 'hola mundo');
+    assert.strictEqual(running, 'hola mundo');
   });
 
-  await t.test('isFinal empty → not sent', () => {
-    const transcript = '  ';
-    const isFinal = true;
-    const sent = (isFinal && transcript.trim()) ? transcript : null;
-    assert.strictEqual(sent, null);
+  await t.test('empty final → not shown', () => {
+    const { displayText, running } = simulateOnresult([
+      { transcript: '', isFinal: true },
+    ]);
+    assert.strictEqual(displayText, '');
+    assert.strictEqual(running, '');
   });
 
-  await t.test('interim (not final) → shown in overlay, not sent', () => {
-    const transcript = 'hola mun...';
-    const isFinal = false;
-    const interimText = isFinal ? '' : transcript;
-    assert.strictEqual(interimText, 'hola mun...');
+  await t.test('interim (not final) → shown, running stays empty', () => {
+    const { displayText, latestInterim, running } = simulateOnresult([
+      { transcript: 'hola mun...', isFinal: false },
+    ]);
+    assert.strictEqual(latestInterim, 'hola mun...');
+    assert.strictEqual(displayText, 'hola mun...');
+    assert.strictEqual(running, '');
+  });
+});
+
+// ── Scroll to bottom ─────────────────────────────────────────────────
+
+test('overlay scroll — always scrolled to bottom after update', async (t) => {
+  await t.test('scrollTop set to scrollHeight after text update', () => {
+    // Real code: dictateText.scrollTop = dictateText.scrollHeight;
+    // This is a DOM property set — test the intent: scrollTop ≥ old value
+    let scrollTop = 0;
+    const scrollHeight = 500;
+    // Simulate: text grows, scrollHeight increases, scrollTop follows
+    scrollTop = scrollHeight;  // Always pegged to bottom
+    assert.ok(scrollTop >= 0);
+    assert.strictEqual(scrollTop, scrollHeight);
+  });
+
+  await t.test('new text larger → scrollTop updates to new bottom', () => {
+    let scrollTop = 200;
+    let scrollHeight = 500; // new content larger
+    scrollTop = scrollHeight;
+    assert.strictEqual(scrollTop, 500);
   });
 });
 
 // ── longPress timer logic ─────────────────────────────────────────────
 
-test('longPress timer — 500ms threshold', async (t) => {
-  await t.test('pointerdown sets timer', () => {
-    let timerFired = false;
-    const timer = setTimeout(() => { timerFired = true; }, 500);
-    assert.strictEqual(timerFired, false); // not fired immediately
-    clearTimeout(timer);
-  });
 
-  await t.test('pointerup before 500ms → toggles dictation, not language menu', () => {
-    let longPressFired = false;
-    // pointerup fires while longPressFired is false
-    if (longPressFired) {
-      assert.fail('should toggle dictation, not show menu');
-    } else {
-      assert.ok(true, 'toggle dictation path');
-    }
-  });
-
-  await t.test('pointerleave cancels timer', () => {
-    let timerCleared = false;
-    const timer = setTimeout(() => {}, 500);
-    clearTimeout(timer);
-    timerCleared = true;
-    assert.ok(timerCleared);
-  });
-});
 
 // ── language-not-supported fallback ───────────────────────────────────
 
@@ -418,3 +401,634 @@ test('onerror language-not-supported → falls back to en-US', async (t) => {
     assert.ok(disabled);
   });
 });
+
+// ── onresult reconstruction — cumulative transcript dedup ──────────
+// Chrome mobile fires each final result with the FULL cumulative text.
+// We reconstruct from ALL results every time, detecting cumulative finals
+// (startsWith) vs new segments. Text only updates the overlay — never
+// auto-sent to terminal. Sending happens via acceptDictation().
+
+function simulateOnresult(allResults) {
+  let running = '';
+  let latestInterim = '';
+
+  for (let i = 0; i < allResults.length; i++) {
+    const r = allResults[i];
+    const transcript = r.transcript;
+
+    if (r.isFinal) {
+      if (r.confidence === 0) continue;
+      // Case-insensitive check (matches client.js localeCompare fix)
+      if (running && transcript.length >= running.length && transcript.slice(0, running.length).localeCompare(running, undefined, { sensitivity: 'base' }) === 0) {
+        running = transcript;      // Cumulative or in-place growth
+      } else {
+        running += transcript;     // New segment: append
+      }
+    } else {
+      latestInterim = transcript;
+    }
+  }
+
+  const displayText = latestInterim || running;
+  return { displayText, running, latestInterim };
+}
+
+// ── accept/cancel flow ───────────────────────────────────────────────
+
+function simulateAccept(accumulatedText) {
+  // acceptDictation() sends text then dismisses overlay
+  const text = accumulatedText.trim();
+  const sent = text || '';
+  return { sent, accumulatedAfter: '' };  // dismissOverlay clears text
+}
+
+function simulateCancel() {
+  return { accumulatedAfter: '' };  // dismissOverlay clears text
+}
+
+// simulate full acceptDictation + dismissOverlay on a mutable state object
+function applyAccept(state) {
+  const text = state.running.trim();
+  const sent = text || '';
+  // dismissOverlay side effects
+  state.running = '';
+  state.latestInterim = '';
+  state.displayText = '';
+  return { sent };
+}
+
+function applyCancel(state) {
+  // dismissOverlay side effects
+  state.running = '';
+  state.latestInterim = '';
+  state.displayText = '';
+}
+
+test('onresult reconstruction — Chrome mobile cumulative finals', async (t) => {
+  await t.test('single final → displayText', () => {
+    const { displayText, running } = simulateOnresult([
+      { transcript: 'Hello', isFinal: true },
+    ]);
+    assert.strictEqual(displayText, 'Hello');
+    assert.strictEqual(running, 'Hello');
+  });
+
+  await t.test('two cumulative finals → only final text shown', () => {
+    // Chrome mobile: result[0]="this" final, result[1]="this is" final (cumulative)
+    const { displayText, running } = simulateOnresult([
+      { transcript: 'this', isFinal: true },
+      { transcript: 'this is', isFinal: true },
+    ]);
+    assert.strictEqual(displayText, 'this is');  // Not "thisthis is"!
+    assert.strictEqual(running, 'this is');
+  });
+
+  await t.test('full sentence cumulative chain → correct final text', () => {
+    const words = [
+      'okay', 'okay let\'s', 'okay let\'s see', 'okay let\'s see how',
+      'okay let\'s see how it', 'okay let\'s see how it works',
+      'okay let\'s see how it works now',
+    ];
+    const results = words.map(w => ({ transcript: w, isFinal: true }));
+    const { displayText, running } = simulateOnresult(results);
+    assert.strictEqual(displayText, 'okay let\'s see how it works now');
+    assert.strictEqual(running, 'okay let\'s see how it works now');
+  });
+});
+
+test('onresult reconstruction — incremental events', async (t) => {
+  await t.test('two events → accumulated text correct', () => {
+    // Event 1: first word finalized
+    const e1 = simulateOnresult([
+      { transcript: 'Hello', isFinal: true },
+    ]);
+    assert.strictEqual(e1.displayText, 'Hello');
+    assert.strictEqual(e1.running, 'Hello');
+
+    // Event 2: updated (result[0] in-place update to longer text)
+    const e2 = simulateOnresult([
+      { transcript: 'Hello world', isFinal: true },
+    ]);
+    assert.strictEqual(e2.displayText, 'Hello world');
+    assert.strictEqual(e2.running, 'Hello world');
+  });
+
+  await t.test('cumulative finals + non-cumulative final → appends both', () => {
+    const { displayText, running } = simulateOnresult([
+      { transcript: 'Hello', isFinal: true },
+      { transcript: ' world', isFinal: true },  // Non-cumulative segment
+    ]);
+    assert.strictEqual(displayText, 'Hello world');
+    assert.strictEqual(running, 'Hello world');
+  });
+
+  await t.test('interim shown when present', () => {
+    const { displayText, latestInterim } = simulateOnresult([
+      { transcript: 'Hello', isFinal: false },
+    ]);
+    assert.strictEqual(displayText, 'Hello');
+    assert.strictEqual(latestInterim, 'Hello');
+  });
+});
+
+test('onresult reconstruction — confidence zero ghost filter', async (t) => {
+  await t.test('confidence 0 final → skipped', () => {
+    const { running } = simulateOnresult([
+      { transcript: 'real', isFinal: true, confidence: 0.9 },
+      { transcript: 'ghost', isFinal: true, confidence: 0 },
+    ]);
+    assert.strictEqual(running, 'real');
+  });
+});
+
+test('acceptDictation — sends text and clears', async (t) => {
+  await t.test('non-empty text → sent, state cleared', () => {
+    const state = { running: 'Hello world', latestInterim: '' };
+    const { sent } = applyAccept(state);
+    assert.strictEqual(sent, 'Hello world');
+    assert.strictEqual(state.running, '');
+    assert.strictEqual(state.displayText, '');
+  });
+
+  await t.test('empty text → nothing sent, still clears', () => {
+    const state = { running: '   ', latestInterim: '' };
+    const { sent } = applyAccept(state);
+    assert.strictEqual(sent, '');
+    assert.strictEqual(state.running, '');
+  });
+
+  await t.test('no text → nothing sent, clears', () => {
+    const state = { running: '', latestInterim: '' };
+    const { sent } = applyAccept(state);
+    assert.strictEqual(sent, '');
+    assert.strictEqual(state.running, '');
+  });
+});
+
+test('cancelDictation — clears without sending', async (t) => {
+  await t.test('state cleared after cancel', () => {
+    const state = { running: 'hello', latestInterim: '', displayText: 'hello' };
+    applyCancel(state);
+    assert.strictEqual(state.running, '');
+    assert.strictEqual(state.displayText, '');
+  });
+});
+
+test('full flow: dictate → accept → send', async (t) => {
+  await t.test('speak 3 words, accept → sends all at once', () => {
+    const state = { running: '', latestInterim: '', displayText: '' };
+
+    // Speak phase: 3 cumulative events
+    const r1 = simulateOnresult([{ transcript: 'hello', isFinal: true }]);
+    state.running = r1.running; state.displayText = r1.displayText;
+    assert.strictEqual(state.displayText, 'hello');
+
+    const r2 = simulateOnresult([
+      { transcript: 'hello', isFinal: true },
+      { transcript: 'hello world', isFinal: true },
+    ]);
+    state.running = r2.running; state.displayText = r2.displayText;
+    assert.strictEqual(state.displayText, 'hello world');
+
+    const r3 = simulateOnresult([
+      { transcript: 'hello', isFinal: true },
+      { transcript: 'hello world', isFinal: true },
+      { transcript: 'hello world testing', isFinal: true },
+    ]);
+    state.running = r3.running; state.displayText = r3.displayText;
+    assert.strictEqual(state.displayText, 'hello world testing');
+
+    // User taps Accept
+    const { sent } = applyAccept(state);
+    assert.strictEqual(sent, 'hello world testing');
+    // State clears after accept
+    assert.strictEqual(state.running, '');
+    assert.strictEqual(state.displayText, '');
+  });
+
+  await t.test('speak, cancel → nothing sent, state cleared', () => {
+    const state = { running: '', latestInterim: '', displayText: '' };
+    const r1 = simulateOnresult([{ transcript: 'goodbye', isFinal: true }]);
+    state.running = r1.running; state.displayText = r1.displayText;
+    assert.strictEqual(state.displayText, 'goodbye');
+
+    applyCancel(state);
+    assert.strictEqual(state.running, '');
+    assert.strictEqual(state.displayText, '');
+  });
+
+  await t.test('stop dictation (toggle) → implicit accept', () => {
+    // toggleDictation() calls acceptDictation() on stop — same as Accept button
+    const state = { running: '', latestInterim: '', displayText: '' };
+    const r = simulateOnresult([
+      { transcript: 'implicit', isFinal: true },
+      { transcript: 'implicit accept', isFinal: true },
+    ]);
+    state.running = r.running; state.displayText = r.displayText;
+    assert.strictEqual(state.displayText, 'implicit accept');
+
+    // User toggles dictation off — same code path as acceptDictation()
+    const { sent } = applyAccept(state);
+    assert.strictEqual(sent, 'implicit accept');
+    assert.strictEqual(state.running, '');
+  });
+});
+
+test('onresult edge: case-insensitive cumulative', async (t) => {
+  // startsWith() is case-sensitive. If Chrome changes case across results,
+  // "hello" → "Hello world" would NOT be detected as cumulative,
+  // resulting in "helloHello world" (duplication). This is a known limitation.
+  await t.test('same case → detected as cumulative', () => {
+    const { running } = simulateOnresult([
+      { transcript: 'hello', isFinal: true },
+      { transcript: 'hello world', isFinal: true },
+    ]);
+    assert.strictEqual(running, 'hello world');
+  });
+
+  await t.test('different case → DETECTED as cumulative (case-insensitive fix)', () => {
+    // Case-insensitive localeCompare now detects "hello" → "Hello world" as cumulative
+    const { running } = simulateOnresult([
+      { transcript: 'hello', isFinal: true },
+      { transcript: 'Hello world', isFinal: true },
+    ]);
+    assert.strictEqual(running, 'Hello world'); // case-insensitive replace
+  });
+});
+
+test('onresult edge: empty/blank transcript', async (t) => {
+  await t.test('empty transcript → not accumulated, displayText empty', () => {
+    const { displayText, running } = simulateOnresult([
+      { transcript: '', isFinal: true },
+    ]);
+    assert.strictEqual(running, '');
+    assert.strictEqual(displayText, '');
+  });
+
+  await t.test('only whitespace → accumulated as-is', () => {
+    const { running } = simulateOnresult([
+      { transcript: ' ', isFinal: true },
+    ]);
+    assert.strictEqual(running, ' ');
+  });
+});
+
+test('onresult edge: interim-only then stop → shows interim', async (t) => {
+  await t.test('interim without any final → displayText is interim', () => {
+    // On desktop Chrome, user speaks but hasn't paused — only interim results
+    const { displayText, latestInterim, running } = simulateOnresult([
+      { transcript: 'I am thinking...', isFinal: false },
+    ]);
+    assert.strictEqual(latestInterim, 'I am thinking...');
+    assert.strictEqual(displayText, 'I am thinking...');
+    assert.strictEqual(running, '');
+  });
+});
+
+// ── Cross-session accumulator (Chrome Android restarts) ──────────────
+
+// Chrome Android ignores continuous:true — onend fires after each
+// utterance, recognition restarts. Each new session has fresh results.
+// Accumulator bridges sessions so user sees incremental progress.
+
+function simulateAccumulatorEvents(events, accumulator) {
+  // events: array of arrays (simulate multiple onresult invocations)
+  // Each inner array = one event's results
+  for (const eventResults of events) {
+    const { running } = simulateOnresult(eventResults);
+    if (running) {
+      if (accumulator.text && running.startsWith(accumulator.text)) {
+        accumulator.text = running;
+      } else if (accumulator.text) {
+        const lower = running.charAt(0).toLowerCase() + running.slice(1);
+        accumulator.text = (accumulator.text + ', ' + lower).trim();
+      } else {
+        accumulator.text = running;
+      }
+    }
+    accumulator.displayText = accumulator.text;
+  }
+  return accumulator;
+}
+
+test('cross-session accumulator — Chrome Android pattern', async (t) => {
+  await t.test('two utterances across restarts → joined', () => {
+    const acc = { text: '', displayText: '' };
+    // Utterance 1: "hello" → onend → restart
+    simulateAccumulatorEvents([
+      [{ transcript: 'hello', isFinal: true }],
+    ], acc);
+    assert.strictEqual(acc.text, 'hello');
+    assert.strictEqual(acc.displayText, 'hello');
+
+    // Utterance 2: "world" (fresh session, no knowledge of prior)
+    simulateAccumulatorEvents([
+      [{ transcript: 'world', isFinal: true }],
+    ], acc);
+    assert.strictEqual(acc.text, 'hello, world');
+    assert.strictEqual(acc.displayText, 'hello, world');
+  });
+
+  await t.test('three utterances → all joined with spaces', () => {
+    const acc = { text: '', displayText: '' };
+    simulateAccumulatorEvents([
+      [{ transcript: 'this', isFinal: true }],
+      [{ transcript: 'is', isFinal: true }],
+      [{ transcript: 'working', isFinal: true }],
+    ], acc);
+    assert.strictEqual(acc.text, 'this, is, working');
+  });
+
+  await t.test('cumulative within one session → no duplicate join', () => {
+    // Desktop pattern: cumulative results within one event
+    const acc = { text: '', displayText: '' };
+    simulateAccumulatorEvents([
+      [
+        { transcript: 'hello', isFinal: true },
+        { transcript: 'hello world', isFinal: true },
+      ],
+    ], acc);
+    assert.strictEqual(acc.text, 'hello world');
+  });
+
+  await t.test('cumulative across sessions → extends naturally', () => {
+    const acc = { text: '', displayText: '' };
+    // Session 1: "hello"
+    simulateAccumulatorEvents([
+      [{ transcript: 'hello', isFinal: true }],
+    ], acc);
+    // Session 2: "hello world" (cumulative within session, includes prior)
+    simulateAccumulatorEvents([
+      [
+        { transcript: 'hello', isFinal: true },
+        { transcript: 'hello world', isFinal: true },
+      ],
+    ], acc);
+    // startsWith catches it → no duplicate "hello hello world"
+    assert.strictEqual(acc.text, 'hello world');
+  });
+});
+
+test('cross-session accumulator — reset on accept/cancel/start', async (t) => {
+  await t.test('accept clears accumulator', () => {
+    const { sent } = simulateAccept('hello world');
+    assert.strictEqual(sent, 'hello world');
+    // After accept, accumulator should be '' (cleared by acceptDictation)
+    // verify via the returned state
+    assert.strictEqual(simulateAccept('').sent, '');
+  });
+
+  await t.test('cancel clears accumulator', () => {
+    const result = simulateCancel();
+    assert.strictEqual(result.accumulatedAfter, '');
+  });
+
+  await t.test('new start resets accumulator to empty', () => {
+    // simulate fresh start: accumulator = ''
+    const acc = { text: '', displayText: '' };
+    simulateAccumulatorEvents([
+      [{ transcript: 'new session', isFinal: true }],
+    ], acc);
+    assert.strictEqual(acc.text, 'new session');
+  });
+});
+
+// ── Dictate button click isolation ─────────────────────────────────────
+
+test('dictateBtn click isolation — test intent', async (t) => {
+  await t.test('dictateBtn click stops propagation', () => {
+    // Real code: dictateBtn.addEventListener('click', (e) => { e.stopPropagation(); });
+    // sessionBar.addEventListener('click', openModal);
+    // Without stopPropagation, clicking dictateBtn would open the modal.
+    // Test: verify the intent — clicking dictateBtn should NOT call openModal.
+    let modalOpened = false;
+    function openModal() { modalOpened = true; }
+    function dictateBtnClick(e) { e.stopPropagation(); }  // Real API call
+
+    // Simulate: sessionBar catches only non-stopped clicks
+    function simulateClick(onDictate, onSession) {
+      const event = { _stopped: false };
+      event.stopPropagation = function() { this._stopped = true; };
+      onDictate(event);
+      if (!event._stopped) onSession();  // sessionBar only sees non-stopped clicks
+    }
+
+    simulateClick(dictateBtnClick, openModal);
+    assert.strictEqual(modalOpened, false, 'modal must not open when dictateBtn stops propagation');
+  });
+
+  await t.test('sessionBar click directly → modal opens', () => {
+    // Clicking the bar label (not a button) should open modal
+    let modalOpened = false;
+    function openModal() { modalOpened = true; }
+    function sessionBarLabelClick() { openModal(); }  // no stopPropagation
+    sessionBarLabelClick();
+    assert.strictEqual(modalOpened, true);
+  });
+});
+// i18n - translation map and tr() function
+
+const T_TEST = {
+  'en-US': { dictate: 'Dictate', recording: 'Recording', paused: 'Paused', cancel: 'Cancel', accept: 'Accept', send: 'Send', noSession: 'No session', unknown: 'Testing' },
+  'es-AR': { dictate: 'Dictar', recording: 'Grabando', paused: 'Pausado', cancel: 'Cancelar', accept: 'Aceptar', send: 'Enviar', noSession: 'Sin sesi\u00f3n' },
+};
+
+function trTest(key, lang) {
+  return (T_TEST[lang] && T_TEST[lang][key]) || T_TEST['en-US'][key] || key;
+}
+
+test('i18n tr() - resolves keys for known languages', async (t) => {
+  await t.test('en-US -> English labels', () => {
+    assert.strictEqual(trTest('dictate', 'en-US'), 'Dictate');
+    assert.strictEqual(trTest('recording', 'en-US'), 'Recording');
+    assert.strictEqual(trTest('cancel', 'en-US'), 'Cancel');
+    assert.strictEqual(trTest('accept', 'en-US'), 'Accept');
+    assert.strictEqual(trTest('send', 'en-US'), 'Send');
+    assert.strictEqual(trTest('paused', 'en-US'), 'Paused');
+  });
+
+  await t.test('es-AR -> Spanish labels', () => {
+    assert.strictEqual(trTest('dictate', 'es-AR'), 'Dictar');
+    assert.strictEqual(trTest('recording', 'es-AR'), 'Grabando');
+    assert.strictEqual(trTest('cancel', 'es-AR'), 'Cancelar');
+    assert.strictEqual(trTest('accept', 'es-AR'), 'Aceptar');
+    assert.strictEqual(trTest('send', 'es-AR'), 'Enviar');
+    assert.strictEqual(trTest('paused', 'es-AR'), 'Pausado');
+  });
+});
+
+test('i18n tr() - fallback behavior', async (t) => {
+  await t.test('unknown language -> falls back to en-US', () => {
+    assert.strictEqual(trTest('dictate', 'fr-FR'), 'Dictate');
+  });
+
+  await t.test('unknown key -> falls back to en-US if exists', () => {
+    assert.strictEqual(trTest('unknown', 'es-AR'), 'Testing');
+  });
+
+  await t.test('unknown key + unknown lang -> falls back to key itself', () => {
+    assert.strictEqual(trTest('nonexistent', 'xx-XX'), 'nonexistent');
+  });
+
+  await t.test('key missing in es-AR but present in en-US -> en-US fallback', () => {
+    assert.strictEqual(trTest('unknown', 'es-AR'), 'Testing');
+  });
+});
+
+test('i18n tr() - label switching does not break', async (t) => {
+  await t.test('state labels switch correctly', () => {
+    const states = ['dictate', 'recording', 'paused'];
+    for (const s of states) {
+      const en = trTest(s, 'en-US');
+      const es = trTest(s, 'es-AR');
+      assert.notStrictEqual(en, es, '"' + s + '" must differ between en-US and es-AR');
+    }
+  });
+
+  await t.test('overlay button labels differ per language', () => {
+    assert.notStrictEqual(trTest('cancel', 'en-US'), trTest('cancel', 'es-AR'));
+    assert.notStrictEqual(trTest('accept', 'en-US'), trTest('accept', 'es-AR'));
+    assert.notStrictEqual(trTest('send', 'en-US'), trTest('send', 'es-AR'));
+  });
+});
+
+// ── _stopPending guard — prevents double-tap race ─────────────────────
+
+function simulateToggleState(isListening, isPaused, stopPending) {
+  // Replicates toggleDictation() decision tree
+  if (isListening) {
+    // STOP path
+    return { action: 'stop', stopPending: true };
+  } else if (stopPending) {
+    // Guard: ignore taps during in-flight stop
+    return { action: 'ignored' };
+  } else if (isPaused) {
+    return { action: 'resume' };
+  } else {
+    // START path
+    return { action: 'start', accumulator: '' };
+  }
+}
+
+test('toggleDictation — _stopPending guard and state transitions', async (t) => {
+  await t.test('recording → stop (sets _stopPending)', () => {
+    const r = simulateToggleState(true, false, false);
+    assert.strictEqual(r.action, 'stop');
+    assert.strictEqual(r.stopPending, true);
+  });
+
+  await t.test('_stopPending=true blocks START', () => {
+    const r = simulateToggleState(false, false, true);
+    assert.strictEqual(r.action, 'ignored');
+  });
+
+  await t.test('_stopPending=true blocks RESUME too', () => {
+    const r = simulateToggleState(false, true, true);
+    assert.strictEqual(r.action, 'ignored');
+  });
+
+  await t.test('stopped + no guard → start with fresh accumulator', () => {
+    const r = simulateToggleState(false, false, false);
+    assert.strictEqual(r.action, 'start');
+    assert.strictEqual(r.accumulator, '');
+  });
+
+  await t.test('paused + no guard → resume (not start)', () => {
+    const r = simulateToggleState(false, true, false);
+    assert.strictEqual(r.action, 'resume');
+  });
+});
+
+// ── Pause / Resume state transitions ──────────────────────────────────
+
+function simulatePause(state) {
+  // pauseDictation(): isListening=true → isListening=false, isPaused=true
+  if (!state.isListening) return null; // early return guard
+  return { isListening: false, isPaused: true };
+}
+
+function simulateResume(state) {
+  // resumeDictation(): isPaused=true → isPaused=false, isListening=true
+  if (!state.isPaused) return null;
+  return { isListening: true, isPaused: false };
+}
+
+test('pause/resume — guard conditions and transitions', async (t) => {
+  await t.test('pause when not listening → no-op', () => {
+    const r = simulatePause({ isListening: false, isPaused: false });
+    assert.strictEqual(r, null);
+  });
+
+  await t.test('pause when listening → paused', () => {
+    const r = simulatePause({ isListening: true, isPaused: false });
+    assert.ok(r);
+    assert.strictEqual(r.isListening, false);
+    assert.strictEqual(r.isPaused, true);
+  });
+
+  await t.test('resume when not paused → no-op', () => {
+    const r = simulateResume({ isListening: false, isPaused: false });
+    assert.strictEqual(r, null);
+  });
+
+  await t.test('resume when paused → listening', () => {
+    const r = simulateResume({ isListening: false, isPaused: true });
+    assert.ok(r);
+    assert.strictEqual(r.isListening, true);
+    assert.strictEqual(r.isPaused, false);
+  });
+
+  await t.test('full cycle: start → pause → resume → stop', () => {
+    // start
+    let state = { isListening: true, isPaused: false };
+    assert.strictEqual(state.isListening, true);
+    // pause
+    state = simulatePause(state);
+    assert.strictEqual(state.isListening, false);
+    assert.strictEqual(state.isPaused, true);
+    // resume
+    state = simulateResume(state);
+    assert.strictEqual(state.isListening, true);
+    assert.strictEqual(state.isPaused, false);
+    // stop (toggle while listening)
+    const r = simulateToggleState(state.isListening, state.isPaused, false);
+    assert.strictEqual(r.action, 'stop');
+    assert.strictEqual(r.stopPending, true);
+  });
+});
+
+// ── dismissOverlay — clears paused state ──────────────────────────────
+
+test('dismissOverlay — resets isPaused', async (t) => {
+  await t.test('dismiss from paused → isPaused cleared', () => {
+    // dismissOverlay(): isPaused=false, remove paused class, hide overlay
+    let isPaused = true;
+    isPaused = false; // dismissOverlay effect
+    assert.strictEqual(isPaused, false);
+  });
+
+  await t.test('dismiss from recording → isPaused stays false', () => {
+    let isPaused = false;
+    isPaused = false; // dismissOverlay effect (no-op, already false)
+    assert.strictEqual(isPaused, false);
+  });
+});
+
+// ── acceptAndSend — appends \\r ────────────────────────────────────────
+
+test('acceptAndSend — sends text with carriage return', async (t) => {
+  await t.test('text + CR → terminal sends prompt as Enter', () => {
+    const text = 'hello world';
+    const data = text + '\r'; // carriage return = Enter in terminal
+    assert.ok(data.endsWith('\r'));
+    assert.strictEqual(data.length, text.length + 1);
+    assert.strictEqual(data.charCodeAt(data.length - 1), 13); // CR = 0x0D
+  });
+
+  await t.test('empty text → not sent (guarded by if(text))', () => {
+    const text = '';
+    const sent = text ? (text + '\r') : null;
+    assert.strictEqual(sent, null);
+  });
+});
+

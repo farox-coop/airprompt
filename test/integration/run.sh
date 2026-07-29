@@ -45,7 +45,7 @@ echo "Starting AirPrompt server on port $PORT..."
 TEST_PID_FILE="/tmp/airprompt-server-test.pid"
 rm -f "$TEST_PID_FILE"
 cd "$PROJECT_DIR"
-AIRPROMPT_NO_TLS=1 AIRPROMPT_PID_FILE="$TEST_PID_FILE" PORT="$PORT" node server.js 2>/dev/null &
+AIRPROMPT_NO_TLS=1 AIRPROMPT_PID_FILE="$TEST_PID_FILE" CLAUDE_CONFIG_DIR="$TMPDIR" AIRPROMPT_SKIP_RECOVERY=1 PORT="$PORT" node server.js 2>/dev/null &
 SERVER_PID=$!
 
 for i in $(seq 1 20); do
