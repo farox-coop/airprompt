@@ -432,6 +432,52 @@ term.onData((data) => {
   send({ type: 'input', data });
 });
 
+// ── Mobile keyboard viewport fix ─────────────────────────────────────
+// On mobile, the virtual keyboard overlays or shrinks the viewport.
+// xterm.js's hidden textarea doesn't trigger native scroll-into-view
+// on focus, so the prompt hides behind the keyboard until first keypress.
+//
+// Fix: listen to visualViewport.resize. When the keyboard opens (viewport
+// shrinks significantly), constrain the terminal container height to the
+// visible area, re-fit rows, and scroll the viewport to show the prompt.
+// When the keyboard closes, restore the natural flex layout.
+let _vvhPrev = 0;
+let _vvhRaf = 0;
+if (window.visualViewport) {
+  _vvhPrev = window.visualViewport.height;
+  window.visualViewport.addEventListener('resize', function () {
+    if (_vvhRaf) return;
+    _vvhRaf = requestAnimationFrame(function () {
+      _vvhRaf = 0;
+      var vh = window.visualViewport.height;
+      var termContainer = document.getElementById('terminal-container');
+      var viewport = termContainer && termContainer.querySelector('.xterm-viewport');
+      var lh = window.innerHeight;
+      var kbHeight = lh - vh;
+      var sessionBar = document.getElementById('session-bar');
+      var barH = sessionBar ? sessionBar.offsetHeight : 44;
+      var overlayH = dictateOverlay.classList.contains('dictate-hidden') ? 0 : dictateOverlay.offsetHeight;
+
+      // Only react to significant height drops (keyboard open)
+      if (kbHeight > 80) {
+        var termH = vh - window.visualViewport.offsetTop - barH - overlayH;
+        termContainer.style.height = termH + 'px';
+        termContainer.style.flex = 'none';
+        try { fitAddon.fit(); } catch (_) {}
+        if (viewport && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 100) {
+          viewport.scrollTop = viewport.scrollHeight;
+        }
+      } else if (kbHeight < 20 && _vvhPrev > 0 && window.visualViewport.height - _vvhPrev > 40) {
+        // Keyboard dismissed: restore natural layout
+        termContainer.style.height = '';
+        termContainer.style.flex = '';
+        try { fitAddon.fit(); } catch (_) {}
+      }
+      _vvhPrev = window.visualViewport.height;
+    });
+  });
+}
+
 // ── Voice Dictation ─────────────────────────────────────────────────
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
@@ -701,6 +747,18 @@ if (SpeechRecognition) {
     dictateOverlay.classList.remove('speaking');
   };
 
+  recognition.onstart = () => {
+    // Recognition actually started — sync UI state defensively.
+    // Only correct if we're supposed to be listening but UI is wrong.
+    if (isListening && !dictateBtn.classList.contains('recording')) {
+      isPaused = false;
+      dictateBtn.classList.remove('paused');
+      dictateBtn.classList.add('recording');
+      dictateIcon.textContent = '🔴';
+      dictateLabel.textContent = tr('recording');
+    }
+  };
+
   recognition.onerror = (e) => {
     if (e.error === 'not-allowed') {
       // Fatal — dismiss everything
@@ -827,7 +885,12 @@ function acceptAndSend() {
     dictateLabel.textContent = tr('dictate');
   }
   if (text) {
-    send({ type: 'input', data: text + '\r' });
+    // Send text and Enter as two separate writes — mimics real keystrokes.
+    // Sending them as a single string can cause PTY buffering quirks where
+    // the shell echoes the text but the \r gets consumed by readline without
+    // actually submitting the line.
+    send({ type: 'input', data: text });
+    send({ type: 'input', data: '\r' });
   }
   dictationAccumulator = '';
   dismissOverlay();
@@ -854,7 +917,7 @@ dictateCancel.addEventListener('click', function(e) {
 //   short tap paused    → resume recording
 //   long-press stopped  → language dropdown
 //   long-press recording → pause
-//   long-press paused    → language dropdown
+//   long-press paused    → resume
 
 let longPressTimer = null;
 let longPressFired = false;
@@ -871,10 +934,12 @@ dictateBtn.addEventListener('pointerdown', (e) => {
     if (_stopPending) {
       // Ignore — stop is in-flight
     } else if (isListening) {
-      // Long-press while recording → pause
       pauseDictation();
+    } else if (isPaused) {
+      // Long-press while paused → resume instead of language dropdown
+      resumeDictation();
     } else {
-      // Long-press while stopped/paused → language dropdown
+      // Long-press while idle → language dropdown
       showLangDropdown();
     }
     if (navigator.vibrate) navigator.vibrate(12);
@@ -891,6 +956,8 @@ dictateBtn.addEventListener('pointerup', (e) => {
       toggleDictation(e);
     }
   }
+  // When longPressFired: the timeout already handled it (pause/resume/lang).
+  // Don't toggle — that would double-act on the same gesture.
 });
 
 dictateBtn.addEventListener('pointerleave', () => clearTimeout(longPressTimer));

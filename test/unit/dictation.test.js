@@ -373,6 +373,48 @@ test('overlay scroll — always scrolled to bottom after update', async (t) => {
 
 // ── longPress timer logic ─────────────────────────────────────────────
 
+// Simulates the pointerdown timeout handler (500ms timer callback).
+// Mirrors client.js: dictateBtn pointerdown → setTimeout body.
+function simulateLongPress(isListening, isPaused, stopPending) {
+  if (stopPending) {
+    return { action: 'ignored' };
+  } else if (isListening) {
+    return { action: 'pause' };
+  } else if (isPaused) {
+    return { action: 'resume' };
+  } else {
+    return { action: 'langDropdown' };
+  }
+}
+
+test('longPress handler — decision tree', async (t) => {
+  await t.test('long-press while recording → pause', () => {
+    const r = simulateLongPress(true, false, false);
+    assert.strictEqual(r.action, 'pause');
+  });
+
+  await t.test('long-press while paused → resume (not lang dropdown)', () => {
+    const r = simulateLongPress(false, true, false);
+    assert.strictEqual(r.action, 'resume');
+  });
+
+  await t.test('long-press while idle → language dropdown', () => {
+    const r = simulateLongPress(false, false, false);
+    assert.strictEqual(r.action, 'langDropdown');
+  });
+
+  await t.test('long-press while _stopPending → ignored', () => {
+    // Even if recording, stopPending takes priority
+    const r = simulateLongPress(true, false, true);
+    assert.strictEqual(r.action, 'ignored');
+  });
+
+  await t.test('long-press while stopPending + paused → ignored', () => {
+    const r = simulateLongPress(false, true, true);
+    assert.strictEqual(r.action, 'ignored');
+  });
+});
+
 
 
 // ── language-not-supported fallback ───────────────────────────────────
@@ -1014,21 +1056,94 @@ test('dismissOverlay — resets isPaused', async (t) => {
   });
 });
 
-// ── acceptAndSend — appends \\r ────────────────────────────────────────
+// ── recognition.onstart — defensive UI state sync ──────────────────────
 
-test('acceptAndSend — sends text with carriage return', async (t) => {
-  await t.test('text + CR → terminal sends prompt as Enter', () => {
-    const text = 'hello world';
-    const data = text + '\r'; // carriage return = Enter in terminal
-    assert.ok(data.endsWith('\r'));
-    assert.strictEqual(data.length, text.length + 1);
-    assert.strictEqual(data.charCodeAt(data.length - 1), 13); // CR = 0x0D
+function simulateOnstart(isListening, hasRecordingClass, wasPaused) {
+  // Mirrors client.js recognition.onstart handler.
+  // Only corrects if isListening=true but .recording class missing.
+  let isPaused = wasPaused;
+  let fixed = false;
+  if (isListening && !hasRecordingClass) {
+    isPaused = false;
+    fixed = true;
+  }
+  return { isPaused, fixed, classNow: isListening ? 'recording' : (isPaused ? 'paused' : 'none') };
+}
+
+test('recognition.onstart — UI state sync', async (t) => {
+  await t.test('onstart when listening + no .recording → fixes paused state', () => {
+    // Bug scenario: resumeDictation sets isListening=true, starts recognition,
+    // but recognition.onstart hadn't fired yet — button still shows paused.
+    // onstart fires and detects mismatch.
+    const r = simulateOnstart(true, false, true);
+    assert.strictEqual(r.fixed, true);
+    assert.strictEqual(r.isPaused, false);
   });
 
-  await t.test('empty text → not sent (guarded by if(text))', () => {
-    const text = '';
-    const sent = text ? (text + '\r') : null;
-    assert.strictEqual(sent, null);
+  await t.test('onstart when listening + .recording present → no change needed', () => {
+    const r = simulateOnstart(true, true, false);
+    assert.strictEqual(r.fixed, false);
+    assert.strictEqual(r.isPaused, false);
+  });
+
+  await t.test('onstart when NOT listening → no change (defensive no-op)', () => {
+    // If onstart fires but isListening is false (shouldn't happen normally,
+    // but be defensive), don't touch state.
+    const r = simulateOnstart(false, false, true);
+    assert.strictEqual(r.fixed, false);
+    assert.strictEqual(r.isPaused, true); // unchanged
+  });
+
+  await t.test('onstart: listening + paused class but no recording → fixes', () => {
+    // Red bg + "Paused" label: isListening=true, classList has 'paused' not 'recording'
+    const r = simulateOnstart(true, false, true);
+    assert.strictEqual(r.fixed, true);
+    assert.strictEqual(r.isPaused, false);
+    assert.strictEqual(r.classNow, 'recording');
+  });
+});
+
+// ── acceptAndSend — split write (text, then \\r) ────────────────────────
+
+function simulateAcceptAndSend(text) {
+  // Replicates acceptAndSend(): sends text then \r as two separate writes.
+  // This mimics real keystrokes — avoids PTY buffering quirks where a
+  // single write of "text\r" may not submit the line.
+  const writes = [];
+  if (text) {
+    writes.push({ data: text });
+    writes.push({ data: '\r' });
+  }
+  return writes;
+}
+
+test('acceptAndSend — split write behavior', async (t) => {
+  await t.test('text + CR → two separate writes', () => {
+    const text = 'hello world';
+    const writes = simulateAcceptAndSend(text);
+    assert.strictEqual(writes.length, 2);
+    assert.strictEqual(writes[0].data, 'hello world');
+    assert.strictEqual(writes[1].data, '\r');
+    assert.strictEqual(writes[1].data.charCodeAt(0), 13); // CR = 0x0D
+  });
+
+  await t.test('empty text → no writes at all', () => {
+    const writes = simulateAcceptAndSend('');
+    assert.strictEqual(writes.length, 0);
+  });
+
+  await t.test('whitespace-only text → no writes (empty after trim)', () => {
+    // Both client and test trim the text, so whitespace-only becomes empty
+    const text = '   '.trim();
+    const writes = simulateAcceptAndSend(text);
+    assert.strictEqual(writes.length, 0);
+  });
+
+  await t.test('single char → two writes', () => {
+    const writes = simulateAcceptAndSend('x');
+    assert.strictEqual(writes.length, 2);
+    assert.strictEqual(writes[0].data, 'x');
+    assert.strictEqual(writes[1].data, '\r');
   });
 });
 
