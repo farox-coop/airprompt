@@ -710,6 +710,53 @@ test('WS receives notification broadcast when POST /api/notify is called', (t, d
   ws.on('error', (e) => { assert.fail('WS error: ' + e.message); });
 });
 
+// ── Session kill tests ──────────────────────────────────────────────
+
+test('POST /api/sessions/kill rejects missing sessionId', async () => {
+  const res = await post('/api/sessions/kill', {});
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Missing sessionId');
+});
+
+test('POST /api/sessions/kill returns 404 for unknown', async () => {
+  const res = await post('/api/sessions/kill', { sessionId: 'nonexistent' });
+  assert.strictEqual(res.status, 404);
+  assert.strictEqual(res.body.error, 'Session not found');
+});
+
+test('POST /api/sessions/kill handles already-dead tmux', async () => {
+  // Register a session (server creates a tmux session for it)
+  await post('/api/sessions/register', { sessionId: 'test-kill-dead', cwd: '/tmp' });
+  assert.ok(sessions.has('test-kill-dead'), 'session should be registered');
+  // Kill the tmux session directly so kill endpoint sees a dead session
+  const entry = sessions.get('test-kill-dead');
+  if (entry && entry.tmuxSession) spawnSync('tmux', ['kill-session', '-t', entry.tmuxSession], { timeout: 2000 });
+  // Wait for tmux to fully clean up
+  await new Promise(function (r) { setTimeout(r, 100); });
+  const res = await post('/api/sessions/kill', { sessionId: 'test-kill-dead' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.ok, true);
+  assert.strictEqual(res.body.killed, false);
+  assert.strictEqual(res.body.reason, 'already dead');
+  assert.ok(!sessions.has('test-kill-dead'), 'session removed from memory');
+});
+
+test('POST /api/sessions/kill force-kills airprompt-* tmux session', { skip: !TMUX_AVAILABLE }, async () => {
+  // Create a real airprompt tmux session
+  spawnSync('tmux', ['new-session', '-d', '-s', 'airprompt-test-kill-live'], { timeout: 2000 });
+  // Register via API
+  await post('/api/sessions/register', { sessionId: 'test-kill-live', cwd: '/tmp', tmuxSession: 'airprompt-test-kill-live' });
+  assert.ok(sessions.has('test-kill-live'), 'session should be registered');
+  // Kill it — should force-kill the tmux and remove from sessions
+  const res = await post('/api/sessions/kill', { sessionId: 'test-kill-live' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.ok, true);
+  assert.ok(!sessions.has('test-kill-live'), 'session removed from memory');
+  // Verify tmux session is dead
+  const { status } = spawnSync('tmux', ['has-session', '-t', 'airprompt-test-kill-live'], { timeout: 2000 });
+  assert.notStrictEqual(status, 0, 'tmux session should be gone');
+});
+
 test('integration test sets CLAUDE_CONFIG_DIR for isolation', () => {
   const fs = require('fs');
   const path = require('path');

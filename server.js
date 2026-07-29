@@ -223,6 +223,55 @@ function createApp() {
     res.json({ ok: true });
   });
 
+  app.post('/api/sessions/kill', async (req, res) => {
+    try {
+      const { sessionId } = req.body || {};
+      if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
+      const entry = sessions.get(sessionId);
+      if (!entry) return res.status(404).json({ error: 'Session not found' });
+
+      const tmux = entry.tmuxSession;
+      if (!tmux) {
+        sessions.delete(sessionId);
+        broadcastSessionList(wss);
+        return res.json({ ok: true, killed: false, reason: 'no tmux session' });
+      }
+
+      if (!tmuxExists(tmux)) {
+        sessions.delete(sessionId);
+        broadcastSessionList(wss);
+        return res.json({ ok: true, killed: false, reason: 'already dead' });
+      }
+
+      // Phase 1: Graceful — send `/airprompt off` into the tmux session
+      spawnSync('tmux', ['send-keys', '-t', tmux, '/airprompt off', 'Enter'], { timeout: 2000 });
+
+      // Phase 2: Wait up to 5s for session to die
+      var deadline = Date.now() + 5000;
+      var died = false;
+      while (Date.now() < deadline) {
+        await new Promise(function (r) { setTimeout(r, 300); });
+        if (!tmuxExists(tmux)) { died = true; break; }
+      }
+
+      // Phase 3: If still alive, force kill (airprompt-* only)
+      if (!died && tmuxExists(tmux)) {
+        if (tmux.startsWith('airprompt-')) {
+          spawnSync('tmux', ['kill-session', '-t', tmux], { timeout: 2000 });
+        }
+        // Non-airprompt sessions are real Claude sessions — never kill them.
+        // The stale interval will clean up when Claude eventually exits.
+      }
+
+      sessions.delete(sessionId);
+      broadcastSessionList(wss);
+      res.json({ ok: true, killed: !died, graceful: died });
+    } catch (err) {
+      log('error', 'session kill failed', { sessionId: req.body && req.body.sessionId, error: err.message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   app.put('/api/sessions/name', (req, res) => {
     const { sessionId, name } = req.body || {};
     if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });

@@ -73,14 +73,25 @@ body, html {
 }
 .session-item {
   display: block; width: 100%; background: #21262d; border: 1px solid #30363d;
-  border-radius: 8px; padding: 14px; margin-bottom: 8px; cursor: pointer;
-  text-align: left; color: #c9d1d9; font-size: 16px;
+  border-radius: 8px; padding: 14px; padding-right: 48px; margin-bottom: 8px; cursor: pointer;
+  text-align: left; color: #c9d1d9; font-size: 16px; position: relative;
 }
 .session-item:active { background: #30363d; }
 .session-item.active { border-color: #58a6ff; }
 .session-item .name { font-weight: 600; font-size: 18px; }
 .session-item .cwd { font-size: 14px; }
+.session-item .sid { font-size: 11px; color: #8b949e; font-family: monospace; margin-top: 2px; }
 .session-item .time { font-size: 13px; color: #8b949e; margin-top: 4px; }
+.session-kill {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px;
+  background: transparent; border: none;
+  font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2;
+}
+.session-kill:active { background: #dc2626; border-radius: 6px; }
+.session-kill.killing { animation: spin 0.8s linear infinite; }
 .session-empty { color: #8b949e; text-align: center; padding: 24px; }
 #modal-close {
   display: block; width: 100%; background: #21262d; color: #c9d1d9;

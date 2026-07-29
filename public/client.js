@@ -374,14 +374,58 @@ function updateUI() {
         return `<button class="session-item${activeClass}" data-id="${s.id}">
           <div class="name">${label}</div>
           ${subHtml}
+          <div class="sid">${escHtml(s.id)}</div>
           <div class="time">${escHtml(time)}</div>
+          <span class="session-kill" data-id="${s.id}" title="Kill session" role="button" tabindex="0">🗑️</span>
         </button>`;
       })
       .join('');
-    // Bind click handlers
+    // Bind click handlers — single handler on session-item.
+    // .session-kill is nested inside <button>; mobile browsers route
+    // the click to the button regardless of stopPropagation. Instead
+    // we check e.target.closest('.session-kill') to decide the action.
     sessionList.querySelectorAll('.session-item').forEach((el) => {
-      el.addEventListener('click', () => selectSession(el.dataset.id));
+      el.addEventListener('click', function (e) {
+        if (e.target.closest('.session-kill')) {
+          if (!confirm('Kill session ' + el.dataset.id + '?')) return;
+          killSession(el.dataset.id);
+          return;
+        }
+        selectSession(el.dataset.id);
+      });
     });
+  }
+}
+
+async function killSession(sessionId) {
+  const btn = document.querySelector('.session-kill[data-id="' + sessionId + '"]');
+  if (!btn) return;
+  btn.classList.add('killing');
+  btn.textContent = '⏳';
+  try {
+    const resp = await fetch('/api/sessions/kill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sessionId }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // session_list broadcast will refresh UI automatically.
+      // If it was the active session, deselect.
+      if (activeSessionId === sessionId) {
+        activeSessionId = null;
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+      }
+      // session_list broadcast will rebuild the list, removing this button
+    } else {
+      log('warn', 'kill session rejected', { sessionId: sessionId, status: resp.status, error: data.error });
+      btn.classList.remove('killing');
+      btn.textContent = '🗑️';
+    }
+  } catch (err) {
+    log('error', 'kill session failed', { sessionId: sessionId, error: err.message });
+    btn.classList.remove('killing');
+    btn.textContent = '🗑️';
   }
 }
 
