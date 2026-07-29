@@ -26,15 +26,17 @@ if [ "$NAME" = '""' ]; then
   NAME=""
 fi
 
-# ── Detect protocol ──────────────────────────────────────────────────
-CERT_FILE="${CONFIG_DIR}/airprompt-cert.pem"
-KEY_FILE="${CONFIG_DIR}/airprompt-key.pem"
+# ── Detect protocol: daemon.json SSOT → cert fallback → http ──────────
+AIRPROMPT_CONF="${CONFIG_DIR}/.airprompt/daemon.json"
 PROTO="http"
-CURL_OPTS="-s"
-if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
+CURL_OPTS=""
+if [ -f "$AIRPROMPT_CONF" ] && command -v jq >/dev/null 2>&1; then
+  PROTO=$(jq -r '.protocol // "http"' "$AIRPROMPT_CONF" 2>/dev/null || echo "http")
+  DAEMON_PORT=$(jq -r '.port // 3210' "$AIRPROMPT_CONF" 2>/dev/null || echo "$DAEMON_PORT")
+elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/airprompt-key.pem" ]; then
   PROTO="https"
-  CURL_OPTS="-s -k"
 fi
+[ "$PROTO" = "https" ] && CURL_OPTS="-k"
 
 # ── Resolve current tmux session ─────────────────────────────────────
 CURRENT_TMUX=""

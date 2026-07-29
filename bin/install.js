@@ -28,7 +28,6 @@ const PINNED_REF = process.env.AIRPROMPT_REF || 'main';
 const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/${PINNED_REF}`;
 
 const HOOK_FILES = [
-  'package.json',
   'airprompt-activate.js',
   'airprompt-deactivate.js',
   'airprompt-statusline.sh',
@@ -112,6 +111,52 @@ function makeChalk(noColor) {
 function checkNodeVersion() {
   const major = parseInt(process.versions.node.split('.')[0], 10);
   if (major < 18) die(`airprompt: Node ${process.versions.node} too old. Need Node ≥18. https://nodejs.org`);
+}
+
+function checkJq(ctx) {
+  const { note, warn, ok, opts } = ctx;
+  if (hasCmd('jq')) { note('  jq: found'); return true; }
+  warn('  jq is required but not installed.');
+  warn('  Please run this command in another terminal:');
+  warn('    sudo apt install jq');
+  warn('');
+  if (opts.dryRun) return false;
+  process.stdout.write('  Press Enter after installing jq to continue...');
+  child_process.spawnSync('bash', ['-c', 'read -r _'], { stdio: 'inherit' });
+  if (hasCmd('jq')) {
+    ok('  jq: ready');
+    return true;
+  }
+  warn('  jq still not found — notifications may not work.');
+  return false;
+}
+
+function generateCert(ctx, targetDir) {
+  const { say, note, warn, ok, opts } = ctx;
+  const certScript = path.join(targetDir, 'bin', 'generate-cert.sh');
+  if (!fs.existsSync(certScript)) {
+    warn('  cert script not found — HTTPS will not be enforced');
+    return false;
+  }
+  const configDir = claudeConfigDir(opts);
+  const certFile = path.join(configDir, 'airprompt-cert.pem');
+  const keyFile = path.join(configDir, 'airprompt-key.pem');
+  if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
+    note('  TLS certificate already present');
+    return true;
+  }
+  say('  → generating TLS certificate (required for HTTPS)');
+  if (!opts.dryRun) {
+    const r = spawnXplat('bash', [certScript], { stdio: 'inherit', env: { ...process.env, CLAUDE_CONFIG_DIR: configDir } });
+    if (!spawnOk(r)) {
+      warn('  cert generation failed — voice dictation needs HTTPS. Run: make cert');
+      return false;
+    }
+    ok('  TLS certificate generated');
+  } else {
+    note('  would generate TLS certificate');
+  }
+  return true;
 }
 
 // ── Detection ─────────────────────────────────────────────────────────────
@@ -248,6 +293,14 @@ async function installClaude(ctx) {
     }
   } else {
     note('  dependencies already installed');
+  }
+
+  // 2c. Check jq dependency (required for daemon protocol detection)
+  checkJq(ctx);
+
+  // 2d. Enforce HTTPS — generate TLS certificate
+  if (!generateCert(ctx, targetDir)) {
+    warn('  HTTPS not available — voice dictation and notifications may not work');
   }
 
   // 2b. Create ~/bin/airprompt + ~/bin/airprompt-claude symlinks
@@ -456,20 +509,26 @@ function copyUserFiles(ctx, targetDir) {
   fs.mkdirSync(commandsDir, { recursive: true });
   fs.mkdirSync(skillsDir, { recursive: true });
 
-  // Command
-  const cmdSrc = path.join(targetDir, '.claude', 'commands', 'airprompt.md');
-  const cmdDest = path.join(commandsDir, 'airprompt.md');
-  if (fs.existsSync(cmdSrc)) {
-    fs.copyFileSync(cmdSrc, cmdDest);
-    process.stdout.write(`  installed: ${cmdDest}\n`);
+  // Command files
+  const cmdSrcMd = path.join(targetDir, 'commands', 'airprompt.md');
+  const cmdSrcToml = path.join(targetDir, 'commands', 'airprompt.toml');
+  if (fs.existsSync(cmdSrcMd)) {
+    fs.copyFileSync(cmdSrcMd, path.join(commandsDir, 'airprompt.md'));
+    process.stdout.write(`  installed: ${path.join(commandsDir, 'airprompt.md')}\n`);
+  }
+  if (fs.existsSync(cmdSrcToml)) {
+    fs.copyFileSync(cmdSrcToml, path.join(commandsDir, 'airprompt.toml'));
+    process.stdout.write(`  installed: ${path.join(commandsDir, 'airprompt.toml')}\n`);
   }
 
-  // Skill
-  const skillSrc = path.join(targetDir, '.claude', 'skills', 'airprompt.md');
-  const skillDest = path.join(skillsDir, 'airprompt.md');
+  // sync-claude skill (directory)
+  const skillSrc = path.join(targetDir, '.claude', 'skills', 'sync-claude');
+  const skillDest = path.join(skillsDir, 'sync-claude');
   if (fs.existsSync(skillSrc)) {
-    fs.copyFileSync(skillSrc, skillDest);
+    fs.cpSync(skillSrc, skillDest, { recursive: true });
     process.stdout.write(`  installed: ${skillDest}\n`);
+  } else {
+    process.stdout.write(`  (skip skill — source not found: ${skillSrc})\n`);
   }
 }
 
@@ -577,6 +636,15 @@ function uninstall(ctx) {
     note(`  removed ${sessionsDir}`);
   }
 
+  // 6b. Remove daemon.json and .airprompt directory
+  const airpromptDir = path.join(configDir, '.airprompt');
+  const daemonJson = path.join(airpromptDir, 'daemon.json');
+  if (fs.existsSync(daemonJson)) {
+    if (!opts.dryRun) { try { fs.unlinkSync(daemonJson); } catch (_) {} }
+    note(`  removed ${daemonJson}`);
+  }
+  try { if (!opts.dryRun) fs.rmdirSync(airpromptDir); } catch (_) {}
+
   // 7. Target dir removal prompt
   const targetDir = opts.targetDir || path.join(os.homedir(), '.airprompt');
   if (fs.existsSync(targetDir)) {
@@ -681,8 +749,11 @@ async function main() {
     for (const [id, why] of ctx.results.failed) process.stderr.write(`    • ${id} — ${why}\n`);
   }
   process.stdout.write('\n');
+  const certFile = path.join(claudeConfigDir(opts), 'airprompt-cert.pem');
+  const keyFile = path.join(claudeConfigDir(opts), 'airprompt-key.pem');
+  const hasTls = fs.existsSync(certFile) && fs.existsSync(keyFile);
   ctx.note('  start Claude Code and AirPrompt will auto-register each session');
-  ctx.note(`  mobile URL: http://<your-lan-ip>:${opts.port}`);
+  ctx.note(`  mobile URL: ${hasTls ? 'https' : 'http'}://<your-lan-ip>:${opts.port}`);
   ctx.note(`  uninstall: node ${path.join(opts.targetDir || path.join(os.homedir(), '.airprompt'), 'bin', 'install.js')} --uninstall`);
 
   return 0;

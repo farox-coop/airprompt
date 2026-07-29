@@ -37,23 +37,84 @@ for d in "${CACHES[@]}"; do
   fi
 done
 
-# Copy hooks to ~/.claude/ (skip if dest is a symlink — user-managed)
+# Sync hooks to ~/.claude/ — prefer symlinks into repo. If symlink was
+# overwritten by a stale copy (content matches repo), restore it.
 for h in "${HOOKS[@]}"; do
   dest="$HOME/.claude/hooks/$h"
-  if [ -L "$dest" ]; then
-    echo "  (skip $dest — symlink, user-managed)"
+  src="$REPO/src/hooks/$h"
+  if [ ! -f "$src" ]; then
+    echo "  (skip $h — source missing from repo)"
+    continue
+  fi
+  if [ -d "$dest" ]; then
+    echo "  WARNING: $dest is a directory, should be a symlink — removing"
+    rm -rf "$dest"
+    ln -s "$src" "$dest"
+    echo "  restored symlink: $dest → $src"
+  elif [ -L "$dest" ]; then
+    # Already a symlink — verify it points to the right place and exists
+    _target=$(readlink "$dest" 2>/dev/null || echo "")
+    if [ ! -e "$dest" ]; then
+      echo "  broken symlink: $dest → restoring"
+      rm "$dest"
+      ln -s "$src" "$dest"
+      echo "  restored symlink: $dest → $src"
+    elif [ "$_target" != "$src" ]; then
+      echo "  redirecting symlink: $dest (was → $_target, now → $src)"
+      rm "$dest"
+      ln -s "$src" "$dest"
+    fi
+  elif [ -f "$dest" ]; then
+    # Regular file — check if content matches repo (stale copy → restore symlink)
+    if diff -q "$src" "$dest" >/dev/null 2>&1; then
+      echo "  restoring symlink (was overwritten): $dest"
+      rm "$dest"
+      ln -s "$src" "$dest"
+      echo "  restored symlink: $dest → $src"
+    else
+      echo "  (skip $dest — user-edited copy, not overwriting)"
+    fi
   else
-    cp "$REPO/src/hooks/$h" "$dest"
+    # No file at dest — create symlink
+    ln -s "$src" "$dest"
+    echo "  symlinked: $dest → $src"
   fi
 done
 
-# Copy command files to ~/.claude/commands/ (skip if dest is a symlink — user-managed)
+# Sync commands to ~/.claude/commands/ — same symlink logic
 for f in airprompt.md airprompt.toml; do
   dest="$HOME/.claude/commands/$f"
-  if [ -L "$dest" ]; then
-    echo "  (skip $dest — symlink, user-managed)"
-  elif [ -f "$REPO/commands/$f" ]; then
-    cp "$REPO/commands/$f" "$dest"
+  src="$REPO/commands/$f"
+  [ ! -f "$src" ] && continue
+  if [ -d "$dest" ]; then
+    echo "  WARNING: $dest is a directory, should be a symlink — removing"
+    rm -rf "$dest"
+    ln -s "$src" "$dest"
+    echo "  restored symlink: $dest → $src"
+  elif [ -L "$dest" ]; then
+    _target=$(readlink "$dest" 2>/dev/null || echo "")
+    if [ ! -e "$dest" ]; then
+      echo "  broken symlink: $dest → restoring"
+      rm "$dest"
+      ln -s "$src" "$dest"
+      echo "  restored symlink: $dest → $src"
+    elif [ "$_target" != "$src" ]; then
+      echo "  redirecting symlink: $dest (was → $_target, now → $src)"
+      rm "$dest"
+      ln -s "$src" "$dest"
+    fi
+  elif [ -f "$dest" ]; then
+    if diff -q "$src" "$dest" >/dev/null 2>&1; then
+      echo "  restoring symlink (was overwritten): $dest"
+      rm "$dest"
+      ln -s "$src" "$dest"
+      echo "  restored symlink: $dest → $src"
+    else
+      echo "  (skip $dest — user-edited copy, not overwriting)"
+    fi
+  else
+    ln -s "$src" "$dest"
+    echo "  symlinked: $dest → $src"
   fi
 done
 
@@ -85,9 +146,13 @@ for h in "${HOOKS[@]}"; do
   for d in "${CACHES[@]}"; do
     debug_mismatch "hook" "$REPO/src/hooks/$h" "$d/src/hooks" "$h"
   done
-  # Also verify ~/.claude/hooks/ copy (unless symlinked)
-  if [ ! -L "$HOME/.claude/hooks/$h" ]; then
-    debug_mismatch "hook" "$REPO/src/hooks/$h" "$HOME/.claude/hooks" "$h"
+  # Verify ~/.claude/hooks/ copy — skip symlinks and user-edited copies
+  dest="$HOME/.claude/hooks/$h"
+  if [ ! -L "$dest" ] && [ -f "$dest" ]; then
+    # Only verify if content matches repo (i.e. a managed copy, not user-edited)
+    if diff -q "$REPO/src/hooks/$h" "$dest" >/dev/null 2>&1; then
+      debug_mismatch "hook" "$REPO/src/hooks/$h" "$HOME/.claude/hooks" "$h"
+    fi
   fi
 done
 
@@ -113,6 +178,13 @@ for f in airprompt.md airprompt.toml; do
   for d in "${CACHES[@]}"; do
     debug_mismatch "command" "$REPO/commands/$f" "$d/commands" "$f"
   done
+  # Also verify ~/.claude/commands/ copy — skip symlinks and user-edited copies
+  dest="$HOME/.claude/commands/$f"
+  if [ ! -L "$dest" ] && [ -f "$dest" ]; then
+    if diff -q "$REPO/commands/$f" "$dest" >/dev/null 2>&1; then
+      debug_mismatch "command" "$REPO/commands/$f" "$HOME/.claude/commands" "$f"
+    fi
+  fi
 done
 
 if [ $MISMATCHES -eq 0 ]; then

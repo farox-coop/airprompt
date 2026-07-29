@@ -25,6 +25,8 @@ const CERT_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.clau
 const CERT_FILE = path.join(CERT_DIR, 'airprompt-cert.pem');
 const KEY_FILE = path.join(CERT_DIR, 'airprompt-key.pem');
 const TLS_ENABLED = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
+const AIRPROMPT_DIR = path.join(CERT_DIR, '.airprompt');
+const DAEMON_JSON = path.join(AIRPROMPT_DIR, 'daemon.json');
 
 const sessions = new Map();
 
@@ -76,6 +78,13 @@ function writePid() {
 }
 
 function removePid() { try { fs.unlinkSync(PID_FILE); } catch (e) { /* ok */ } }
+
+function writeDaemonJson(protocol, port, lanIp) {
+  try { fs.mkdirSync(AIRPROMPT_DIR, { recursive: true }); } catch (_) {}
+  const json = JSON.stringify({ protocol, port, lanIp, url: `${protocol}://${lanIp}:${port}`, pid: process.pid });
+  try { fs.writeFileSync(DAEMON_JSON, json); } catch (_) {}
+}
+function removeDaemonJson() { try { fs.unlinkSync(DAEMON_JSON); } catch (_) {} }
 
 function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return false; } }
 
@@ -454,6 +463,7 @@ if (require.main === module) {
   } catch (e) { /* ok */ }
 
   writePid();
+  writeDaemonJson(TLS_ENABLED ? 'https' : 'http', PORT, getLocalIp());
   log('info', 'daemon starting', { port: PORT, pid: process.pid, tls: TLS_ENABLED, debug: DEBUG });
   // Rebuild session registry from on-disk markers BEFORE listen
   // so first WS client sees recovered sessions immediately.
@@ -470,14 +480,15 @@ if (require.main === module) {
     qrcode.generate(url, { small: true });
   });
 
-  httpServer.on('error', (err) => { console.error(`Server error: ${err.message}`); removePid(); process.exit(1); });
+  httpServer.on('error', (err) => { console.error(`Server error: ${err.message}`); removePid(); removeDaemonJson(); process.exit(1); });
   function gracefulShutdown(signal) {
     log('info', 'daemon shutting down', { signal, sessions: sessions.size });
     removePid();
+    removeDaemonJson();
     process.exit(0);
   }
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGHUP', () => gracefulShutdown('SIGHUP'));
-  process.on('exit', () => removePid());
+  process.on('exit', () => { removePid(); removeDaemonJson(); });
 }

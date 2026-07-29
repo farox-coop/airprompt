@@ -16,14 +16,36 @@ const https = require('https');
 const os = require('os');
 const { spawnSync } = require('child_process');
 
-const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+
+const PORT = (() => {
+  // daemon.json SSOT → env fallback → default
+  try {
+    const dj = path.join(CONFIG_DIR, '.airprompt', 'daemon.json');
+    if (fs.existsSync(dj)) {
+      const info = JSON.parse(fs.readFileSync(dj, 'utf8'));
+      if (info.port) return info.port;
+    }
+  } catch (_) {}
+  return process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
+})();
 const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
 
-const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');
-const KEY_FILE = path.join(CONFIG_DIR, 'airprompt-key.pem');
-const TLS = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
+// Detect TLS — daemon.json SSOT → cert fallback → http
+let TLS = false;
+try {
+  const daemonJson = path.join(CONFIG_DIR, '.airprompt', 'daemon.json');
+  if (fs.existsSync(daemonJson)) {
+    const info = JSON.parse(fs.readFileSync(daemonJson, 'utf8'));
+    TLS = info.protocol === 'https';
+  }
+} catch (_) {}
+if (!TLS) {
+  const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');
+  const KEY_FILE = path.join(CONFIG_DIR, 'airprompt-key.pem');
+  TLS = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
+}
 
 const DEBUG = process.env.AIRPROMPT_DEBUG === '1';
 

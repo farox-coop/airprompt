@@ -14,8 +14,19 @@ const https = require('https');
 const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 
-const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+
+const PORT = (() => {
+  // daemon.json SSOT → env fallback → default
+  try {
+    const dj = path.join(CONFIG_DIR, '.airprompt', 'daemon.json');
+    if (fs.existsSync(dj)) {
+      const info = JSON.parse(fs.readFileSync(dj, 'utf8'));
+      if (info.port) return info.port;
+    }
+  } catch (_) {}
+  return process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
+})();
 const AIRPROMPT_DIR = path.join(os.homedir(), '.airprompt');
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
 const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
@@ -27,10 +38,21 @@ const DEV_DIR = path.join(os.homedir(), 'projects', 'airprompt');
 const INSTALL_DIR = process.env.CLAUDE_PLUGIN_ROOT
   || (fs.existsSync(path.join(AIRPROMPT_DIR, 'server.js')) ? AIRPROMPT_DIR : DEV_DIR);
 
-// Detect TLS
-const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');
-const KEY_FILE = path.join(CONFIG_DIR, 'airprompt-key.pem');
-const TLS = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
+// Detect TLS — daemon.json SSOT → cert fallback → http
+const AIRPROMPT_DATA_DIR = path.join(CONFIG_DIR, '.airprompt');
+const DAEMON_JSON = path.join(AIRPROMPT_DATA_DIR, 'daemon.json');
+let TLS = false;
+try {
+  if (fs.existsSync(DAEMON_JSON)) {
+    const info = JSON.parse(fs.readFileSync(DAEMON_JSON, 'utf8'));
+    TLS = info.protocol === 'https';
+  }
+} catch (_) {}
+if (!TLS) {
+  const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');
+  const KEY_FILE = path.join(CONFIG_DIR, 'airprompt-key.pem');
+  TLS = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
+}
 
 function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (_) { return false; } }
 

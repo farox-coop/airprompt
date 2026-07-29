@@ -10,6 +10,7 @@ AirPrompt lets you view and interact with remote Claude CLI sessions running on 
 
 - **Node.js** ≥ 18
 - **tmux** (`sudo apt install tmux`)
+- **jq** (`sudo apt install jq`) — JSON parsing for daemon protocol detection and notifications
 - **reptyr** (`sudo apt install reptyr`) — optional, for `airprompt-attach.sh` (attach running processes to tmux)
 - **openssl** — TLS certificate generation for HTTPS voice dictation
 

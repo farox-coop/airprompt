@@ -76,15 +76,17 @@ fi
 [ -z "$LAN_IP" ] && LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 [ -z "$LAN_IP" ] && LAN_IP="localhost"
 
-# ── Detect protocol ──────────────────────────────────────────────────
-CERT_FILE="${CONFIG_DIR}/airprompt-cert.pem"
-KEY_FILE="${CONFIG_DIR}/airprompt-key.pem"
+# ── Detect protocol: daemon.json SSOT → cert fallback → http ──────────
+AIRPROMPT_CONF="${CONFIG_DIR}/.airprompt/daemon.json"
 PROTO="http"
 CURL_OPTS=""
-if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
+if [ -f "$AIRPROMPT_CONF" ] && command -v jq >/dev/null 2>&1; then
+  PROTO=$(jq -r '.protocol // "http"' "$AIRPROMPT_CONF" 2>/dev/null || echo "http")
+  DAEMON_PORT=$(jq -r '.port // 3210' "$AIRPROMPT_CONF" 2>/dev/null || echo "$DAEMON_PORT")
+elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/airprompt-key.pem" ]; then
   PROTO="https"
-  CURL_OPTS="-k"
 fi
+[ "$PROTO" = "https" ] && CURL_OPTS="-k"
 
 # ── Ensure daemon is running ─────────────────────────────────────────
 if [ -f "$PID_FILE" ]; then
@@ -199,16 +201,6 @@ if echo "$RESP" | grep -q '"ok":true'; then
   fi
   echo "AirPrompt session registered: $SESSION_ID"
   echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
-elif echo "$RESP" | grep -q '"already registered"'; then
-  mkdir -p "$MY_DIR"
-  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
-  echo "$SESSION_ID" > "${MY_DIR}/session"
-  echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
-  touch "$ACTIVE_FILE"
-  if [ -n "$SESSION_NAME" ]; then
-    _name_update "$SESSION_ID" "$SESSION_NAME" "$MY_DIR"
-  fi
-  echo "AirPrompt already registered for this session."
 elif echo "$RESP" | grep -q '"Session already registered"'; then
   mkdir -p "$MY_DIR"
   echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
