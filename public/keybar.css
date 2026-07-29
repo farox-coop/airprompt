@@ -97,3 +97,11 @@
   font-size: 18px;
   min-width: 42px;
 }
+
+/* ── Spacer (invisible layout placeholder) ───── */
+.keybar-spacer {
+  min-width: 36px;
+  min-height: 36px;
+  visibility: hidden;
+  flex-shrink: 0;
+}

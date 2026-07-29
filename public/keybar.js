@@ -2,6 +2,10 @@
 (function () {
   'use strict';
 
+  // Shift modifier does NOT transform characters — it is purely a sticky
+  // modifier to combine with Ctrl/Alt for terminal shortcuts (e.g. Ctrl+Shift+C).
+  // In a raw PTY, Ctrl+Shift+letter sends the same control char as Ctrl+letter.
+
   // ── Key definitions ──────────────────────────────────────────────────
   var ROWS = [
     [
@@ -9,40 +13,50 @@
       { label: 'Tab',   seq: '\t',       cls: 'modifier' },
       { label: 'Ctrl',  seq: null,       cls: 'modifier sticky', id: 'ctrl' },
       { label: 'Alt',   seq: null,       cls: 'modifier sticky', id: 'alt' },
+      { label: 'Shift', seq: null,       cls: 'modifier sticky', id: 'shift' },
+      { label: '\\',    seq: '\\',       cls: '' },
+      { label: ';',     seq: ';',        cls: '' },
       { label: '-',     seq: '-',        cls: '' },
       { label: '/',     seq: '/',        cls: '' },
       { label: '.',     seq: '.',        cls: '' },
-      { label: '|',     seq: '|',        cls: '' },
     ],
     [
-      { label: '↑', seq: '\x1b[A',  cls: 'arrow' },
-      { label: '↓', seq: '\x1b[B',  cls: 'arrow' },
-      { label: '←', seq: '\x1b[D',  cls: 'arrow' },
-      { label: '→', seq: '\x1b[C',  cls: 'arrow' },
       { label: 'Home',  seq: '\x1b[H',   cls: '' },
+      { label: '',      seq: null,       cls: 'spacer' },
+      { label: '↑',     seq: '\x1b[A',   cls: 'arrow' },
+      { label: '',      seq: null,       cls: 'spacer' },
       { label: 'End',   seq: '\x1b[F',   cls: '' },
-    ],
-    [
       { label: 'PgUp',  seq: '\x1b[5~',  cls: '' },
       { label: 'PgDn',  seq: '\x1b[6~',  cls: '' },
-      { label: 'Del',   seq: '\x1b[3~',  cls: '' },
+    ],
+    [
+      { label: '←',     seq: '\x1b[D',   cls: 'arrow' },
+      { label: '↓',     seq: '\x1b[B',   cls: 'arrow' },
+      { label: '→',     seq: '\x1b[C',   cls: 'arrow' },
+      { label: '|',     seq: '|',        cls: '' },
       { label: ':',     seq: ':',        cls: '' },
+      { label: 'Del',   seq: '\x1b[3~',  cls: '' },
     ],
   ];
 
   // ── State ─────────────────────────────────────────────────────────────
   var container = null;
-  var ctrlBtn = null;
-  var altBtn = null;
-  var ctrlArmed = false;
-  var ctrlLocked = false;
-  var altArmed = false;
-  var altLocked = false;
-  var ctrlLastTap = 0;
-  var altLastTap = 0;
+  var modBtns = {};       // { ctrl: btn, alt: btn, shift: btn }
+  var modState = {
+    ctrl:  { armed: false, locked: false, lastTap: 0 },
+    alt:   { armed: false, locked: false, lastTap: 0 },
+    shift: { armed: false, locked: false, lastTap: 0 },
+  };
   var DOUBLE_TAP_MS = 300;
 
   // ── Helpers ───────────────────────────────────────────────────────────
+  // SHIFT_MAP: terminal control sequences → Shift-modified version.
+  // This is NOT character casing (a→A). It maps terminal escape codes
+  // that change when Shift is held (e.g. Tab → reverse tab \x1b[Z]).
+  var SHIFT_MAP = {
+    '\t': '\x1b[Z',   // Tab → Shift+Tab (reverse tab)
+  };
+
   function isMobile() {
     try {
       return window.matchMedia('(pointer: coarse)').matches;
@@ -53,78 +67,76 @@
     if (!seq) return;
 
     // Apply sticky Ctrl: mask ASCII chars with 0x1f
-    if ((ctrlArmed || ctrlLocked) && seq.length === 1) {
+    var s = modState.ctrl;
+    if ((s.armed || s.locked) && seq.length === 1) {
       var code = seq.charCodeAt(0);
       if (code >= 0x20 && code < 0x7f) {
         seq = String.fromCharCode(code & 0x1f);
       }
     }
-    // Disarm Ctrl after any keypress (armed is single-shot).
-    // Always disarm even on multi-char sequences (arrows, Home, etc.)
-    // where the mask wasn't applied — otherwise Ctrl stays blue forever.
-    if (ctrlArmed) { ctrlArmed = false; updateModUI(); }
+    if (s.armed) { s.armed = false; updateModUI(); }
 
     // Apply sticky Alt: prefix \x1b
-    if (altArmed || altLocked) {
+    var a = modState.alt;
+    if (a.armed || a.locked) {
       seq = '\x1b' + seq;
-      if (!altLocked) { altArmed = false; updateModUI(); }
+      if (!a.locked) { a.armed = false; updateModUI(); }
     }
+
+    // Apply sticky Shift: map known control sequences. Only for keys in
+    // SHIFT_MAP — regular characters are NOT transformed (a stays a).
+    var sh = modState.shift;
+    if ((sh.armed || sh.locked) && SHIFT_MAP[seq]) {
+      seq = SHIFT_MAP[seq];
+    }
+    if (sh.armed) { sh.armed = false; updateModUI(); }
 
     if (window._airpromptSend) {
       window._airpromptSend({ type: 'input', data: seq });
     }
+    // tabindex=-1 on buttons prevents focus theft from xterm's textarea.
+    // Do NOT force focus() here — it opens the native keyboard even for
+    // keys that don't need it (Esc, Tab, arrows). Focus stays where it
+    // was; if the user had the native keyboard open, it stays open.
   }
 
   function updateModUI() {
-    if (ctrlBtn) {
-      ctrlBtn.classList.toggle('armed', ctrlArmed);
-      ctrlBtn.classList.toggle('locked', ctrlLocked);
-    }
-    if (altBtn) {
-      altBtn.classList.toggle('armed', altArmed);
-      altBtn.classList.toggle('locked', altLocked);
+    for (var mod in modState) {
+      var btn = modBtns[mod];
+      if (!btn) continue;
+      btn.classList.toggle('armed', modState[mod].armed);
+      btn.classList.toggle('locked', modState[mod].locked);
     }
   }
 
   function handleSticky(mod) {
     var now = Date.now();
+    var s = modState[mod];
+    if (!s) return;
 
-    if (mod === 'ctrl') {
-      if (ctrlLocked) {
-        // Locked → unlock (completely disarm)
-        ctrlLocked = false;
-        ctrlArmed = false;
-      } else if (ctrlArmed) {
-        // Armed: double-tap → lock, otherwise disarm
-        if (now - ctrlLastTap <= DOUBLE_TAP_MS) {
-          ctrlArmed = false;
-          ctrlLocked = true;
-        } else {
-          ctrlArmed = false;
-        }
+    if (s.locked) {
+      // Locked → unlock (completely disarm)
+      s.locked = false;
+      s.armed = false;
+    } else if (s.armed) {
+      // Armed: double-tap within window → lock, otherwise disarm
+      if (now - s.lastTap <= DOUBLE_TAP_MS) {
+        s.armed = false;
+        s.locked = true;
       } else {
-        // Idle → arm (start double-tap window)
-        ctrlArmed = true;
-        ctrlLastTap = now;
+        s.armed = false;
       }
-    } else if (mod === 'alt') {
-      if (altLocked) {
-        altLocked = false;
-        altArmed = false;
-      } else if (altArmed) {
-        if (now - altLastTap <= DOUBLE_TAP_MS) {
-          altArmed = false;
-          altLocked = true;
-        } else {
-          altArmed = false;
-        }
-      } else {
-        altArmed = true;
-        altLastTap = now;
-      }
+    } else {
+      // Idle → arm (start double-tap window)
+      s.armed = true;
+      s.lastTap = now;
     }
 
     updateModUI();
+    // NOTE: do NOT call refocusTerminal() here. Modifier buttons have
+    // tabindex=-1 so focus stays in xterm's textarea naturally. Forcing
+    // focus() would open the native keyboard and trigger xterm.js flushes
+    // through onData, which could send spurious keystrokes to the shell.
   }
 
   // ── Build DOM ─────────────────────────────────────────────────────────
@@ -141,20 +153,38 @@
 
       for (var ki = 0; ki < row.length; ki++) {
         var key = row[ki];
+        var clsList = key.cls ? key.cls.split(' ') : [];
+
+        // Spacer: invisible placeholder for layout
+        if (clsList.indexOf('spacer') !== -1) {
+          var spacer = document.createElement('div');
+          spacer.className = 'keybar-spacer';
+          spacer.setAttribute('aria-hidden', 'true');
+          rowDiv.appendChild(spacer);
+          continue;
+        }
+
         var btn = document.createElement('button');
         btn.className = 'keybar-btn';
-        if (key.cls) {
-          btn.className += ' ' + key.cls.split(' ').map(function (c) { return 'keybar-' + c; }).join(' ');
+        for (var ci = 0; ci < clsList.length; ci++) {
+          btn.className += ' keybar-' + clsList[ci];
         }
         btn.textContent = key.label;
         btn.setAttribute('aria-label', key.id || key.label);
+        // Prevent button from stealing focus from xterm.js textarea.
+        // On mobile, focus loss dismisses the virtual keyboard. When the
+        // user re-taps the terminal to bring it back, xterm.js fires
+        // onData with buffered IME content → modifier pipeline processes
+        // it → one-shot (armed) Ctrl/Shift get disarmed. tabindex=-1
+        // keeps focus in xterm.js, keyboard stays open.
+        btn.setAttribute('tabindex', '-1');
 
-        if (key.id === 'ctrl') {
-          ctrlBtn = btn;
-          btn.addEventListener('click', function () { handleSticky('ctrl'); });
-        } else if (key.id === 'alt') {
-          altBtn = btn;
-          btn.addEventListener('click', function () { handleSticky('alt'); });
+        if (key.id && modState[key.id]) {
+          // Sticky modifier key
+          modBtns[key.id] = btn;
+          (function (m) {
+            btn.addEventListener('click', function () { handleSticky(m); });
+          })(key.id);
         } else {
           (function (s) {
             btn.addEventListener('click', function () { sendKey(s); });
@@ -176,7 +206,6 @@
   function init() {
     buildToolbar();
 
-    // Hide toolbar + toggle on desktop; on mobile show toggle, toolbar hidden
     if (!isMobile()) {
       var toggle = document.getElementById('keybar-toggle');
       toggle && (toggle.style.display = 'none');
@@ -186,10 +215,84 @@
     }
   }
 
+  // ── Apply modifiers to data from native keyboard ──────────────────────
+  // Called by client.js term.onData() to inject Ctrl/Alt/Shift before send.
+  // Returns Promise<string|null> — null means already handled, don't send.
+  function applyModifiers(data) {
+    // Guard: empty/ghost events must not disarm one-shot modifiers.
+    if (!data) return Promise.resolve(data);
+
+    var ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
+    var alt   = modState.alt.armed   || modState.alt.locked;
+    var shift = modState.shift.armed || modState.shift.locked;
+
+    // Disarm one-shot modifiers (locked stay active)
+    if (modState.ctrl.armed)  { modState.ctrl.armed = false; }
+    if (modState.alt.armed && !modState.alt.locked) {
+      modState.alt.armed = false;
+    }
+    if (modState.shift.armed) { modState.shift.armed = false; }
+    updateModUI();
+
+    var result = data;
+
+    // Apply Ctrl mask per character
+    if (ctrl) {
+      var masked = '';
+      for (var i = 0; i < result.length; i++) {
+        var code = result.charCodeAt(i);
+        if (code >= 0x20 && code < 0x7f) {
+          masked += String.fromCharCode(code & 0x1f);
+        } else {
+          masked += result[i];
+        }
+      }
+      result = masked;
+    }
+
+    // Apply Alt prefix (single \x1b, not per-char)
+    if (alt) {
+      result = '\x1b' + result;
+    }
+
+    // Apply Shift map — only for keys in SHIFT_MAP.
+    // Shift does NOT transform regular characters (a stays a).
+    if (shift && SHIFT_MAP[result]) {
+      result = SHIFT_MAP[result];
+    }
+
+    return Promise.resolve(result);
+  }
+
+  // ── Check if Ctrl+Shift+<key> combo is active ─────────────────────────
+  // These are pure checks — client.js calls them before applyModifiers()
+  // to decide whether to send copy_buffer / paste_buffer to server.
+  function isCopyPasteCombo(key) {
+    var ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
+    var shift = modState.shift.armed || modState.shift.locked;
+    return ctrl && shift && (key === 'c' || key === 'v');
+  }
+
+  function disarmCopyPaste() {
+    if (modState.ctrl.armed)  { modState.ctrl.armed = false; }
+    if (modState.shift.armed) { modState.shift.armed = false; }
+    updateModUI();
+  }
+
+  function hasAnyModifier() {
+    return modState.ctrl.armed  || modState.ctrl.locked ||
+           modState.alt.armed   || modState.alt.locked  ||
+           modState.shift.armed || modState.shift.locked;
+  }
+
   // ── Exports ───────────────────────────────────────────────────────────
   window._airpromptKeybar = {
     toggle: toggle,
     sendKey: sendKey,
+    hasAnyModifier: hasAnyModifier,
+    applyModifiers: applyModifiers,
+    isCopyPasteCombo: isCopyPasteCombo,
+    disarmCopyPaste: disarmCopyPaste,
   };
 
   // ── Start ─────────────────────────────────────────────────────────────

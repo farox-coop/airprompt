@@ -396,6 +396,23 @@ function createApp() {
           }
           break;
         case 'list_sessions': broadcastSessionList(wss); break;
+        case 'copy_buffer':
+          if (msg.data) {
+            try {
+              spawnSync('tmux', ['load-buffer', '-'], { input: msg.data, encoding: 'utf8', timeout: 2000 });
+            } catch (e) { /* ok */ }
+          }
+          break;
+        case 'paste_buffer':
+          if (ptyProcess) {
+            try {
+              var result = spawnSync('tmux', ['save-buffer', '-'], { encoding: 'utf8', timeout: 2000 });
+              if (result.status === 0 && result.stdout) {
+                ptyProcess.write(result.stdout);
+              }
+            } catch (e) { /* ok */ }
+          }
+          break;
       }
     });
 

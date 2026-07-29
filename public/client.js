@@ -462,6 +462,10 @@ document.getElementById('keybar-toggle').addEventListener('click', function (e) 
     try { term.refresh(0, term.rows - 1); } catch (_) {}
     var vp = document.querySelector('#terminal-container .xterm-viewport');
     if (vp) { vp.scrollTop = vp.scrollHeight; }
+    // Restore focus so native keyboard stays open on mobile.
+    // fitAddon.fit() can blur xterm's hidden textarea, dismissing the
+    // virtual keyboard. Re-focusing brings it back immediately.
+    try { term.focus(); } catch (_) {}
   }
   if (keybarEl) {
     keybarEl.addEventListener('transitionend', function () {
@@ -497,8 +501,67 @@ sessionBar.addEventListener('pointerleave', function() {
 });
 
 // ── Terminal input → WebSocket ──────────────────────────────────────
+// Route through keybar modifiers: if Ctrl/Alt/Shift are active on the
+// on-screen keyboard, apply them to native-keyboard input before sending.
+// Ctrl+Shift+C / Ctrl+Shift+V operate on the REMOTE tmux buffer, never
+// the local browser clipboard.
+
+// ── Focus gate: block spurious onData after textarea focus ───────────
+// On mobile, tapping the terminal to bring up the native keyboard fires
+// a focus event on xterm's hidden textarea. The browser flushes any
+// buffered IME composition through onData — this is NOT user input.
+// Without a gate, it flows through the modifier pipeline and disarms
+// one-shot Ctrl/Shift. The gate blocks all onData for 100ms after focus.
+var _xtermFocusGate = false;
+var _xtermFocusTimer = null;
+
+function _setupFocusGate() {
+  var ta = document.querySelector('.xterm-helper-textarea');
+  if (!ta) { setTimeout(_setupFocusGate, 200); return; }
+  ta.addEventListener('focus', function () {
+    _xtermFocusGate = true;
+    clearTimeout(_xtermFocusTimer);
+    _xtermFocusTimer = setTimeout(function () {
+      _xtermFocusGate = false;
+    }, 100);
+  });
+}
+_setupFocusGate();
+
 term.onData((data) => {
-  send({ type: 'input', data });
+  // Skip empty/ghost events — focus/blur on mobile fires spurious
+  // onData with empty string, which would disarm one-shot modifiers.
+  if (!data) return;
+
+  // Skip buffered flush right after textarea gains focus. Tapping the
+  // terminal to open the keyboard must not send data or disarm modifiers.
+  if (_xtermFocusGate) return;
+
+  var kb = window._airpromptKeybar;
+  if (!kb || !kb.hasAnyModifier || !kb.hasAnyModifier()) {
+    send({ type: 'input', data });
+    return;
+  }
+
+  // ── Ctrl+Shift+C → copy selection to remote tmux buffer ──────────
+  // ── Ctrl+Shift+V → paste from remote tmux buffer ─────────────────
+  if (kb.isCopyPasteCombo && kb.isCopyPasteCombo(data)) {
+    if (data === 'c') {
+      // Copy: grab xterm.js selection, send to server → tmux load-buffer
+      var sel = term.getSelection();
+      if (sel) send({ type: 'copy_buffer', data: sel });
+    } else if (data === 'v') {
+      // Paste: server reads tmux save-buffer → writes to PTY
+      send({ type: 'paste_buffer' });
+    }
+    if (kb.disarmCopyPaste) kb.disarmCopyPaste();
+    return;
+  }
+
+  // Normal modifier application (Ctrl/Alt masking)
+  kb.applyModifiers(data).then(function (modified) {
+    if (modified) send({ type: 'input', data: modified });
+  });
 });
 
 // ── Mobile keyboard viewport fix ─────────────────────────────────────
