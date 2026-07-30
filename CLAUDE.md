@@ -36,6 +36,20 @@ Examples from this project:
 
 Smaller focused files > one giant file.
 
+## CRITICAL: NO hardcoded user paths
+
+AirPrompt is a tool to be used by ANY user. **NEVER** hardcode `/home/diego/` or any user-specific absolute path. Always use:
+
+| Context | Use |
+|---------|-----|
+| Shell scripts | `$HOME`, `$CLAUDE_CONFIG_DIR` (fallback `$HOME/.claude`) |
+| Node.js / JS | `os.homedir()`, `process.env.HOME`, `process.env.CLAUDE_CONFIG_DIR` |
+| Config / docs | `~`, `$HOME`, `$CLAUDE_CONFIG_DIR` — never `/home/diego/` |
+
+Also applies to: `$AIRPROMPT_PORT`, `$AIRPROMPT_DEBUG`, `$AIRPROMPT_PID_FILE` — use env vars, never hardcoded values specific to one machine.
+
+Before committing, `grep -r '/home/'` in changed files. Any hit is a bug.
+
 ## Development
 
 - Always `AIRPROMPT_DEBUG=1` when running scripts in dev. Use: `AIRPROMPT_DEBUG=1 airprompt <cmd>`
