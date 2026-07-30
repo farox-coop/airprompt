@@ -703,6 +703,7 @@ test('WS receives notification broadcast when POST /api/notify is called', (t, d
       assert.strictEqual(msg.cwd, '/tmp');
       assert.strictEqual(msg.permission_mode, 'default');
       assert.deepStrictEqual(msg.effort, { level: 'medium' });
+      assert.strictEqual(msg.auto_dismiss, false);
       ws.close();
       done();
     }

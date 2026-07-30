@@ -223,7 +223,8 @@ function createApp() {
 
     log('info', 'notification received', { type: input.notification_type, session_id: input.session_id });
     // Broadcast to all connected web clients
-    const msg = JSON.stringify({ ...input, type: 'notification' });
+    // auto_dismiss: false = user must swipe to dismiss
+    const msg = JSON.stringify({ ...input, type: 'notification', auto_dismiss: false });
     wss.clients.forEach((client) => {
       if (client.readyState === 1) {
         try { client.send(msg); } catch (e) { /* ok */ }

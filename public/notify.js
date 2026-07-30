@@ -15,6 +15,14 @@ const NOTIFY_SUMMARIES = {
   agent_completed:   'Background agent finished',
 };
 
+// ── Timing & gesture constants ─────────────────────────────────────────
+const AUTO_DISMISS_MS          = 6000;   // auto-dismiss delay when auto_dismiss is true
+const SWIPE_DEAD_ZONE_PX       = 10;     // min horizontal movement before swipe activates
+const SWIPE_OPACITY_DIST_PX    = 200;    // distance over which opacity fades from 1→0
+const SWIPE_THRESHOLD_PX       = 60;     // min swipe distance to trigger dismiss
+const SWIPE_DISMISS_ANIM_MS    = 250;    // CSS animation duration after swipe dismiss
+const DISMISS_ANIM_MS          = 300;    // fade-out animation duration
+
 let notifyContainer = null;
 function getNotifyContainer() {
   if (!notifyContainer) {
@@ -103,7 +111,7 @@ function showNotification(n) {
     var t = e.touches ? e.touches[0] : e;
     var dx = t.clientX - startX;
     var dy = Math.abs(t.clientY - startY);
-    if (!swiping && Math.abs(dx) > 10 && Math.abs(dx) > dy) {
+    if (!swiping && Math.abs(dx) > SWIPE_DEAD_ZONE_PX && Math.abs(dx) > dy) {
       swiping = true;
       toast.classList.add('swiping');
     }
@@ -111,19 +119,19 @@ function showNotification(n) {
     e.preventDefault();
     deltaX = dx;
     toast.style.transform = 'translateX(' + dx + 'px)';
-    toast.style.opacity = Math.max(0, 1 - Math.abs(dx) / 200);
+    toast.style.opacity = Math.max(0, 1 - Math.abs(dx) / SWIPE_OPACITY_DIST_PX);
   }
   function onEnd() {
     if (toast._swiped) return;  // Synthetic mouse event after touch
     toast.classList.remove('swiping');
-    if (Math.abs(deltaX) > 60) {
+    if (Math.abs(deltaX) > SWIPE_THRESHOLD_PX) {
       toast._swiped = true;
       // Clear inline transform/opacity so CSS class animation takes over
       toast.style.transform = '';
       toast.style.opacity = '';
       if (deltaX < 0) toast.classList.add('dismiss-left');
       else toast.classList.add('dismiss-right');
-      setTimeout(function () { dismissToast(toast); }, 250);
+      setTimeout(function () { dismissToast(toast); }, SWIPE_DISMISS_ANIM_MS);
     } else {
       toast.style.transform = '';
       toast.style.opacity = '';
@@ -145,12 +153,14 @@ function showNotification(n) {
 
   getNotifyContainer().appendChild(toast);
 
-  // Auto-dismiss after 6 seconds
-  toast._dismissTimer = setTimeout(function () {
-    if (!toast._swiped && toast.parentNode) {
-      dismissToast(toast);
-    }
-  }, 6000);
+  // Auto-dismiss only when server says so
+  if (n.auto_dismiss) {
+    toast._dismissTimer = setTimeout(function () {
+      if (!toast._swiped && toast.parentNode) {
+        dismissToast(toast);
+      }
+    }, AUTO_DISMISS_MS);
+  }
 }
 
 function dismissToast(toast) {
@@ -161,6 +171,6 @@ function dismissToast(toast) {
     toast.classList.add('dismissed');
     setTimeout(function () {
       if (toast.parentNode) toast.parentNode.removeChild(toast);
-    }, 300);
+    }, DISMISS_ANIM_MS);
   }
 }
