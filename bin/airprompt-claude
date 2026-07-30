@@ -26,17 +26,31 @@ if [ ! -x "$REAL_CLAUDE" ]; then
   exit 1
 fi
 
-# ── Per-session marker — writes metadata only (session/tmux/name).
-# Does NOT write `active` or `url` — those are set by airprompt-on.sh
-# or the SessionStart hook after daemon registration.
+# ── Collect env vars to forward to claude inside tmux ──────────────────
+# Tmux does NOT forward all env vars to new sessions by default — only the
+# ones listed in update-environment (DISPLAY, SSH_*, etc.). Inline env vars
+# like CLAUDE_CODE_EFFORT_LEVEL=high airprompt-claude would never reach the
+# real claude process. We collect everything except AirPrompt-internal vars
+# (AIRPROMPT_*) and pass them explicitly via `env` in every tmux command.
+declare -a FORWARD_ENV=()
+while IFS='=' read -r name value; do
+  case "$name" in
+    AIRPROMPT_*) ;;
+    *) FORWARD_ENV+=("$name=$value") ;;
+  esac
+done < <(env)
+
+# ── Per-session marker — writes name + tmux only.
+# Does NOT write `url`, `active`, or `session` — those are set by
+# the SessionStart hook (airprompt-activate.js) after daemon registration.
+# The daemon owns session IDs; this script does not invent them.
 save_session_marker() {
   local tmux_name="$1"
   local session_name="${2:-}"
   local my_dir="${SESSIONS_DIR}/${tmux_name}"
   mkdir -p "$my_dir" 2>/dev/null || true
-  echo "$tmux_name" > "${my_dir}/session"
-  [ -n "$session_name" ] && echo "$session_name" > "${my_dir}/name"
-  echo "$tmux_name" > "${my_dir}/tmux"
+  [ -n "$session_name" ] && printf '%s\n' "$session_name" > "${my_dir}/name"
+  printf '%s\n' "$tmux_name" > "${my_dir}/tmux"
 }
 
 # ── Parse args ────────────────────────────────────────────────────────
@@ -87,13 +101,13 @@ if [ -n "$RESUME_SESSION" ]; then
     # Kill zombie pane (dead from previous /exit) silently, respawn fresh.
     dead=$(tmux list-panes -t "$RESUME_SESSION" -F '#{pane_dead}' 2>/dev/null || true)
     if echo "$dead" | tr -d '[:space:]' | grep -q '1'; then
-      tmux respawn-pane -k -t "$RESUME_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" "${args[@]}" 2>/dev/null || {
+      tmux respawn-pane -k -t "$RESUME_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ env "${FORWARD_ENV[@]}" "$REAL_CLAUDE" "${args[@]}" 2>/dev/null || {
         # respawn failed — kill zombie session and create new one
         tmux kill-session -t "$RESUME_SESSION" 2>/dev/null || true
         RESUME_CLAUDE_ID=""
         RESUME_SESSION="claude-$$-$(date +%s)"
         save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
-        tmux new-session -d -s "$RESUME_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" "${args[@]}"
+        tmux new-session -d -s "$RESUME_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ env "${FORWARD_ENV[@]}" "$REAL_CLAUDE" "${args[@]}"
         tmux set-option -t "$RESUME_SESSION" focus-events on
       }
     fi
@@ -108,7 +122,7 @@ if [ -n "$RESUME_SESSION" ]; then
     RESUME_CLAUDE_ID="$RESUME_SESSION"
     TMUX_SESSION="claude-$$-$(date +%s)"
     save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
-    tmux new-session -d -s "$TMUX_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" --resume "$RESUME_CLAUDE_ID"
+    tmux new-session -d -s "$TMUX_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ env "${FORWARD_ENV[@]}" "$REAL_CLAUDE" --resume "$RESUME_CLAUDE_ID"
     tmux set-option -t "$TMUX_SESSION" focus-events on
     if [ -n "${TMUX:-}" ]; then
       exec tmux switch-client -t "$TMUX_SESSION"
@@ -137,6 +151,6 @@ save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
 # Bash wrapper runs Claude via "$@". When Claude exits (regardless of
 # exit code), prints the resume message that Claude outputs then waits
 # for Enter.
-tmux new-session -d -s "$TMUX_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ "$REAL_CLAUDE" "${args[@]}"
+tmux new-session -d -s "$TMUX_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Press Enter to close..."; read' _ env "${FORWARD_ENV[@]}" "$REAL_CLAUDE" "${args[@]}"
 tmux set-option -t "$TMUX_SESSION" focus-events on
 exec tmux attach-session -t "$TMUX_SESSION"

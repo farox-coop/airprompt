@@ -110,18 +110,47 @@ function post(p, body) { return request('POST', p, body); }
 
 function put(p, body) { return request('PUT', p, body); }
 
-// Auto-apply project name from global cwd→name mapping.
+// Auto-apply project name from global cwd→name mapping or existing name file.
 // Called after session registration so autostart picks up saved names.
+//
+// Strategy (ordered by priority):
+//   1. If airprompt-claude already wrote a name file, use that (it wins over project-names.json).
+//   2. Fall back to project-names.json cwd→name mapping.
+//   3. Write name to disk SYNCHRONOUSLY so statusline sees it immediately.
+//   4. Send async HTTP to daemon — fire-and-forget, name is already on disk.
 function autoApplyName(sessionId, cwd, myDir) {
-  const namesFile = path.join(AIRPROMPT_DATA_DIR, 'project-names.json');
-  let map;
-  try { map = JSON.parse(fs.readFileSync(namesFile, 'utf8')); } catch (_) { return; }
-  const savedName = map[cwd];
-  if (!savedName) return;
-  put('/api/sessions/name', { sessionId, name: savedName }).then((resp) => {
+  const nameFilePath = path.join(myDir, 'name');
+  let resolvedName = null;
+
+  // 1. Check for existing name file written by airprompt-claude
+  try {
+    if (fs.existsSync(nameFilePath)) {
+      const existing = fs.readFileSync(nameFilePath, 'utf8').trim().slice(0, 64);
+      if (existing && /^[a-zA-Z0-9 _-]+$/.test(existing)) {
+        resolvedName = existing;
+      }
+    }
+  } catch (_) {}
+
+  // 2. Fallback: project-names.json cwd→name mapping
+  if (!resolvedName) {
+    const namesFile = path.join(AIRPROMPT_DATA_DIR, 'project-names.json');
+    try {
+      const map = JSON.parse(fs.readFileSync(namesFile, 'utf8'));
+      const savedName = map[cwd];
+      if (savedName) resolvedName = savedName;
+    } catch (_) {}
+  }
+
+  if (!resolvedName) return;
+
+  // 3. Write name to disk SYNCHRONOUSLY — statusline needs it immediately
+  try { fs.writeFileSync(nameFilePath, resolvedName + '\n'); } catch (_) {}
+
+  // 4. Sync to daemon async — fire-and-forget (disk already has name)
+  put('/api/sessions/name', { sessionId, name: resolvedName }).then((resp) => {
     if (resp && resp.ok) {
-      process.stdout.write(`airprompt: auto-named '${savedName}'\n`);
-      try { fs.writeFileSync(path.join(myDir, 'name'), savedName + '\n'); } catch (_) {}
+      process.stdout.write(`airprompt: auto-named '${resolvedName}'\n`);
     }
   }).catch(() => {});
 }
