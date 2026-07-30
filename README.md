@@ -70,7 +70,7 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 
 ## TLS & Voice Dictation
 
-Chrome/Android block `SpeechRecognition` over plain HTTP to LAN IPs. AirPrompt auto-detects TLS certs in `~/.claude/` and serves HTTPS. On first connect, accept the self-signed certificate warning. After that, push-to-talk voice dictation works.
+Chrome/Android block `SpeechRecognition` over plain HTTP to LAN IPs. AirPrompt auto-detects TLS certs in `~/.claude/.airprompt/` and serves HTTPS. On first connect, accept the self-signed certificate warning. After that, push-to-talk voice dictation works.
 
 ## Claude Integration
 
