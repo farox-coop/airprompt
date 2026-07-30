@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-CERT_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+CERT_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.airprompt"
 CERT_FILE="${CERT_DIR}/airprompt-cert.pem"
 KEY_FILE="${CERT_DIR}/airprompt-key.pem"
 

@@ -496,7 +496,7 @@ function cleanupMarkers() {
     try { fs.unlinkSync(path.join(TEMP_DIR, f)); } catch (_) {}
   }
   // Per-session dirs
-  const sessionsDir = path.join(TEMP_DIR, '.airprompt-sessions');
+  const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
   if (fs.existsSync(sessionsDir)) {
     try { fs.rmSync(sessionsDir, { recursive: true, force: true }); } catch (_) {}
   }
@@ -517,7 +517,7 @@ test('deactivate hook exits 0 when tmux session is alive (spurious Stop guard)',
     // Set up per-session dir as if /airprompt on was run from that session
     const fs = require('fs');
     const path = require('path');
-    const sessionsDir = path.join(TEMP_DIR, '.airprompt-sessions');
+    const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
     const myDir = path.join(sessionsDir, aliveSession);
     fs.mkdirSync(myDir, { recursive: true });
     fs.writeFileSync(path.join(myDir, 'session'), 'test-guard-session\n');
@@ -553,7 +553,7 @@ test('deactivate hook proceeds with cleanup when tmux session is gone', { skip: 
   const fs = require('fs');
   const path = require('path');
   // New per-session dir structure — deactivate.js checks here first
-  const sessionsDir = path.join(TEMP_DIR, '.airprompt-sessions');
+  const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
   const myDir = path.join(sessionsDir, deadSession);
   fs.mkdirSync(myDir, { recursive: true });
   fs.writeFileSync(path.join(myDir, 'session'), 'test-guard-dead-session\n');
@@ -584,7 +584,7 @@ test('deactivate hook exits 0 when tmux is not available (safe fallback)', { ski
     const fs = require('fs');
     const path = require('path');
     // Per-session dir structure
-    const sessionsDir = path.join(TEMP_DIR, '.airprompt-sessions');
+    const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
     const myDir = path.join(sessionsDir, aliveSession);
     fs.mkdirSync(myDir, { recursive: true });
     fs.writeFileSync(path.join(myDir, 'session'), 'test-tmuxless-session\n');

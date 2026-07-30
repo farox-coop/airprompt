@@ -1,12 +1,12 @@
 #!/bin/bash
 # airprompt-statusline.sh — StatusLine hook.
 # Shows [airprompt: https://<IP>:3210] badge only in the registered session.
-# Per-session isolation: reads ~/.claude/.airprompt-sessions/{tmux-name}/url
+# Per-session isolation: reads ~/.claude/.airprompt/sessions/{tmux-name}/url
 # Multiple Claude sessions can coexist without fighting over global files.
 set -euo pipefail
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
+SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
 
 # ── Detect current tmux session ─────────────────────────────────────
 CURRENT_TMUX=""

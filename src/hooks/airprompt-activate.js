@@ -2,7 +2,7 @@
 // airprompt-activate.js — SessionStart hook.
 // Ensures the AirPrompt daemon is running and registers this Claude session.
 // Runs on every Claude Code session start. Idempotent — re-register is safe.
-// Per-session isolation: writes to ~/.claude/.airprompt-sessions/{safe-name}/
+// Per-session isolation: writes to ~/.claude/.airprompt/sessions/{safe-name}/
 // Multiple Claude sessions can coexist without fighting over global files.
 
 'use strict';
@@ -29,7 +29,7 @@ const PORT = (() => {
 })();
 const AIRPROMPT_DIR = path.join(os.homedir(), '.airprompt');
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
-const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
+const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt', 'sessions');
 
 // Resolve install dir — prefer CLAUDE_PLUGIN_ROOT (plugin installed),
 // fallback to ~/.airprompt/ (standalone manual install),
@@ -49,8 +49,8 @@ try {
   }
 } catch (_) {}
 if (!TLS) {
-  const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');
-  const KEY_FILE = path.join(CONFIG_DIR, 'airprompt-key.pem');
+  const CERT_FILE = path.join(AIRPROMPT_DATA_DIR, 'airprompt-cert.pem');
+  const KEY_FILE = path.join(AIRPROMPT_DATA_DIR, 'airprompt-key.pem');
   TLS = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
 }
 
@@ -113,7 +113,7 @@ function put(p, body) { return request('PUT', p, body); }
 // Auto-apply project name from global cwd→name mapping.
 // Called after session registration so autostart picks up saved names.
 function autoApplyName(sessionId, cwd, myDir) {
-  const namesFile = path.join(CONFIG_DIR, '.airprompt-project-names.json');
+  const namesFile = path.join(AIRPROMPT_DATA_DIR, 'project-names.json');
   let map;
   try { map = JSON.parse(fs.readFileSync(namesFile, 'utf8')); } catch (_) { return; }
   const savedName = map[cwd];

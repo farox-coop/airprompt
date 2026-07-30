@@ -19,7 +19,7 @@ set -euo pipefail
 
 REAL_CLAUDE="$HOME/.local/bin/claude"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
+SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
 
 if [ ! -x "$REAL_CLAUDE" ]; then
   echo "Error: Claude not found at $REAL_CLAUDE" >&2

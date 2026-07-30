@@ -16,7 +16,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
+SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
 AIRPROMPT_DIR="${CONFIG_DIR}/.airprompt"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 LOG_FILE="/tmp/airprompt.log"
@@ -51,6 +51,7 @@ if [ -f "$PID_FILE" ]; then
 fi
 # Also kill daemon tmux session (airprompt-on.sh starts it this way)
 rm -f "${AIRPROMPT_DIR}/daemon.json" && echo "  daemon.json removed" || true
+rm -rf "${AIRPROMPT_DIR}/sessions" 2>/dev/null || true
 rmdir "${AIRPROMPT_DIR}" 2>/dev/null || true
 tmux kill-session -t airprompt-daemon 2>/dev/null && echo "  daemon tmux session killed" || true
 

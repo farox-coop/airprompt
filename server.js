@@ -22,10 +22,10 @@ function log(level, msg, extra) {
 }
 
 const CERT_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-const CERT_FILE = path.join(CERT_DIR, 'airprompt-cert.pem');
-const KEY_FILE = path.join(CERT_DIR, 'airprompt-key.pem');
-const TLS_ENABLED = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
 const AIRPROMPT_DIR = path.join(CERT_DIR, '.airprompt');
+const CERT_FILE = path.join(AIRPROMPT_DIR, 'airprompt-cert.pem');
+const KEY_FILE = path.join(AIRPROMPT_DIR, 'airprompt-key.pem');
+const TLS_ENABLED = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
 const DAEMON_JSON = path.join(AIRPROMPT_DIR, 'daemon.json');
 
 const sessions = new Map();
@@ -90,11 +90,11 @@ function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { 
 
 // ── Startup recovery: scan per-session dirs and re-register alive sessions ──
 // Daemon restart loses in-memory state. On-disk markers survive.
-// Rebuild session registry from ~/.claude/.airprompt-sessions/{tmux}/
+// Rebuild session registry from ~/.claude/.airprompt/sessions/{tmux}/
 function recoverSessionsFromDisk() {
   if (process.env.AIRPROMPT_SKIP_RECOVERY === '1') return;
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-  const sessionsDir = path.join(configDir, '.airprompt-sessions');
+  const sessionsDir = path.join(configDir, '.airprompt', 'sessions');
   if (!fs.existsSync(sessionsDir)) return;
 
   let entries;

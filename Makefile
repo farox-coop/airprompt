@@ -27,6 +27,7 @@ stop:
 clean:
 	@rm -f $(PID_FILE) $(LOG_FILE)
 	@rm -f $(HOME)/.claude/.airprompt/daemon.json
+	@rm -rf $(HOME)/.claude/.airprompt/sessions
 	@rmdir $(HOME)/.claude/.airprompt 2>/dev/null || true
 	@rm -rf node_modules
 

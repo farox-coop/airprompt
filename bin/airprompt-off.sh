@@ -14,7 +14,7 @@ fi
 
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
+SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
 
 SESSION_ID="${1:-}"
 
@@ -52,7 +52,7 @@ CURL_OPTS=""
 if [ -f "$AIRPROMPT_CONF" ] && command -v jq >/dev/null 2>&1; then
   PROTO=$(jq -r '.protocol // "http"' "$AIRPROMPT_CONF" 2>/dev/null || echo "http")
   DAEMON_PORT=$(jq -r '.port // 3210' "$AIRPROMPT_CONF" 2>/dev/null || echo "$DAEMON_PORT")
-elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/airprompt-key.pem" ]; then
+elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-key.pem" ]; then
   PROTO="https"
 fi
 [ "$PROTO" = "https" ] && CURL_OPTS="-k"

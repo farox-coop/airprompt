@@ -25,7 +25,7 @@ DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="/tmp/airprompt-server.pid"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt-sessions"
+SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
 
 DEBUG="${AIRPROMPT_DEBUG:-1}"  # always debug during development
 
@@ -83,7 +83,7 @@ CURL_OPTS=""
 if [ -f "$AIRPROMPT_CONF" ] && command -v jq >/dev/null 2>&1; then
   PROTO=$(jq -r '.protocol // "http"' "$AIRPROMPT_CONF" 2>/dev/null || echo "http")
   DAEMON_PORT=$(jq -r '.port // 3210' "$AIRPROMPT_CONF" 2>/dev/null || echo "$DAEMON_PORT")
-elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/airprompt-key.pem" ]; then
+elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-key.pem" ]; then
   PROTO="https"
 fi
 [ "$PROTO" = "https" ] && CURL_OPTS="-k"
@@ -129,7 +129,7 @@ ACTIVE_FILE="${MY_DIR}/active"
 # ── Helper: persist cwd→name mapping for autostart reuse ────────────
 _persist_project_name() {
   local name_val="$1"
-  local names_file="${CONFIG_DIR}/.airprompt-project-names.json"
+  local names_file="${CONFIG_DIR}/.airprompt/project-names.json"
   PWD_VAL="$ORIG_PWD" NAME_VAL="$name_val" FILE_VAL="$names_file" node -e '
     var fs = require("fs");
     var map = {};

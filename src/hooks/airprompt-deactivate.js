@@ -5,7 +5,7 @@
 //
 // Guards against spurious Stop hook invocations by checking
 // whether the registered tmux session is still alive before cleaning up.
-// Per-session isolation: reads ~/.claude/.airprompt-sessions/{safe-tmux}/
+// Per-session isolation: reads ~/.claude/.airprompt/sessions/{safe-tmux}/
 
 'use strict';
 
@@ -29,7 +29,7 @@ const PORT = (() => {
   } catch (_) {}
   return process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
 })();
-const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt-sessions');
+const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt', 'sessions');
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
 
 // Detect TLS — daemon.json SSOT → cert fallback → http
@@ -42,8 +42,8 @@ try {
   }
 } catch (_) {}
 if (!TLS) {
-  const CERT_FILE = path.join(CONFIG_DIR, 'airprompt-cert.pem');
-  const KEY_FILE = path.join(CONFIG_DIR, 'airprompt-key.pem');
+  const CERT_FILE = path.join(CONFIG_DIR, '.airprompt', 'airprompt-cert.pem');
+  const KEY_FILE = path.join(CONFIG_DIR, '.airprompt', 'airprompt-key.pem');
   TLS = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
 }
 

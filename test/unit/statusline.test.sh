@@ -11,7 +11,7 @@ TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 export CLAUDE_CONFIG_DIR="$TMPDIR"
-SESSIONS_DIR="${TMPDIR}/.airprompt-sessions"
+SESSIONS_DIR="${TMPDIR}/.airprompt/sessions"
 
 # Resolve real tmux session name to create matching per-session dir
 CURRENT_TMUX=""

@@ -139,8 +139,8 @@ function generateCert(ctx, targetDir) {
     return false;
   }
   const configDir = claudeConfigDir(opts);
-  const certFile = path.join(configDir, 'airprompt-cert.pem');
-  const keyFile = path.join(configDir, 'airprompt-key.pem');
+  const certFile = path.join(configDir, '.airprompt', 'airprompt-cert.pem');
+  const keyFile = path.join(configDir, '.airprompt', 'airprompt-key.pem');
   if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
     note('  TLS certificate already present');
     return true;
@@ -619,7 +619,7 @@ function uninstall(ctx) {
   }
 
   // 6. Remove per-session directories
-  const sessionsDir = path.join(configDir, '.airprompt-sessions');
+  const sessionsDir = path.join(configDir, '.airprompt', 'sessions');
   if (fs.existsSync(sessionsDir)) {
     if (!opts.dryRun) {
       try {
@@ -636,14 +636,14 @@ function uninstall(ctx) {
     note(`  removed ${sessionsDir}`);
   }
 
-  // 6b. Remove daemon.json and .airprompt directory
+  // 6b. Remove .airprompt data directory
   const airpromptDir = path.join(configDir, '.airprompt');
-  const daemonJson = path.join(airpromptDir, 'daemon.json');
-  if (fs.existsSync(daemonJson)) {
-    if (!opts.dryRun) { try { fs.unlinkSync(daemonJson); } catch (_) {} }
-    note(`  removed ${daemonJson}`);
+  if (fs.existsSync(airpromptDir)) {
+    if (!opts.dryRun) {
+      try { fs.rmSync(airpromptDir, { recursive: true, force: true }); } catch (_) {}
+    }
+    note(`  removed ${airpromptDir}`);
   }
-  try { if (!opts.dryRun) fs.rmdirSync(airpromptDir); } catch (_) {}
 
   // 7. Target dir removal prompt
   const targetDir = opts.targetDir || path.join(os.homedir(), '.airprompt');
@@ -749,8 +749,8 @@ async function main() {
     for (const [id, why] of ctx.results.failed) process.stderr.write(`    • ${id} — ${why}\n`);
   }
   process.stdout.write('\n');
-  const certFile = path.join(claudeConfigDir(opts), 'airprompt-cert.pem');
-  const keyFile = path.join(claudeConfigDir(opts), 'airprompt-key.pem');
+  const certFile = path.join(claudeConfigDir(opts), '.airprompt', 'airprompt-cert.pem');
+  const keyFile = path.join(claudeConfigDir(opts), '.airprompt', 'airprompt-key.pem');
   const hasTls = fs.existsSync(certFile) && fs.existsSync(keyFile);
   ctx.note('  start Claude Code and AirPrompt will auto-register each session');
   ctx.note(`  mobile URL: ${hasTls ? 'https' : 'http'}://<your-lan-ip>:${opts.port}`);
