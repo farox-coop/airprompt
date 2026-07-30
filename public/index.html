@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>AirPrompt - Mobile Terminal</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="theme-color" content="#0d1117" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
@@ -14,6 +17,16 @@
   <div id="load-spinner"><div id="spinner"></div></div>
 
   <div id="session-bar">
+    <svg id="app-logo" role="img" aria-label="AirPrompt logo" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <g stroke="#f59e0b" stroke-width="2.2">
+        <path d="m1.3 22.9 4.9-4.9-4.9-4.9"/>
+        <line x1="7.5" y1="22.9" x2="13.8" y2="22.9"/>
+      </g>
+      <g transform="translate(0.6, -0.9) scale(0.98)">
+        <path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z" stroke-width="1.85"/>
+        <path d="m21.854 2.147-10.94 10.939" stroke-width="1.85"/>
+      </g>
+    </svg>
     <span id="session-label">No session selected</span>
     <button id="refresh-btn" title="Refresh">↻</button>
     <button id="keybar-toggle" title="Keyboard">⌨</button>

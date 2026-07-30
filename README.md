@@ -1,6 +1,6 @@
-# AirPrompt
+# <img src="public/favicon.svg" alt="AirPrompt logo" width="56" height="56"> AirPrompt
 
-Remote control interface for Claude CLI with voice dictation support.
+### Remote control interface for Claude CLI with voice dictation support.
 
 ## Overview
 

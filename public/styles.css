@@ -17,6 +17,9 @@ body, html {
 }
 /* Only highlight when bar itself is tapped, not its buttons */
 #session-bar.bar-active { background: #161b22; }
+#app-logo {
+  width: 26px; height: 26px; flex-shrink: 0; margin-right: 10px;
+}
 #session-label {
   font-size: 16px; color: #58a6ff; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; flex: 1;
