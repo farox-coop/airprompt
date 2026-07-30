@@ -371,7 +371,7 @@ Add expo targets following the reference project pattern (see [[expo-reference-p
 .PHONY: expo expo-clean
 
 expo: ## Start Expo dev server (mobileapp/)
-	@cd mobileapp && npx expo start -c --go
+  @cd mobileapp && npx expo start -c --go
 
 expo-clean: clean setup expo ## Clean + setup + start Expo dev server
 ```
