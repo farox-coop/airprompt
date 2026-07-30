@@ -123,6 +123,37 @@ if [ -z "$MESSAGE" ]; then
   esac
 fi
 
+# ── Compute webUI-enrichment fields ─────────────────────────────────────
+# Same logic as notify.sh — provides rich info even via direct delivery
+_format_duration() {
+  local ms="$1"
+  if [ "$ms" -lt 1000 ]; then
+    echo "${ms}ms"
+  elif [ "$ms" -lt 60000 ]; then
+    echo "$(echo "scale=1; $ms/1000" | bc 2>/dev/null || echo "0")s"
+  elif [ "$ms" -lt 3600000 ]; then
+    echo "$(echo "scale=1; $ms/60000" | bc 2>/dev/null || echo "0")m"
+  else
+    echo "$(echo "scale=1; $ms/3600000" | bc 2>/dev/null || echo "0")h"
+  fi
+}
+TURN_INFO="$(_format_duration "$DURATION_MS") — ${MESSAGE_COUNT} msgs"
+PROJECT_NAME="$(basename "$CWD")"
+if [ -n "$SESSION_NAME" ]; then
+  SESSION_LABEL="$SESSION_NAME"
+elif [ -n "$PROJECT_NAME" ] && [ "$PROJECT_NAME" != "." ]; then
+  SESSION_LABEL="$PROJECT_NAME @ $AI_TITLE"
+elif [ -n "$AI_TITLE" ]; then
+  SESSION_LABEL="$AI_TITLE"
+else
+  SESSION_LABEL="${SESSION_ID:0:8}"
+fi
+if [ -n "$SESSION_NAME" ]; then
+  SUBTITLE="($PROJECT_NAME @ $AI_TITLE)"
+else
+  SUBTITLE=""
+fi
+
 # ── Create temp transcript with simulated events ────────────────────────
 TRANSCRIPT_DIR="$(mktemp -d)"
 trap "rm -rf '$TRANSCRIPT_DIR'" EXIT
@@ -146,8 +177,12 @@ build_payload() {
       --arg transcript_path "$TRANSCRIPT_FILE" \
       --arg permission_mode "$PERMISSION_MODE" \
       --arg effort "$EFFORT" \
+      --arg session_label "$SESSION_LABEL" \
+      --arg turn_info "$TURN_INFO" \
+      --arg subtitle "$SUBTITLE" \
+      --arg cc_title "$AI_TITLE" \
       --argjson auto_dismiss "$AUTO_DISMISS" \
-      '{notification_type:$type,message:$message,session_id:$session_id,cwd:$cwd,transcript_path:$transcript_path,permission_mode:$permission_mode,effort:{level:$effort},auto_dismiss:$auto_dismiss}'
+      '{notification_type:$type,message:$message,session_id:$session_id,cwd:$cwd,transcript_path:$transcript_path,permission_mode:$permission_mode,effort:{level:$effort},session_label:$session_label,turn_info:$turn_info,subtitle:$subtitle,cc_title:$cc_title,auto_dismiss:$auto_dismiss}'
   else
     jq -n \
       --arg type "$NOTIFY_TYPE" \
@@ -156,8 +191,12 @@ build_payload() {
       --arg cwd "$CWD" \
       --arg permission_mode "$PERMISSION_MODE" \
       --arg effort "$EFFORT" \
+      --arg session_label "$SESSION_LABEL" \
+      --arg turn_info "$TURN_INFO" \
+      --arg subtitle "$SUBTITLE" \
+      --arg cc_title "$AI_TITLE" \
       --argjson auto_dismiss "$AUTO_DISMISS" \
-      '{notification_type:$type,message:$message,session_id:$session_id,cwd:$cwd,permission_mode:$permission_mode,effort:{level:$effort},auto_dismiss:$auto_dismiss}'
+      '{notification_type:$type,message:$message,session_id:$session_id,cwd:$cwd,permission_mode:$permission_mode,effort:{level:$effort},session_label:$session_label,turn_info:$turn_info,subtitle:$subtitle,cc_title:$cc_title,auto_dismiss:$auto_dismiss}'
   fi
 }
 

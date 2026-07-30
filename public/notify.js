@@ -43,10 +43,10 @@ function showNotification(n) {
   var summary = NOTIFY_SUMMARIES[n.notification_type] || ('Notification: ' + (n.notification_type || 'unknown'));
 
   // Build session label from available fields
-  // Priority: matching active session's name → cwd basename → session_id prefix
+  // Priority: notify.sh enriched label → session name → cwd basename → session_id prefix
   var sid = String(n.session_id || '');
-  var label = '';
-  if (sid && typeof sessions !== 'undefined') {
+  var label = n.session_label || '';
+  if (!label && sid && typeof sessions !== 'undefined') {
     var match = sessions.find(function (s) { return s.id === sid; });
     if (match) {
       label = match.name || (match.cwd ? String(match.cwd).split('/').pop() : '');
@@ -69,6 +69,8 @@ function showNotification(n) {
   metaEl.className = 'notify-meta';
   metaEl.innerHTML = metaHtml;
 
+  if (n.turn_info) summary += '  (' + esc(n.turn_info) + ')';
+
   var summaryEl = document.createElement('div');
   summaryEl.className = 'notify-summary';
   summaryEl.textContent = summary;
@@ -81,6 +83,13 @@ function showNotification(n) {
     msgEl.className = 'notify-message';
     msgEl.textContent = n.message;
     toast.appendChild(msgEl);
+  }
+
+  if (n.subtitle) {
+    var subEl = document.createElement('div');
+    subEl.className = 'notify-subtitle';
+    subEl.textContent = n.subtitle;
+    toast.appendChild(subEl);
   }
 
   // ── Tap to navigate to source session ──
