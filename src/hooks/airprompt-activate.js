@@ -237,6 +237,13 @@ async function main() {
     const activeFile = path.join(myDir, 'active');
     if (fs.existsSync(activeFile)) {
       process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
+      // Retroactive fix: add missing mirror marker for AirPrompt-created sessions.
+      // Daemon excludes, web proxy excludes — everything else is a mirror.
+      const mirrorFile = path.join(myDir, 'mirror');
+      if (!fs.existsSync(mirrorFile) && currentTmux.startsWith('airprompt-') &&
+          currentTmux !== 'airprompt-daemon' && !currentTmux.startsWith('airprompt-web-')) {
+        try { fs.writeFileSync(mirrorFile, ''); } catch (_) {}
+      }
       // Still auto-apply project name mapping
       let sid = '';
       try { sid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
@@ -253,9 +260,11 @@ async function main() {
 
   // 5. Resolve tmux session (reuse currentTmux, or create one)
   let tmuxSession = currentTmux;
+  let isMirror = false;
   if (!tmuxSession) {
     tmuxSession = `airprompt-${sessionId}`;
     spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], { timeout: 2000 });
+    isMirror = true;
   }
 
   // 6. Register with daemon
@@ -275,6 +284,7 @@ async function main() {
         fs.writeFileSync(path.join(myDir, 'session'), sessionId + '\n');
         fs.writeFileSync(path.join(myDir, 'tmux'), tmuxSession + '\n');
         fs.writeFileSync(path.join(myDir, 'active'), '');
+        if (isMirror) fs.writeFileSync(path.join(myDir, 'mirror'), '');
         markersWritten = true;
       } catch (e) {
         process.stderr.write(`airprompt: marker write failed: ${e.message}\n`);

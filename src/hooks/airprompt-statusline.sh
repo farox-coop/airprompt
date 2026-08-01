@@ -8,9 +8,11 @@ set -euo pipefail
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
 
+# ── Test override: set fake tmux session name so tests don't need a real tmux
+CURRENT_TMUX="${AIRPROMPT_TEST_TMUX:-}"
+
 # ── Detect current tmux session ─────────────────────────────────────
-CURRENT_TMUX=""
-if [ -n "${TMUX:-}" ]; then
+if [ -z "$CURRENT_TMUX" ] && [ -n "${TMUX:-}" ]; then
   CURRENT_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
   # Inside a web proxy session — resolve to parent via tmux group name
   if echo "$CURRENT_TMUX" | grep -q '^airprompt-web-'; then

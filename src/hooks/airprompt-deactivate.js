@@ -67,6 +67,10 @@ function safeDirName(name) {
 
 // ── Resolve current tmux session ──────────────────────────────────────
 function resolveCurrentTmux() {
+  // Test override: skip tmux display-message, use fake session name
+  if (process.env.AIRPROMPT_DEACTIVATE_TEST_TMUX) {
+    return process.env.AIRPROMPT_DEACTIVATE_TEST_TMUX;
+  }
   if (process.env.TMUX) {
     let s = '';
     const r = spawnSync('tmux', ['display-message', '-p', '#S'], { timeout: 2000, encoding: 'utf8' });
@@ -167,8 +171,17 @@ async function main() {
     const r = spawnSync('tmux', ['has-session', '-t', registeredTmux], { timeout: 2000 });
     dlog(`tmux has-session -t '${registeredTmux}' status=${r.status} error=${r.error ? r.error.code || r.error.message : 'none'}`);
     if (r.status === 0) {
-      dlog('GUARD: tmux session ALIVE → exit 0 (no cleanup)');
-      process.exit(0);
+      // Mirror sessions (created by activate hook) should die when Claude exits.
+      // Real sessions (user's own tmux) are left alone.
+      const mirrorFile = myDir ? path.join(myDir, 'mirror') : '';
+      if (mirrorFile && fs.existsSync(mirrorFile)) {
+        dlog('GUARD: mirror session ALIVE → killing tmux and cleaning up');
+        spawnSync('tmux', ['kill-session', '-t', registeredTmux], { timeout: 2000 });
+        // Fall through to cleanup below
+      } else {
+        dlog('GUARD: tmux session ALIVE → exit 0 (no cleanup)');
+        process.exit(0);
+      }
     }
     if (r.status === null || r.error) {
       dlog(`GUARD: tmux not available (status=${r.status} error=${r.error?.code}) → exit 0 (safe)`);

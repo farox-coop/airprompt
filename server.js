@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 const qrcode = require('qrcode-terminal');
+const { tmuxExists, sessionToJSON } = require('./src/utils');
 
 const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
@@ -40,13 +41,6 @@ function getLocalIp() {
   return 'localhost';
 }
 
-function tmuxExists(sessionName) {
-  try {
-    const r = spawnSync('tmux', ['has-session', '-t', sessionName], { timeout: 2000 });
-    return r.status === 0;
-  } catch (e) { return false; }
-}
-
 function createTmuxSession(sessionName, cwd) {
   try {
     const r = spawnSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd], { timeout: 2000 });
@@ -59,7 +53,7 @@ function killTmuxSession(sessionName) {
 }
 
 function broadcastSessionList(wss) {
-  const list = Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, name: s.name || null, createdAt: s.createdAt }));
+  const list = Array.from(sessions.values()).map(sessionToJSON);
   const msg = JSON.stringify({ type: 'session_list', sessions: list });
   wss.clients.forEach((client) => {
     if (client.readyState === 1) {
@@ -132,7 +126,7 @@ function recoverSessionsFromDisk() {
     } catch (_) {}
 
     if (!sessions.has(sessionId)) {
-      sessions.set(sessionId, { sessionId, cwd, name, tmuxSession: realTmux, createdAt: new Date().toISOString() });
+      sessions.set(sessionId, { sessionId, cwd, name, tmuxSession: realTmux, createdAt: new Date().toISOString(), lastActivity: Date.now() });
       log('info', 'session recovered from disk', { sessionId, tmuxSession: realTmux, cwd, name });
     }
   }
@@ -146,7 +140,7 @@ function createApp() {
   app.use(express.static(path.join(__dirname, 'public')));
 
   app.get('/api/sessions', (_req, res) => {
-    res.json(Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, name: s.name || null, createdAt: s.createdAt })));
+    res.json(Array.from(sessions.values()).map(sessionToJSON));
   });
 
   app.post('/api/sessions/register', (req, res) => {
@@ -177,6 +171,7 @@ function createApp() {
         existing.cwd = cwd;
         existing.sessionId = sessionId;
         if (name !== undefined) existing.name = name || null;
+        existing.lastActivity = Date.now();
         sessions.delete(existingId);
         sessions.set(sessionId, existing);
         log('info', 'session re-registered (deduped by tmux)', { oldId: existingId, newId: sessionId, tmuxSession: actualTmuxSession });
@@ -184,7 +179,7 @@ function createApp() {
         return res.json({ ok: true, sessionId });
       }
     }
-    sessions.set(sessionId, { sessionId, cwd, name: name || null, tmuxSession: actualTmuxSession, createdAt: new Date().toISOString() });
+    sessions.set(sessionId, { sessionId, cwd, name: name || null, tmuxSession: actualTmuxSession, createdAt: new Date().toISOString(), lastActivity: Date.now() });
     log('info', 'session registered', { sessionId, tmuxSession: actualTmuxSession, cwd, name: name || null });
     broadcastSessionList(wss);
     res.json({ ok: true, sessionId });
@@ -315,7 +310,7 @@ function createApp() {
 
     ws.send(JSON.stringify({
       type: 'session_list',
-      sessions: Array.from(sessions.values()).map((s) => ({ id: s.sessionId, cwd: s.cwd, name: s.name || null, createdAt: s.createdAt })),
+      sessions: Array.from(sessions.values()).map(sessionToJSON),
     }));
 
     function spawnPty(sessionId) {
@@ -335,6 +330,7 @@ function createApp() {
       if (!entry) return false;
 
       activeSessionId = sessionId;
+      entry.lastActivity = Date.now();
       const termCols = ws._airpromptCols || 120;
       const termRows = ws._airpromptRows || 40;
 
@@ -391,7 +387,11 @@ function createApp() {
           log('debug', '[client] ' + (msg.msg || ''), { level: msg.level, extra: msg.extra });
           break;
         case 'input':
-          if (ptyProcess && msg.data) { try { ptyProcess.write(msg.data); } catch (e) { /* ok */ } }
+          if (ptyProcess && msg.data) {
+            try { ptyProcess.write(msg.data); } catch (e) { /* ok */ }
+            const activeEntry = activeSessionId ? sessions.get(activeSessionId) : null;
+            if (activeEntry) activeEntry.lastActivity = Date.now();
+          }
           break;
         case 'switch_session':
           if (msg.sessionId && sessions.has(msg.sessionId)) spawnPty(msg.sessionId);
@@ -437,10 +437,38 @@ function createApp() {
     });
   });
 
+  const ORPHAN_GRACE_MS = 120_000; // 2 minutes grace before killing orphan mirrors
+
   const staleInterval = setInterval(() => {
     let changed = false;
     for (const [id, entry] of sessions) {
-      if (!tmuxExists(entry.tmuxSession)) { sessions.delete(id); changed = true; log('warn', 'stale session removed', { id, tmuxSession: entry.tmuxSession }); }
+      if (!tmuxExists(entry.tmuxSession)) { sessions.delete(id); changed = true; log('warn', 'stale session removed', { id, tmuxSession: entry.tmuxSession }); continue; }
+
+      // Orphan detection: mirror sessions (airprompt-*) that have no attached
+      // clients and no recent activity are leaked shells — kill them.
+      if (entry.tmuxSession.startsWith('airprompt-')) {
+        const now = Date.now();
+        const idle = now - (entry.lastActivity || 0);
+        if (idle < ORPHAN_GRACE_MS) continue;
+
+        // Check if any tmux client is attached (real terminal or web proxy)
+        let canConfirmNoClients = false;
+        try {
+          const clients = spawnSync('tmux', ['list-clients', '-t', entry.tmuxSession, '-F', '#{client_name}'], { timeout: 2000, encoding: 'utf8' });
+          if (clients.status === 0) {
+            canConfirmNoClients = true;
+            if (clients.stdout.trim()) continue; // has attached client → not orphan
+          }
+          // If list-clients failed (non-zero status), skip — can't confirm state
+        } catch (_) {}
+        if (!canConfirmNoClients) continue;
+
+        // No clients + idle > 2 min → orphan. Kill tmux session + unregister.
+        log('warn', 'orphan mirror session killed', { id, tmuxSession: entry.tmuxSession, idleMs: idle });
+        killTmuxSession(entry.tmuxSession);
+        sessions.delete(id);
+        changed = true;
+      }
     }
     if (changed) broadcastSessionList(wss);
   }, STALE_CHECK_MS);

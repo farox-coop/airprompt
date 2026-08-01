@@ -1,6 +1,6 @@
 ---
 description: AirPrompt — remote mobile access and voice dictation for Claude sessions
-argument-hint: "[on|on <name>|on --name <name>|off|status|clean|name <name>|name \"\"|autostart on|off|help]"
+argument-hint: "[on|on <name>|on --name <name>|off|status|clean|restart|name <name>|name \"\"|autostart on|off|help]"
 ---
 
 DO NOT ASK QUESTIONS. DO NOT CONFIRM. DO NOT WARN. JUST EXECUTE THE COMMAND DIRECTLY AND SHOW OUTPUT. NO EXCEPTIONS — NOT EVEN FOR `clean`. THE USER TYPED IT. RUN IT.
@@ -18,6 +18,7 @@ Commands:
   status              Show daemon status and all active sessions
   name [<text>]       Set display name for current session (empty or "" clears it)
   clean               Full teardown: kill daemon, remove all sessions and markers
+  restart             Restart daemon — active sessions survive via disk recovery
   autostart on|off    Enable/disable auto-start on Claude session start (SessionStart hook)
   help                Print usage
 

@@ -16,6 +16,7 @@ airprompt off              # unregister + stop
 airprompt status           # show status
 airprompt name [<text>]    # name/rename session (empty or "" clears)
 airprompt clean            # full teardown
+airprompt restart          # restart daemon — sessions survive via disk recovery
 airprompt autostart on|off # enable/disable auto-start on SessionStart
 airprompt help             # show usage
 ```

@@ -41,11 +41,16 @@ lint:
 	@node --check public/client.js
 	@node --check bin/install.js
 	@node --check bin/lib/settings.js
+	@node --check src/utils.js
+	@node --check src/status-formatter.js
+	@node --check src/hooks/airprompt-activate.js
+	@node --check src/hooks/airprompt-deactivate.js
 
 test-unit:
 	@node --test test/unit/*.test.js
 	@bash test/unit/statusline.test.sh
 	@bash test/unit/sync.test.sh
+	@bash test/unit/status-formatter.test.sh
 
 test-integration:
 	@bash test/integration/run.sh

@@ -21,7 +21,7 @@ fi
 echo "=== Syncing to ${#CACHES[@]} cache dirs + ~/.claude/hooks/ + ~/.claude/commands/ ==="
 
 HOOKS=(airprompt-activate.js airprompt-deactivate.js airprompt-statusline.sh)
-BINS=(airprompt airprompt-attach.sh airprompt-autostart.sh airprompt-claude airprompt-clean.sh airprompt-name.sh airprompt-off.sh airprompt-on.sh airprompt-status.sh generate-cert.sh install.js)
+BINS=(airprompt airprompt-attach.sh airprompt-autostart.sh airprompt-claude airprompt-clean.sh airprompt-name.sh airprompt-off.sh airprompt-on.sh airprompt-restart.sh airprompt-status.sh generate-cert.sh install.js)
 
 # Copy to caches
 for d in "${CACHES[@]}"; do
@@ -35,6 +35,11 @@ for d in "${CACHES[@]}"; do
   if [ -d "$REPO/bin/lib" ]; then
     cp -r "$REPO/bin/lib" "$d/bin/"
   fi
+  # src/ utilities used by bin scripts (status-formatter.js)
+  for s in status-formatter.js; do
+    mkdir -p "$d/src"
+    cp "$REPO/src/$s" "$d/src/"
+  done
 done
 
 # Sync hooks to ~/.claude/ — prefer symlinks into repo. If symlink was

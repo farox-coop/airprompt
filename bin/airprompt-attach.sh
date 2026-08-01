@@ -129,6 +129,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   touch "${MY_DIR}/active"
+  touch "${MY_DIR}/mirror"  # AirPrompt-created session — auto-cleanup when process exits
   echo ""
   echo "AirPrompt session registered: $SESSION_ID"
   echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"

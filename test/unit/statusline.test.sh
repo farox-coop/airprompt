@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Try deployed hook first, fall back to copying from known location
+# Try deployed hook first, fall back to source
 HOOK="${HOME}/.claude/hooks/airprompt-statusline.sh"
 if [ ! -f "$HOOK" ]; then
   echo "Warning: deployed hook not found, this test requires a deployed airprompt-statusline.sh" >&2
@@ -13,14 +13,10 @@ trap 'rm -rf "$TMPDIR"' EXIT
 export CLAUDE_CONFIG_DIR="$TMPDIR"
 SESSIONS_DIR="${TMPDIR}/.airprompt/sessions"
 
-# Resolve real tmux session name to create matching per-session dir
-CURRENT_TMUX=""
-if [ -n "${TMUX:-}" ]; then
-  CURRENT_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
-  if echo "$CURRENT_TMUX" | grep -q '^airprompt-web-'; then
-    CURRENT_TMUX=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r')
-  fi
-fi
+# Use test override so hook doesn't need a real tmux session
+CURRENT_TMUX="airprompt-test-fake"
+export AIRPROMPT_TEST_TMUX="$CURRENT_TMUX"
+
 # Sanitize (same as statusline.sh)
 SAFE_NAME=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
 MY_DIR="${SESSIONS_DIR}/${SAFE_NAME}"
@@ -35,7 +31,7 @@ ok() { echo "  PASS: $1"; pass=$((pass + 1)); }
 not_ok() { echo "  FAIL: $1"; fail=$((fail + 1)); }
 
 echo "=== Statusline Hook Tests ==="
-echo "(tmux=$CURRENT_TMUX safe=$SAFE_NAME)"
+echo "(test_override_tmux=$CURRENT_TMUX safe=$SAFE_NAME)"
 
 # 1: No badge when no per-session url
 echo "[1/6] No badge when no per-session url"

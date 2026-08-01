@@ -21,6 +21,25 @@ AirPrompt lets you view and interact with remote Claude CLI sessions running on 
 - **Mobile UI**: Web-based terminal with session selector, xterm.js, push-to-talk voice dictation, and keyboard input fallback
 - **Statusline**: Integrated badge `[airprompt: https://<IP>:3210]` in Claude Code
 
+### tmux feature usage
+
+Every tmux feature AirPrompt depends on, where it's used, and why:
+
+| tmux command | Used in | Purpose |
+|---|---|---|
+| `new-session -d` | `on.sh:65`, `activate.js:258`, `server.js:52,346` | Create detached sessions (mirror + daemon + web proxy) |
+| `attach-session` | `server.js:356` | Web client connects to tmux session via node-pty |
+| `has-session` | `server.js:44`, `clean.sh`, `off.sh`, `status.sh` | Check if session exists |
+| `kill-session` | `server.js:57`, `clean.sh:56-63`, `off.sh:66` | Destroy sessions (mirror, daemon, cleanup) |
+| `send-keys` | `server.js:257` | Inject `/airprompt off` into session without attaching |
+| `list-clients` | `server.js:449` | Detect orphaned mirror sessions (no attached clients) |
+| `display-message` | `activate.js:167`, `server.js:130` | Read session name `#S`, group `#{session_group}`, cwd `#{pane_current_path}` |
+| `set-option` | `server.js:353-354`, `claude:111` | Disable status bar in web sessions, enable focus-events |
+| `load-buffer` / `save-buffer` | `server.js:413,421` | Clipboard sync between web client and session |
+| `list-panes -F '#{pane_dead}'` | `claude:102` | Detect zombie panes from previous `/exit` |
+| `respawn-pane -k` | `claude:104`, `on.sh:107` | Revive zombie pane or restart daemon |
+| Session grouping (`-t parent`) | `server.js:346` | Web proxy sessions inherit from real session — kill parent, children die
+
 ## Quick Start
 
 ```bash
@@ -47,6 +66,7 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | `status` | Show daemon status and all active sessions |
 | `name [<text>]` | Set display name for current session (empty or "" clears it) |
 | `clean` | Full teardown — kill daemon, remove all tmux sessions and markers |
+| `restart` | Restart daemon — sessions survive via disk recovery |
 | `autostart on|off` | Auto-start AirPrompt on Claude session start |
 | `help` | Print usage |
 
@@ -80,6 +100,7 @@ Chrome/Android block `SpeechRecognition` over plain HTTP to LAN IPs. AirPrompt a
 - `/airprompt name <text>` — Set session display name (empty or "" clears)
 - `/airprompt autostart on|off` — Auto-start on Claude session start
 - `/airprompt clean` — Full teardown: kill daemon, remove all sessions and markers
+- `/airprompt restart` — Restart daemon — active sessions survive via disk recovery
 - `/airprompt help` — Print usage
 
 ## License

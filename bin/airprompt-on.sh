@@ -57,12 +57,14 @@ if [ -n "${TMUX:-}" ]; then
 fi
 
 if [ -z "${TMUX_SESSION:-}" ]; then
+  CREATED_SESSION=false
   if [ -n "${AIRPROMPT_TMUX_SESSION:-}" ]; then
     TMUX_SESSION="$AIRPROMPT_TMUX_SESSION"
   else
     TMUX_SESSION="airprompt-$$-$(date +%s)"
     if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
       tmux new-session -d -s "$TMUX_SESSION" -c "$ORIG_PWD"
+      CREATED_SESSION=true
     fi
   fi
 fi
@@ -163,6 +165,16 @@ _name_update() {
 # Daemon recovers state from on-disk markers on startup, so a simple
 # file check is sufficient — no need to double-check with daemon API.
 if [ -f "$ACTIVE_FILE" ]; then
+  # Retroactive fix: add missing mirror marker for AirPrompt-created sessions.
+  # Covers both: sessions created by on.sh outside tmux, and mirror sessions
+  # created by the activate hook. Excludes daemon and web proxy sessions.
+  if [ ! -f "${MY_DIR}/mirror" ]; then
+    case "$TMUX_SESSION" in
+      airprompt-daemon|airprompt-web-*) ;;
+      airprompt-*) touch "${MY_DIR}/mirror" ;;
+      *) [ -z "${TMUX:-}" ] && touch "${MY_DIR}/mirror" ;;  # on.sh outside tmux
+    esac
+  fi
   if [ -n "$SESSION_NAME" ]; then
     MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
     if [ -n "$MY_SID" ]; then
@@ -193,6 +205,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   touch "$ACTIVE_FILE"
+  [ "${CREATED_SESSION:-}" = "true" ] && touch "${MY_DIR}/mirror"
   if [ -n "$SESSION_NAME" ]; then
     # Registration already stores name on daemon; just persist to disk
     echo "$SESSION_NAME" > "${MY_DIR}/name"
@@ -207,6 +220,7 @@ elif echo "$RESP" | grep -q '"Session already registered"'; then
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   touch "$ACTIVE_FILE"
+  [ "${CREATED_SESSION:-}" = "true" ] && touch "${MY_DIR}/mirror"
   if [ -n "$SESSION_NAME" ]; then
     _name_update "$SESSION_ID" "$SESSION_NAME" "$MY_DIR"
   fi
