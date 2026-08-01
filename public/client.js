@@ -207,6 +207,12 @@ let sessions = [];
 let activeSessionId = localStorage.getItem(SESSION_STORAGE_KEY) || null;
 let _needPtySpawn = true;  // true when WS (re)connects — PTY not yet spawned
 
+// ── Input buffer: queue messages when WS not OPEN, prevent silent drops ──
+// Capped at MAX_PENDING to prevent unbounded memory on long disconnects.
+const MAX_PENDING = 200;  // matches server INPUT_QUEUE_MAX
+let _pendingMessages = [];
+let _inputSeq = 0;  // monotonic counter for input messages
+
 // ── WebSocket with auto-reconnect ────────────────────────────────────
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 let ws = null;
@@ -236,6 +242,8 @@ function connect() {
     }
     // Re-send resize so server re-spawns pty with correct dimensions
     scheduleResize();
+    // Flush any input queued during disconnect/reconnect window
+    _flushPending();
     // Keepalive — ws library auto-responds to ping frames
     pingTimer = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -289,9 +297,24 @@ function scheduleReconnect() {
 connect();
 
 function send(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(msg));
+  // Tag input messages with monotonic seq — debug tracing + future ack.
+  if (msg.type === 'input') msg.seq = ++_inputSeq;
+  // Always enqueue so messages survive transient WS states and reconnects.
+  _pendingMessages.push(msg);
+  if (_pendingMessages.length > MAX_PENDING) _pendingMessages.shift();
+  _flushPending();
+}
+
+function _flushPending() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || _pendingMessages.length === 0) return;
+  // Drain queue in order. If a send throws (unlikely for WS), stop —
+  // remaining messages stay in queue for next flush attempt.
+  var sent = 0;
+  for (var i = 0; i < _pendingMessages.length; i++) {
+    try { ws.send(JSON.stringify(_pendingMessages[i])); sent++; }
+    catch (e) { break; }
   }
+  if (sent > 0) _pendingMessages.splice(0, sent);
 }
 
 // Expose for keybar.js
@@ -464,8 +487,11 @@ document.getElementById('keybar-toggle').addEventListener('click', function (e) 
     if (vp) { vp.scrollTop = vp.scrollHeight; }
     // Restore focus so native keyboard stays open on mobile.
     // fitAddon.fit() can blur xterm's hidden textarea, dismissing the
-    // virtual keyboard. Re-focusing brings it back immediately.
-    try { term.focus(); } catch (_) {}
+    // virtual keyboard. On mobile, focus the invisible input instead
+    // of xterm's readonly textarea.
+    var mi = document.getElementById('mobile-input');
+    if (mi && mi.classList.contains('visible')) { try { mi.focus(); } catch (_) {} }
+    else { try { term.focus(); } catch (_) {} }
   }
   if (keybarEl) {
     keybarEl.addEventListener('transitionend', function () {
@@ -506,36 +532,10 @@ sessionBar.addEventListener('pointerleave', function() {
 // Ctrl+Shift+C / Ctrl+Shift+V operate on the REMOTE tmux buffer, never
 // the local browser clipboard.
 
-// ── Focus gate: block spurious onData after textarea focus ───────────
-// On mobile, tapping the terminal to bring up the native keyboard fires
-// a focus event on xterm's hidden textarea. The browser flushes any
-// buffered IME composition through onData — this is NOT user input.
-// Without a gate, it flows through the modifier pipeline and disarms
-// one-shot Ctrl/Shift. The gate blocks all onData for 100ms after focus.
-var _xtermFocusGate = false;
-var _xtermFocusTimer = null;
-
-function _setupFocusGate() {
-  var ta = document.querySelector('.xterm-helper-textarea');
-  if (!ta) { setTimeout(_setupFocusGate, 200); return; }
-  ta.addEventListener('focus', function () {
-    _xtermFocusGate = true;
-    clearTimeout(_xtermFocusTimer);
-    _xtermFocusTimer = setTimeout(function () {
-      _xtermFocusGate = false;
-    }, 100);
-  });
-}
-_setupFocusGate();
-
 term.onData((data) => {
   // Skip empty/ghost events — focus/blur on mobile fires spurious
   // onData with empty string, which would disarm one-shot modifiers.
   if (!data) return;
-
-  // Skip buffered flush right after textarea gains focus. Tapping the
-  // terminal to open the keyboard must not send data or disarm modifiers.
-  if (_xtermFocusGate) return;
 
   var kb = window._airpromptKeybar;
   if (!kb || !kb.hasAnyModifier || !kb.hasAnyModifier()) {
@@ -956,7 +956,9 @@ function toggleDictation(e) {
     // Ignore taps during stop → accept transition
     return;
   } else {
-    // START: show empty overlay
+    // START: show empty overlay. Close native keyboard so dictation
+    // overlay is visible and mic button is reachable.
+    if (window._airpromptBlurMobileInput) window._airpromptBlurMobileInput();
     isListening = true;
     dictationAccumulator = '';
     dictateOverlay.classList.remove('dictate-hidden');
@@ -1181,3 +1183,181 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
   e.preventDefault(); e.stopPropagation();
   location.reload();
 });
+
+// ── Mobile input bar ──────────────────────────────────────────────────
+// On touch devices, a real <input> captures keyboard input instead of
+// xterm.js's hidden textarea. Android IME (Gboard) works correctly with
+// real <input> elements — autocorrect, autocomplete, and per-character
+// events all function. xterm.js's textarea has a known Android IME bug
+// (xtermjs/xterm.js#3600) that drops characters during composition.
+//
+// The input bar shows what the user typed. Each character change is
+// forwarded to the PTY immediately, and the echo appears in xterm.js
+// (read-only display). On Enter, the text is committed + \r sent.
+// The invisible textarea captures all keyboard input on touch devices —
+(function () {
+  var inputEl = document.getElementById('mobile-input');
+  var isMobile = false;
+  try { isMobile = window.matchMedia('(pointer: coarse)').matches; } catch (_) {}
+
+  if (!isMobile || !inputEl) return;
+
+  inputEl.classList.add('visible');
+  // Expose for dictation: blur to dismiss native keyboard before voice input.
+  window._airpromptBlurMobileInput = function () { inputEl.blur(); };
+  var _prev = '';                // tracks input value as code-point array
+  var _enterTimer = null;        // debounce timer — resolves single vs double tap
+  var DOUBLE_ENTER_MS = 400;     // max gap between Enter taps to submit
+
+  // Prevent xterm.js textarea from stealing focus — we manage input
+  // ourselves. Hide it visually (still in DOM for xterm internals).
+  var _xtermTA = document.querySelector('.xterm-helper-textarea');
+  if (_xtermTA) {
+    _xtermTA.setAttribute('readonly', '');
+    _xtermTA.style.opacity = '0';
+    _xtermTA.style.pointerEvents = 'none';
+  }
+
+  // Focus input bar when tapping terminal area
+  document.getElementById('terminal-container').addEventListener('click', function () {
+    inputEl.focus();
+  });
+
+  // ── Helpers: code-point-aware string ops (emoji-safe) ─────────────
+  function _toArray(s) { return Array.from(s); }
+  function _join(a)   { return a.join(''); }
+  function _prevArr() { return _toArray(_prev); }
+
+  inputEl.addEventListener('input', function () {
+    // Any real input cancels the pending Enter \n timer — user is editing.
+    if (_enterTimer) {
+      clearTimeout(_enterTimer);
+      _enterTimer = null;
+    }
+
+    var cur = inputEl.value;
+    if (cur === _prev) return;
+
+    var prevArr = _prevArr();
+    var curArr  = _toArray(cur);
+    var prevLen = prevArr.length;
+    var curLen  = curArr.length;
+
+    if (curLen > prevLen) {
+      // Characters added — send the new ones.
+      if (cur.lastIndexOf(_prev, 0) === 0) {
+        send({ type: 'input', data: cur.slice(_prev.length) });
+      } else {
+        // Insertion not at end (autocorrect, IME replacement mid-text).
+        if (prevLen) send({ type: 'input', data: '\x7f'.repeat(prevLen) });
+        send({ type: 'input', data: cur });
+      }
+    } else if (curLen < prevLen) {
+      // Characters deleted.
+      if (_prev.lastIndexOf(cur, 0) === 0) {
+        var delCount = prevLen - curLen;
+        send({ type: 'input', data: '\x7f'.repeat(delCount) });
+      } else {
+        // Deletion not from end (selected text then typed over, etc.).
+        if (prevLen) send({ type: 'input', data: '\x7f'.repeat(prevLen) });
+        if (cur) send({ type: 'input', data: cur });
+      }
+    } else {
+      // Same length, different content (IME replacement / autocorrect).
+      if (prevLen) send({ type: 'input', data: '\x7f'.repeat(prevLen) });
+      send({ type: 'input', data: cur });
+    }
+
+    _prev = cur;
+  });
+
+  // Special keys that don't produce visible characters or may not
+  // trigger the input event. Mapped to terminal escape sequences.
+  var SPECIAL_KEYS = {
+    Backspace: '\x7f',
+    Delete: '\x1b[3~',
+    Tab: '\t',
+    ArrowUp: '\x1b[A',
+    ArrowDown: '\x1b[B',
+    ArrowRight: '\x1b[C',
+    ArrowLeft: '\x1b[D',
+    Home: '\x1b[H',
+    End: '\x1b[F',
+    Escape: '\x1b',
+  };
+
+  inputEl.addEventListener('keydown', function (e) {
+    var seq = SPECIAL_KEYS[e.key];
+    if (seq) {
+      e.preventDefault();
+      send({ type: 'input', data: seq });
+      // Sync textarea for keys that change visible content.
+      // preventDefault suppresses the input event, so we update state directly.
+      if (e.key === 'Backspace' && _prev.length > 0) {
+        _prev = _join(_prevArr().slice(0, -1));
+        inputEl.value = _prev;
+      }
+      if (e.key === 'Tab') {
+        _prev += '\t';
+        inputEl.value = _prev;
+      }
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      // Ignore Enter during IME composition — Gboard fires keydown with
+      // isComposing=true when the user taps a suggestion or commits text.
+      // Without this guard, composition commits are misread as double-tap
+      // and the line submits before the user intended.
+      if (e.isComposing) return;
+
+      // Double-tap debounce: first Enter queues \n after 400ms,
+      // second Enter cancels timer and sends \r (submit).
+      // Any input or non-Enter keydown cancels the pending \n timer
+      // so the shell never gets a stray newline after an accidental Enter.
+      if (_enterTimer) {
+        e.preventDefault();
+        clearTimeout(_enterTimer);
+        _enterTimer = null;
+        _prev = '';
+        inputEl.value = '';
+        send({ type: 'input', data: '\r' });
+      } else {
+        e.preventDefault();
+        _prev += '\n';
+        inputEl.value = _prev;
+        _enterTimer = setTimeout(function () {
+          _enterTimer = null;
+          send({ type: 'input', data: '\n' });
+        }, DOUBLE_ENTER_MS);
+      }
+      return;
+    }
+
+    // Any non-Enter key cancels the pending \n debounce — the user
+    // changed their mind and is now editing.
+    if (_enterTimer && e.key !== 'Enter') {
+      clearTimeout(_enterTimer);
+      _enterTimer = null;
+      // Undo the \n we added to _prev/value when the first Enter was tapped.
+      if (_prev.endsWith('\n')) {
+        _prev = _prev.slice(0, -1);
+        inputEl.value = _prev;
+      }
+    }
+
+    // Handle Ctrl+letter combos from hardware keyboards on mobile.
+    // Ctrl alone (not AltGr / Cmd) — mask with 0x1f before sending.
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
+      e.preventDefault();
+      var code = e.key.charCodeAt(0);
+      if (code >= 0x20 && code < 0x7f) {
+        send({ type: 'input', data: String.fromCharCode(code & 0x1f) });
+      }
+      return;
+    }
+  });
+
+  // Initial focus so keyboard opens on page load
+  setTimeout(function () { inputEl.focus(); }, 500);
+})();

@@ -452,6 +452,157 @@ test('WS switch_session for unknown id returns error', (t, done) => {
   });
 });
 
+// ── Server-side input queue tests ────────────────────────────────────
+// Input messages arriving before PTY is spawned are buffered in a
+// per-connection _inputQueue and flushed after spawnPty() succeeds.
+
+test('input sent before switch_session is queued and flushed after PTY spawn', { skip: !TMUX_AVAILABLE }, (t, done) => {
+  createTmux('airprompt-test-q1');
+  post('/api/sessions/register', { sessionId: 'test-q1', cwd: '/tmp' }).then(() => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    let gotOutput = false;
+
+    ws.on('open', () => {
+      // Send input BEFORE switch_session — should be queued server-side.
+      // WS frames are ordered by TCP; the input arrives before switch_session.
+      ws.send(JSON.stringify({ type: 'input', data: 'echo q1_before\r' }));
+      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-q1' }));
+    });
+
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'session_list') return;
+      if (msg.type === 'output' && msg.data.indexOf('q1_before') !== -1) {
+        gotOutput = true;
+      }
+    });
+
+    setTimeout(() => {
+      ws.close();
+      killTmux('airprompt-test-q1');
+      assert.ok(gotOutput, 'queued input should be flushed and echoed back');
+      done();
+    }, 1500);
+  });
+});
+
+test('input sent after pty_spawned is written directly (not queued)', { skip: !TMUX_AVAILABLE }, (t, done) => {
+  createTmux('airprompt-test-q2');
+  post('/api/sessions/register', { sessionId: 'test-q2', cwd: '/tmp' }).then(() => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    let gotOutput = false;
+
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-q2' }));
+    });
+
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'session_list') return;
+      // Wait for pty_spawned confirmation, then send input — deterministic.
+      if (msg.type === 'pty_spawned') {
+        ws.send(JSON.stringify({ type: 'input', data: 'echo q2_direct\r' }));
+      }
+      if (msg.type === 'output' && msg.data.indexOf('q2_direct') !== -1) {
+        gotOutput = true;
+      }
+    });
+
+    setTimeout(() => {
+      ws.close();
+      killTmux('airprompt-test-q2');
+      assert.ok(gotOutput, 'direct input after PTY spawn should be echoed back');
+      done();
+    }, 1500);
+  });
+});
+
+test('input queue capped at 200 messages — excess dropped', { skip: !TMUX_AVAILABLE }, (t, done) => {
+  createTmux('airprompt-test-qcap');
+  post('/api/sessions/register', { sessionId: 'test-qcap', cwd: '/tmp' }).then(() => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    // Send 250 echo commands BEFORE spawn. Each `echo CAP_NN\r` is a self-
+    // identifying input that echoes its index back. Only 200 should be queued.
+    // After spawn+flush, we check that CAP_199 is echoed but CAP_220 (beyond
+    // cap) never appears.
+    let maxSeen = -1;
+    let seen220 = false;
+
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'session_list' || msg.type === 'pty_spawned') return;
+      if (msg.type === 'output') {
+        var m = msg.data.match(/CAP_(\d+)/g);
+        if (m) {
+          m.forEach(function (s) {
+            var n = parseInt(s.slice(4), 10);
+            if (n > maxSeen) maxSeen = n;
+            if (n >= 220) seen220 = true;
+          });
+        }
+      }
+    });
+
+    ws.on('open', () => {
+      // Send 250 inputs; only 200 queued (server cap).
+      for (var i = 0; i < 250; i++) {
+        ws.send(JSON.stringify({ type: 'input', data: 'echo CAP_' + i + '\r' }));
+      }
+      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-qcap' }));
+    });
+
+    setTimeout(() => {
+      assert.ok(maxSeen >= 190, 'at least 190 of 200 queued items should echo back (got max=' + maxSeen + ')');
+      assert.ok(!seen220, 'items beyond cap 200 must be dropped (got CAP_220+)');
+      ws.close();
+      killTmux('airprompt-test-qcap');
+      done();
+    }, 2000);
+  });
+});
+
+test('non-string input data is rejected', { skip: !TMUX_AVAILABLE }, (t, done) => {
+  createTmux('airprompt-test-qtval');
+  post('/api/sessions/register', { sessionId: 'test-qtval', cwd: '/tmp' }).then(() => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    ws.on('open', () => {
+      // Should not crash the server
+      ws.send(JSON.stringify({ type: 'input', data: 12345 }));
+      ws.send(JSON.stringify({ type: 'input', data: true }));
+      ws.send(JSON.stringify({ type: 'input', data: null }));
+      // Valid string should still work after non-string rejects
+      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-qtval' }));
+    });
+    setTimeout(() => {
+      assert.ok(ws.readyState === WebSocket.OPEN);  // server didn't crash
+      ws.close();
+      killTmux('airprompt-test-qtval');
+      done();
+    }, 500);
+  });
+});
+
+test('input queue cleared on WS close', { skip: !TMUX_AVAILABLE }, (t, done) => {
+  createTmux('airprompt-test-qclose');
+  post('/api/sessions/register', { sessionId: 'test-qclose', cwd: '/tmp' }).then(() => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ type: 'input', data: 'orphan input\r' }));
+      setTimeout(() => {
+        // Verify server didn't crash from queued-then-abandoned input.
+        // The queue was in _inputQueue; after close, GC frees it.
+        ws.close();
+      }, 50);
+    });
+    ws.on('close', () => {
+      killTmux('airprompt-test-qclose');
+      // Second connection should work fine — server alive
+      const ws2 = new WebSocket(`ws://localhost:${port}`);
+      ws2.on('open', () => { ws2.close(); done(); });
+    });
+  });
+});
+
 // ── Deactivate hook guard tests ─────────────────────────────────────
 
 const TEMP_DIR = (() => {

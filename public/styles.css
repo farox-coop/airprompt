@@ -313,3 +313,38 @@ body, html {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* ── Mobile input ─────────────────────────────── */
+/* Invisible <textarea> captures keyboard on touch devices, bypassing
+   xterm.js's broken Android IME textarea (xtermjs/xterm.js#3600).
+   Fixed at top-left with minimal opacity — must be "visible" to
+   browser compositor for keyboard to attach. Fixed positioning
+   prevents Android scroll-into-view from shoving the page.
+   <textarea> avoids Chrome Android's autofill accessory bar
+   (passwords/cards/locations) that appears on <input> elements. */
+#mobile-input {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 1px;
+  opacity: 0.01;
+  -webkit-appearance: none;
+  -webkit-user-select: text;
+  user-select: text;
+  z-index: -1;
+}
+#mobile-input.visible {
+  display: block;
+}
+

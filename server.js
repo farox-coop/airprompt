@@ -304,6 +304,10 @@ function createApp() {
     let ptyProcess = null;
     let activeSessionId = null;
     const clientId = Math.random().toString(36).slice(2, 8);
+    let _inputQueue = [];       // buffer input arriving before PTY is spawned
+    let _inputQueueBytes = 0;   // total bytes in _inputQueue
+    const INPUT_QUEUE_MAX = 200;       // max messages
+    const INPUT_QUEUE_BYTES_MAX = 1 << 20;  // 1 MiB per connection
     log('info', 'ws client connected', { clientId });
 
     ws.on('error', (e) => { log('warn', 'ws client error', { clientId, error: e.message }); });
@@ -349,9 +353,17 @@ function createApp() {
       spawnSync('tmux', ['set-option', '-t', webSession, 'status', 'off'], { timeout: 1000 });
       spawnSync('tmux', ['set-option', '-t', webSession, 'pane-border-status', 'off'], { timeout: 1000 });
 
-      const thisPty = pty.spawn('tmux', ['attach-session', '-t', webSession], {
-        name: 'xterm-256color', cols: termCols, rows: termRows, cwd: entry.cwd, env: process.env,
-      });
+      let thisPty;
+      try {
+        thisPty = pty.spawn('tmux', ['attach-session', '-t', webSession], {
+          name: 'xterm-256color', cols: termCols, rows: termRows, cwd: entry.cwd, env: process.env,
+        });
+      } catch (e) {
+        log('error', 'pty spawn failed', { clientId, webSession, error: e.message });
+        try { spawnSync('tmux', ['kill-session', '-t', webSession], { timeout: 1000 }); } catch (_) {}
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'error', message: 'Failed to create terminal session' }));
+        return false;
+      }
       thisPty._airpromptWebSession = webSession;
       ptyProcess = thisPty;
       log('info', 'pty spawned', { clientId, webSession, sessionId, cols: termCols, rows: termRows });
@@ -367,10 +379,23 @@ function createApp() {
         if (ptyProcess !== thisPty) return;
         if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'output', data: '\r\n\x1b[33m[AirPrompt: session ended]\x1b[0m\r\n' }));
         ptyProcess = null;
+        // Discard queued input — stale keystrokes from dead session must
+        // not replay into a freshly spawned PTY.
+        _inputQueue = [];
+        _inputQueueBytes = 0;
       });
 
       // Notify client that PTY is ready
       if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pty_spawned', sessionId }));
+      // Flush any input queued before PTY was spawned
+      if (_inputQueue.length > 0) {
+        for (const d of _inputQueue) {
+          try { thisPty.write(d); } catch (e) { /* ok */ }
+        }
+        log('info', 'flushed queued input', { clientId, count: _inputQueue.length });
+        _inputQueue = [];
+        _inputQueueBytes = 0;
+      }
       return true;
     }
 
@@ -387,10 +412,25 @@ function createApp() {
           log('debug', '[client] ' + (msg.msg || ''), { level: msg.level, extra: msg.extra });
           break;
         case 'input':
-          if (ptyProcess && msg.data) {
+          if (!msg.data) break;
+          if (typeof msg.data !== 'string') break;  // reject non-string payloads
+          // Reject oversized input — prevents OOM from a single large payload.
+          // 64 KiB per message protects against paste-bombs on LAN.
+          if (msg.data.length > 65536) break;
+          if (ptyProcess) {
             try { ptyProcess.write(msg.data); } catch (e) { /* ok */ }
             const activeEntry = activeSessionId ? sessions.get(activeSessionId) : null;
             if (activeEntry) activeEntry.lastActivity = Date.now();
+          } else {
+            // PTY not spawned yet — buffer input so it's not lost.
+            // Flushed after spawnPty() succeeds.
+            // Capped by count AND bytes to prevent OOM from a single
+            // connection sending large payloads.
+            if (_inputQueue.length < INPUT_QUEUE_MAX &&
+                _inputQueueBytes + msg.data.length <= INPUT_QUEUE_BYTES_MAX) {
+              _inputQueue.push(msg.data);
+              _inputQueueBytes += msg.data.length;
+            }
           }
           break;
         case 'switch_session':
@@ -428,6 +468,7 @@ function createApp() {
 
     ws.on('close', () => {
       log('info', 'ws client disconnected', { clientId, activeSessionId });
+      _inputQueue = []; _inputQueueBytes = 0;  // discard queued input
       if (ptyProcess) {
         const wsess = ptyProcess._airpromptWebSession;
         try { ptyProcess.kill(); } catch (e) { /* ok */ }
