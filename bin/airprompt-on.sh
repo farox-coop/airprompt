@@ -23,9 +23,14 @@ done
 
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PID_FILE="/tmp/airprompt-server.pid"
+PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
+
+# ── Protocol detection (shared lib) ────────────────────────────────────
+source "$(dirname "$0")/lib/protocol.sh"
+detect_protocol
+DAEMON_PORT="$AP_PORT"
 
 DEBUG="${AIRPROMPT_DEBUG:-1}"  # always debug during development
 
@@ -78,18 +83,6 @@ fi
 [ -z "$LAN_IP" ] && LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 [ -z "$LAN_IP" ] && LAN_IP="localhost"
 
-# ── Detect protocol: daemon.json SSOT → cert fallback → http ──────────
-AIRPROMPT_CONF="${CONFIG_DIR}/.airprompt/daemon.json"
-PROTO="http"
-CURL_OPTS=""
-if [ -f "$AIRPROMPT_CONF" ] && command -v jq >/dev/null 2>&1; then
-  PROTO=$(jq -r '.protocol // "http"' "$AIRPROMPT_CONF" 2>/dev/null || echo "http")
-  DAEMON_PORT=$(jq -r '.port // 3210' "$AIRPROMPT_CONF" 2>/dev/null || echo "$DAEMON_PORT")
-elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-key.pem" ]; then
-  PROTO="https"
-fi
-[ "$PROTO" = "https" ] && CURL_OPTS="-k"
-
 # ── Ensure daemon is running ─────────────────────────────────────────
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE")
@@ -109,7 +102,7 @@ if [ ! -f "$PID_FILE" ]; then
     tmux respawn-pane -k -t airprompt-daemon "AIRPROMPT_DEBUG=$DEBUG node server.js 2>&1 | tee /tmp/airprompt.log" 2>/dev/null || true
   fi
   for i in $(seq 1 20); do
-    if curl -s $CURL_OPTS "${PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
+    if curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
       break
     fi
     if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
@@ -149,7 +142,7 @@ _name_update() {
   local esc
   esc=$(printf '%s' "$name_val" | sed 's/\\/\\\\/g; s/"/\\"/g')
   local put_resp
-  put_resp=$(curl -s $CURL_OPTS -X PUT "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/name" \
+  put_resp=$(curl -s $AP_CURL_OPTS -X PUT "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/name" \
     -H "Content-Type: application/json" \
     -d "{\"sessionId\":\"${sid}\",\"name\":\"${esc}\"}" 2>/dev/null || echo "")
   if echo "$put_resp" | grep -q '"ok":true'; then
@@ -182,7 +175,7 @@ if [ -f "$ACTIVE_FILE" ]; then
     fi
   fi
   echo "AirPrompt already active for this session."
-  echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
+  echo "Mobile URL: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
   exit 0
 fi
 
@@ -195,13 +188,13 @@ if [ -n "$SESSION_NAME" ]; then
 fi
 REG_PAYLOAD="${REG_PAYLOAD}}"
 
-RESP=$(curl -s $CURL_OPTS -X POST "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/register" \
+RESP=$(curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/register" \
   -H "Content-Type: application/json" \
   -d "$REG_PAYLOAD")
 
 if echo "$RESP" | grep -q '"ok":true'; then
   mkdir -p "$MY_DIR"
-  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
+  echo "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   touch "$ACTIVE_FILE"
@@ -213,10 +206,10 @@ if echo "$RESP" | grep -q '"ok":true'; then
     echo "Session name: $SESSION_NAME"
   fi
   echo "AirPrompt session registered: $SESSION_ID"
-  echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
+  echo "Mobile URL: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
 elif echo "$RESP" | grep -q '"Session already registered"'; then
   mkdir -p "$MY_DIR"
-  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
+  echo "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   touch "$ACTIVE_FILE"
@@ -250,7 +243,7 @@ if [ -d "$SESSIONS_DIR" ]; then
       # Read session ID from the session file (not from dir name)
       SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r')
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
-      curl -s $CURL_OPTS -X POST "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+      curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
         -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
       rm -rf "$d"

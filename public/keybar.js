@@ -7,6 +7,8 @@
   // In a raw PTY, Ctrl+Shift+letter sends the same control char as Ctrl+letter.
 
   // ── Key definitions ──────────────────────────────────────────────────
+  var SPACER = { label: '', seq: null, cls: 'spacer' };
+
   var ROWS = [
     [
       { label: 'Esc',   seq: '\x1b',     cls: 'modifier' },
@@ -14,28 +16,30 @@
       { label: 'Ctrl',  seq: null,       cls: 'modifier sticky', id: 'ctrl' },
       { label: 'Alt',   seq: null,       cls: 'modifier sticky', id: 'alt' },
       { label: 'Shift', seq: null,       cls: 'modifier sticky', id: 'shift' },
-      { label: '\\',    seq: '\\',       cls: '' },
+      { label: ':',     seq: ':',        cls: '' },
+      { label: '|',     seq: '|',        cls: '' },
       { label: ';',     seq: ';',        cls: '' },
-      { label: '-',     seq: '-',        cls: '' },
-      { label: '/',     seq: '/',        cls: '' },
-      { label: '.',     seq: '.',        cls: '' },
     ],
     [
       { label: 'Home',  seq: '\x1b[H',   cls: '' },
-      { label: '',      seq: null,       cls: 'spacer' },
-      { label: '↑',     seq: '\x1b[A',   cls: 'arrow' },
-      { label: '',      seq: null,       cls: 'spacer' },
       { label: 'End',   seq: '\x1b[F',   cls: '' },
       { label: 'PgUp',  seq: '\x1b[5~',  cls: '' },
       { label: 'PgDn',  seq: '\x1b[6~',  cls: '' },
+      { label: 'Del',   seq: '\x1b[3~',  cls: '' },
+      { label: '/',     seq: '/',        cls: '' },
+      { label: '↑',     seq: '\x1b[A',   cls: 'arrow' },
+      { label: '\\',    seq: '\\',       cls: '' },
     ],
     [
+      { label: 'S+T',   seq: '\x1b[Z',   cls: 'combo', raw: true },
+      { label: 'Undo',  seq: '/rewind\r', cls: 'combo', raw: true },
+      { label: 'Stash', seq: '\x13',     cls: 'combo', raw: true },
+      { label: 'Search',seq: '\x12',     cls: 'combo', raw: true },
+      { label: 'Send',  seq: '\r',       cls: 'send', raw: true,
+        html: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>' },
       { label: '←',     seq: '\x1b[D',   cls: 'arrow' },
       { label: '↓',     seq: '\x1b[B',   cls: 'arrow' },
       { label: '→',     seq: '\x1b[C',   cls: 'arrow' },
-      { label: '|',     seq: '|',        cls: '' },
-      { label: ':',     seq: ':',        cls: '' },
-      { label: 'Del',   seq: '\x1b[3~',  cls: '' },
     ],
   ];
 
@@ -61,6 +65,20 @@
     try {
       return window.matchMedia('(pointer: coarse)').matches;
     } catch (_) { return false; }
+  }
+
+  // Re-focus mobile input to keep native Android keyboard open.
+  // keybar buttons have tabindex=-1 but the browser still transfers
+  // focus on touch → virtual keyboard dismisses → user forced to re-tap.
+  // Must suppress disarm: refocus can trigger spurious onData events
+  // that would disarm one-shot modifiers via applyModifiers().
+  function refocusMobileInput() {
+    if (!isMobile()) return;
+    suppressDisarm(300);
+    var mi = document.getElementById('mobile-input');
+    if (mi) {
+      try { mi.focus(); } catch (_) {}
+    }
   }
 
   function sendKey(seq) {
@@ -150,6 +168,7 @@
       var row = ROWS[ri];
       var rowDiv = document.createElement('div');
       rowDiv.className = 'keybar-row';
+      rowDiv.style.gridTemplateColumns = 'repeat(' + row.length + ', 1fr)';
 
       for (var ki = 0; ki < row.length; ki++) {
         var key = row[ki];
@@ -169,8 +188,13 @@
         for (var ci = 0; ci < clsList.length; ci++) {
           btn.className += ' keybar-' + clsList[ci];
         }
-        btn.textContent = key.label;
-        btn.setAttribute('aria-label', key.id || key.label);
+        if (key.html) {
+          btn.innerHTML = key.html;
+          btn.setAttribute('aria-label', key.label);
+        } else {
+          btn.textContent = key.label;
+          btn.setAttribute('aria-label', key.id || key.label);
+        }
         // Prevent button from stealing focus from xterm.js textarea.
         // On mobile, focus loss dismisses the virtual keyboard. When the
         // user re-taps the terminal to bring it back, xterm.js fires
@@ -183,11 +207,21 @@
           // Sticky modifier key
           modBtns[key.id] = btn;
           (function (m) {
-            btn.addEventListener('click', function () { handleSticky(m); });
+            btn.addEventListener('click', function () { handleSticky(m); refocusMobileInput(); });
           })(key.id);
+        } else if (key.raw && key.seq) {
+          // Combo key: send pre-composed sequence, bypass modifier pipeline
+          (function (s) {
+            btn.addEventListener('click', function () {
+              if (window._airpromptSend) {
+                window._airpromptSend({ type: 'input', data: s });
+              }
+              refocusMobileInput();
+            });
+          })(key.seq);
         } else {
           (function (s) {
-            btn.addEventListener('click', function () { sendKey(s); });
+            btn.addEventListener('click', function () { sendKey(s); refocusMobileInput(); });
           })(key.seq);
         }
 
@@ -200,7 +234,11 @@
 
   function toggle() {
     if (!container) return;
-    container.classList.toggle('keybar-hidden');
+    var hidden = container.classList.toggle('keybar-hidden');
+    var toggleBtn = document.getElementById('keybar-toggle');
+    if (toggleBtn) {
+      toggleBtn.classList.toggle('active', !hidden);
+    }
   }
 
   function init() {
@@ -215,6 +253,8 @@
     }
   }
 
+  var _focusGraceUntil = 0;  // suppress disarm until this timestamp
+
   // ── Apply modifiers to data from native keyboard ──────────────────────
   // Called by client.js term.onData() to inject Ctrl/Alt/Shift before send.
   // Returns Promise<string|null> — null means already handled, don't send.
@@ -227,24 +267,28 @@
     var shift = modState.shift.armed || modState.shift.locked;
 
     // Disarm one-shot modifiers (locked stay active)
-    if (modState.ctrl.armed)  { modState.ctrl.armed = false; }
-    if (modState.alt.armed && !modState.alt.locked) {
-      modState.alt.armed = false;
+    var inGrace = Date.now() < _focusGraceUntil;
+    if (!inGrace) {
+      if (modState.ctrl.armed)  { modState.ctrl.armed = false; }
+      if (modState.alt.armed && !modState.alt.locked) {
+        modState.alt.armed = false;
+      }
+      if (modState.shift.armed) { modState.shift.armed = false; }
+      updateModUI();
     }
-    if (modState.shift.armed) { modState.shift.armed = false; }
-    updateModUI();
 
     var result = data;
 
-    // Apply Ctrl mask per character
+    // Apply Ctrl mask per code point (emoji-safe — iterates chars, not UTF-16 units)
     if (ctrl) {
       var masked = '';
-      for (var i = 0; i < result.length; i++) {
-        var code = result.charCodeAt(i);
+      var chars = Array.from(result);
+      for (var i = 0; i < chars.length; i++) {
+        var code = chars[i].codePointAt(0);
         if (code >= 0x20 && code < 0x7f) {
           masked += String.fromCharCode(code & 0x1f);
         } else {
-          masked += result[i];
+          masked += chars[i];
         }
       }
       result = masked;
@@ -255,10 +299,25 @@
       result = '\x1b' + result;
     }
 
-    // Apply Shift map — only for keys in SHIFT_MAP.
-    // Shift does NOT transform regular characters (a stays a).
-    if (shift && SHIFT_MAP[result]) {
-      result = SHIFT_MAP[result];
+    // Apply Shift map — terminal control sequences + char casing.
+    // SHIFT_MAP: known control sequences (e.g. Tab → Shift+Tab).
+    // Character casing: armed (one-shot) → first letter uppercase.
+    // Locked (double-tap) → ALL letters uppercase.
+    // Uses String.prototype.toUpperCase() for full Unicode coverage
+    // (handles accented letters like áéíóúüñ correctly).
+    if (shift) {
+      if (SHIFT_MAP[result]) {
+        result = SHIFT_MAP[result];
+      } else if (!ctrl) {
+        if (modState.shift.locked) {
+          result = result.toUpperCase();
+        } else {
+          // One-shot: uppercase first character only
+          var chars = Array.from(result);
+          if (chars.length > 0) chars[0] = chars[0].toUpperCase();
+          result = chars.join('');
+        }
+      }
     }
 
     return Promise.resolve(result);
@@ -285,6 +344,10 @@
            modState.shift.armed || modState.shift.locked;
   }
 
+  function suppressDisarm(ms) {
+    _focusGraceUntil = Date.now() + (ms || 300);
+  }
+
   // ── Exports ───────────────────────────────────────────────────────────
   window._airpromptKeybar = {
     toggle: toggle,
@@ -293,6 +356,7 @@
     applyModifiers: applyModifiers,
     isCopyPasteCombo: isCopyPasteCombo,
     disarmCopyPaste: disarmCopyPaste,
+    suppressDisarm: suppressDisarm,
   };
 
   // ── Start ─────────────────────────────────────────────────────────────

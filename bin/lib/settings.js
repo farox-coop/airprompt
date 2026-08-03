@@ -177,7 +177,7 @@ function tokenizeCommand(command) {
 function referencesManagedScript(command) {
   try {
     for (const tok of tokenizeCommand(command)) {
-      if (tok && typeof tok === 'string' && MANAGED_HOOK_BASENAMES.has(path.win32.basename(tok))) return true;
+      if (tok && typeof tok === 'string' && MANAGED_HOOK_BASENAMES.has(path.basename(tok))) return true;
     }
   } catch (_) { /* malformed command — treat as not ours */ }
   return false;

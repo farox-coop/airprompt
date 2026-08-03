@@ -20,23 +20,17 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
 PROJECT_NAMES_FILE="${CONFIG_DIR}/.airprompt/project-names.json"
 
+# ── Protocol detection (shared lib) ────────────────────────────────────
+source "$(dirname "$0")/lib/protocol.sh"
+detect_protocol
+DAEMON_PORT="$AP_PORT"
+
 NAME="${1:-}"
 # Handle explicit empty-string marker: /airprompt name "" → clear
 if [ "$NAME" = '""' ]; then
   NAME=""
 fi
 
-# ── Detect protocol: daemon.json SSOT → cert fallback → http ──────────
-AIRPROMPT_CONF="${CONFIG_DIR}/.airprompt/daemon.json"
-PROTO="http"
-CURL_OPTS=""
-if [ -f "$AIRPROMPT_CONF" ] && command -v jq >/dev/null 2>&1; then
-  PROTO=$(jq -r '.protocol // "http"' "$AIRPROMPT_CONF" 2>/dev/null || echo "http")
-  DAEMON_PORT=$(jq -r '.port // 3210' "$AIRPROMPT_CONF" 2>/dev/null || echo "$DAEMON_PORT")
-elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-key.pem" ]; then
-  PROTO="https"
-fi
-[ "$PROTO" = "https" ] && CURL_OPTS="-k"
 
 # ── Resolve current tmux session ─────────────────────────────────────
 CURRENT_TMUX=""
@@ -63,9 +57,9 @@ if [ -z "$SESSION_ID" ]; then
 fi
 
 # ── Set name via API ──────────────────────────────────────────────────
-API_URL="${PROTO}://localhost:${DAEMON_PORT}"
+API_URL="${AP_PROTO}://localhost:${DAEMON_PORT}"
 ESC_NAME=$(printf '%s' "$NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
-RESP=$(curl $CURL_OPTS -s -X PUT "${API_URL}/api/sessions/name" \
+RESP=$(curl $AP_CURL_OPTS -s -X PUT "${API_URL}/api/sessions/name" \
   -H "Content-Type: application/json" \
   -d "{\"sessionId\":\"${SESSION_ID}\",\"name\":\"${ESC_NAME}\"}")
 

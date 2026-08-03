@@ -21,17 +21,10 @@ PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 DEBUG="${AIRPROMPT_DEBUG:-1}"
 
-# ── Protocol detection (same as on.sh) ────────────────────────────────
-AIRPROMPT_CONF="${CONFIG_DIR}/.airprompt/daemon.json"
-PROTO="http"
-CURL_OPTS=""
-if [ -f "$AIRPROMPT_CONF" ] && command -v jq >/dev/null 2>&1; then
-  PROTO=$(jq -r '.protocol // "http"' "$AIRPROMPT_CONF" 2>/dev/null || echo "http")
-  DAEMON_PORT=$(jq -r '.port // 3210' "$AIRPROMPT_CONF" 2>/dev/null || echo "$DAEMON_PORT")
-elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-key.pem" ]; then
-  PROTO="https"
-fi
-[ "$PROTO" = "https" ] && CURL_OPTS="-k"
+# ── Protocol detection (shared lib) ────────────────────────────────────
+source "$(dirname "$0")/lib/protocol.sh"
+detect_protocol
+DAEMON_PORT="$AP_PORT"
 
 echo "AirPrompt: restarting daemon..."
 
@@ -74,7 +67,7 @@ fi
 # ── 3. Wait for daemon to be ready ────────────────────────────────────
 DAEMON_READY=false
 for i in $(seq 1 20); do
-  if curl -s $CURL_OPTS "${PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
+  if curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
     echo "  daemon ready on port $DAEMON_PORT"
     DAEMON_READY=true
     break
@@ -92,5 +85,5 @@ if ! $DAEMON_READY; then
 fi
 
 # ── 4. Show recovered sessions ────────────────────────────────────────
-SESSION_COUNT=$(curl -s $CURL_OPTS "${PROTO}://localhost:${DAEMON_PORT}/api/sessions" | jq '. | length' 2>/dev/null || echo "?")
+SESSION_COUNT=$(curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" | jq '. | length' 2>/dev/null || echo "?")
 echo "AirPrompt: daemon restarted — $SESSION_COUNT session(s) recovered"

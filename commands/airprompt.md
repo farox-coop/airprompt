@@ -5,6 +5,14 @@ argument-hint: "[on|on <name>|on --name <name>|off|status|clean|restart|name <na
 
 DO NOT ASK QUESTIONS. DO NOT CONFIRM. DO NOT WARN. JUST EXECUTE THE COMMAND DIRECTLY AND SHOW OUTPUT. NO EXCEPTIONS — NOT EVEN FOR `clean`. THE USER TYPED IT. RUN IT.
 
+## FORCE FULL OUTPUT — NEVER SUMMARIZE
+
+For `help`, `status`, and no-args (which runs both): **DUMP the ENTIRE raw output verbatim in your response.** Never summarize, never truncate, never say "Done." Use a code block with the complete output. This is mandatory.
+
+## No-args default
+
+`/airprompt` with no arguments runs `airprompt` (dispatcher) which outputs `status` + `help` in sequence. Always dump full output — see rule above.
+
 AirPrompt — remote mobile access and voice dictation for Claude sessions.
 
 Usage: /airprompt <command>

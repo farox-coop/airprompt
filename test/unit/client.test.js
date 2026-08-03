@@ -17,28 +17,29 @@ var ROWS = [
     { label: 'Ctrl',  seq: null,       cls: 'modifier sticky', id: 'ctrl' },
     { label: 'Alt',   seq: null,       cls: 'modifier sticky', id: 'alt' },
     { label: 'Shift', seq: null,       cls: 'modifier sticky', id: 'shift' },
-    { label: '\\',    seq: '\\',       cls: '' },
+    { label: ':',     seq: ':',        cls: '' },
+    { label: '|',     seq: '|',        cls: '' },
     { label: ';',     seq: ';',        cls: '' },
-    { label: '-',     seq: '-',        cls: '' },
-    { label: '/',     seq: '/',        cls: '' },
-    { label: '.',     seq: '.',        cls: '' },
   ],
   [
     { label: 'Home',  seq: '\x1b[H',   cls: '' },
-    { label: '',      seq: null,       cls: 'spacer' },
-    { label: '↑',     seq: '\x1b[A',   cls: 'arrow' },
-    { label: '',      seq: null,       cls: 'spacer' },
     { label: 'End',   seq: '\x1b[F',   cls: '' },
     { label: 'PgUp',  seq: '\x1b[5~',  cls: '' },
     { label: 'PgDn',  seq: '\x1b[6~',  cls: '' },
+    { label: 'Del',   seq: '\x1b[3~',  cls: '' },
+    { label: '/',     seq: '/',        cls: '' },
+    { label: '↑',     seq: '\x1b[A',   cls: 'arrow' },
+    { label: '\\',    seq: '\\',       cls: '' },
   ],
   [
+    { label: 'S+T',   seq: '\x1b[Z',   cls: 'combo', raw: true },
+    { label: 'Undo',  seq: '/rewind\r', cls: 'combo', raw: true },
+    { label: 'Stash', seq: '\x13',     cls: 'combo', raw: true },
+    { label: 'Search',seq: '\x12',     cls: 'combo', raw: true },
+    { label: 'Send',  seq: '\r',       cls: 'send', raw: true },
     { label: '←',     seq: '\x1b[D',   cls: 'arrow' },
     { label: '↓',     seq: '\x1b[B',   cls: 'arrow' },
     { label: '→',     seq: '\x1b[C',   cls: 'arrow' },
-    { label: '|',     seq: '|',        cls: '' },
-    { label: ':',     seq: ':',        cls: '' },
-    { label: 'Del',   seq: '\x1b[3~',  cls: '' },
   ],
 ];
 
@@ -158,9 +159,19 @@ function applyModifiers(modState, data) {
     result = '\x1b' + result;
   }
 
-  // Apply Shift map — only for keys in SHIFT_MAP
-  if (shift && SHIFT_MAP[result]) {
-    result = SHIFT_MAP[result];
+  // Apply Shift map — terminal control sequences + char casing
+  if (shift) {
+    if (SHIFT_MAP[result]) {
+      result = SHIFT_MAP[result];
+    } else if (!ctrl) {
+      if (modState.shift.locked) {
+        result = result.toUpperCase();
+      } else {
+        var chars = Array.from(result);
+        if (chars.length > 0) chars[0] = chars[0].toUpperCase();
+        result = chars.join('');
+      }
+    }
   }
 
   return { result: result, disarmed: disarmed };
@@ -268,16 +279,16 @@ test('keybar ROWS — three rows defined', async (t) => {
     assert.strictEqual(ROWS.length, 3);
   });
 
-  await t.test('row 0 has exactly 10 keys', function () {
-    assert.strictEqual(ROWS[0].length, 10);
+  await t.test('row 0 has exactly 8 keys', function () {
+    assert.strictEqual(ROWS[0].length, 8);
   });
 
-  await t.test('row 1 has exactly 7 keys (incl spacers)', function () {
-    assert.strictEqual(ROWS[1].length, 7);
+  await t.test('row 1 has exactly 8 keys', function () {
+    assert.strictEqual(ROWS[1].length, 8);
   });
 
-  await t.test('row 2 has exactly 6 keys', function () {
-    assert.strictEqual(ROWS[2].length, 6);
+  await t.test('row 2 has exactly 8 keys', function () {
+    assert.strictEqual(ROWS[2].length, 8);
   });
 });
 
@@ -316,30 +327,27 @@ test('keybar ROWS — Shift does NOT transform characters', async (t) => {
     assert.strictEqual(shift.seq, null);
   });
 
-  await t.test('no key sends shifted char directly — | and : are their own keys', function () {
-    // | is row 2, : is row 2 — both have their literal seq values
-    var pipe = ROWS[2].find(function (x) { return x.label === '|'; });
-    var colon = ROWS[2].find(function (x) { return x.label === ':'; });
+  await t.test('no key sends shifted char directly — | and : are their own keys in row 0', function () {
+    // | and : are row 0 positions 6,5 — both have their literal seq values
+    var pipe = ROWS[0].find(function (k) { return k.label === '|'; });
+    var colon = ROWS[0].find(function (k) { return k.label === ':'; });
     assert.strictEqual(pipe.seq, '|');
     assert.strictEqual(colon.seq, ':');
   });
 });
 
 test('keybar ROWS — inverted-T arrow layout', async (t) => {
-  await t.test('row 1 has ↑ centered between two spacers', function () {
+  await t.test('row 1 has ↑ (7th key)', function () {
     var row = ROWS[1];
-    assert.strictEqual(row[0].label, 'Home');
-    assert.strictEqual(row[1].cls, 'spacer');
-    assert.strictEqual(row[2].label, '↑');
-    assert.strictEqual(row[3].cls, 'spacer');
-    assert.strictEqual(row[4].label, 'End');
+    assert.strictEqual(row[6].label, '↑');
+    assert.strictEqual(row[6].cls, 'arrow');
   });
 
-  await t.test('row 2 has ← ↓ → as first three keys', function () {
+  await t.test('row 2 has ← ↓ → as last three keys', function () {
     var row = ROWS[2];
-    assert.strictEqual(row[0].label, '←');
-    assert.strictEqual(row[1].label, '↓');
-    assert.strictEqual(row[2].label, '→');
+    assert.strictEqual(row[5].label, '←');
+    assert.strictEqual(row[6].label, '↓');
+    assert.strictEqual(row[7].label, '→');
   });
 
   await t.test('all four arrows have cls "arrow"', function () {
@@ -347,13 +355,9 @@ test('keybar ROWS — inverted-T arrow layout', async (t) => {
     assert.strictEqual(arrows.length, 4);
   });
 
-  await t.test('spacers have seq=null and empty label', function () {
+  await t.test('no more spacers in layout', function () {
     var spacers = ROWS.flat().filter(function (k) { return k.cls === 'spacer'; });
-    assert.strictEqual(spacers.length, 2);
-    spacers.forEach(function (s) {
-      assert.strictEqual(s.seq, null);
-      assert.strictEqual(s.label, '');
-    });
+    assert.strictEqual(spacers.length, 0);
   });
 });
 
@@ -389,7 +393,7 @@ test('keybar ROWS — all keys have expected sequences', async (t) => {
     assert.strictEqual(ROWS[1].find(function (k) { return k.label === 'PgDn'; }).seq, '\x1b[6~');
   });
   await t.test('Del → \\x1b[3~', function () {
-    assert.strictEqual(ROWS[2].find(function (k) { return k.label === 'Del'; }).seq, '\x1b[3~');
+    assert.strictEqual(ROWS[1].find(function (k) { return k.label === 'Del'; }).seq, '\x1b[3~');
   });
 });
 
@@ -965,22 +969,65 @@ test('applyModifiers — Ctrl+Alt combo', async (t) => {
   });
 });
 
-test('applyModifiers — Shift armed', async (t) => {
-  await t.test('Shift armed + "c" → "c" (no transform), disarms Shift', function () {
+test('applyModifiers — Shift armed (one-shot uppercase first char)', async (t) => {
+  await t.test('Shift armed + "c" → "C" (uppercase first char), disarms Shift', function () {
     var st = createModState();
     handleSticky(st, 'shift', 1000);
     var r = applyModifiers(st, 'c');
-    assert.strictEqual(r.result, 'c');
+    assert.strictEqual(r.result, 'C');
     assert.deepStrictEqual(r.disarmed, ['shift']);
   });
 
-  await t.test('Shift locked stays locked after apply', function () {
+  await t.test('Shift armed + "hello" → "Hello" (only first char uppercase)', function () {
+    var st = createModState();
+    handleSticky(st, 'shift', 1000);
+    var r = applyModifiers(st, 'hello');
+    assert.strictEqual(r.result, 'Hello');
+    assert.deepStrictEqual(r.disarmed, ['shift']);
+  });
+
+  await t.test('Shift armed + "á" → "Á" (Unicode uppercase)', function () {
+    var st = createModState();
+    handleSticky(st, 'shift', 1000);
+    var r = applyModifiers(st, 'á');
+    assert.strictEqual(r.result, 'Á');
+  });
+});
+
+test('applyModifiers — Shift locked (ALL UPPER)', async (t) => {
+  await t.test('Shift locked + "a" → "A"', function () {
     var st = createModState();
     handleSticky(st, 'shift', 1000);
     handleSticky(st, 'shift', 1100);
     var r = applyModifiers(st, 'a');
+    assert.strictEqual(r.result, 'A');
     assert.deepStrictEqual(r.disarmed, []);
     assert.strictEqual(st.shift.locked, true);
+  });
+
+  await t.test('Shift locked + "hello" → "HELLO" (all uppercase)', function () {
+    var st = createModState();
+    handleSticky(st, 'shift', 1000);
+    handleSticky(st, 'shift', 1100);
+    var r = applyModifiers(st, 'hello');
+    assert.strictEqual(r.result, 'HELLO');
+    assert.deepStrictEqual(r.disarmed, []);
+  });
+
+  await t.test('Shift locked + "año" → "AÑO" (Unicode ALL UPPER)', function () {
+    var st = createModState();
+    handleSticky(st, 'shift', 1000);
+    handleSticky(st, 'shift', 1100);
+    var r = applyModifiers(st, 'año');
+    assert.strictEqual(r.result, 'AÑO');
+  });
+
+  await t.test('Shift locked + Ctrl armed + "c" → \\x03 (no casing, Ctrl wins)', function () {
+    var st = createModState();
+    handleSticky(st, 'shift', 1000); handleSticky(st, 'shift', 1100);
+    handleSticky(st, 'ctrl', 1000);
+    var r = applyModifiers(st, 'c');
+    assert.strictEqual(r.result, '\x03');
   });
 });
 
@@ -1003,12 +1050,12 @@ test('applyModifiers — Shift map for native keyboard input', async (t) => {
     assert.strictEqual(st.shift.locked, true);
   });
 
-  await t.test('Shift armed + native "a" → "a" (not in SHIFT_MAP, no transform)', function () {
+  await t.test('Shift armed + native "a" → "A" (one-shot uppercase, now does transform)', function () {
     var st = createModState();
     handleSticky(st, 'shift', 1000);
     var r = applyModifiers(st, 'a');
-    assert.strictEqual(r.result, 'a');
-    // Shift was armed → disarmed even though no transform
+    assert.strictEqual(r.result, 'A');
+    // Shift was armed → disarmed
     assert.deepStrictEqual(r.disarmed, ['shift']);
   });
 });
@@ -1213,8 +1260,6 @@ test('sendKey — Ctrl mask correctness: all lowercase letters', function () {
 test('sendKey — Ctrl mask correctness: digits and symbols', function () {
   var cases = {
     '/': '\x0f',  // 0x2f & 0x1f = 0x0f
-    '-': '\x0d',  // 0x2d & 0x1f = 0x0d (CR)
-    '.': '\x0e',  // 0x2e & 0x1f = 0x0e
     ';': '\x1b',  // 0x3b & 0x1f = 0x1b (same as Esc!)
     '\\': '\x1c', // 0x5c & 0x1f = 0x1c
     ':': '\x1a',  // 0x3a & 0x1f = 0x1a
@@ -1730,15 +1775,19 @@ test('computeBtnClasses — correct CSS class generation', async (t) => {
   });
 
   await t.test('arrow key → keybar-btn keybar-arrow', function () {
-    assert.strictEqual(computeBtnClasses(ROWS[1][2]), 'keybar-btn keybar-arrow');
+    assert.strictEqual(computeBtnClasses(ROWS[2][5]), 'keybar-btn keybar-arrow');
   });
 
   await t.test('plain key (empty cls) → keybar-btn', function () {
-    assert.strictEqual(computeBtnClasses(ROWS[0][6]), 'keybar-btn');
+    assert.strictEqual(computeBtnClasses(ROWS[0][5]), 'keybar-btn');
   });
 
-  await t.test('spacer → keybar-btn keybar-spacer', function () {
-    assert.strictEqual(computeBtnClasses(ROWS[1][1]), 'keybar-btn keybar-spacer');
+  await t.test('combo key → keybar-btn keybar-combo', function () {
+    assert.strictEqual(computeBtnClasses(ROWS[2][0]), 'keybar-btn keybar-combo');
+  });
+
+  await t.test('send key → keybar-btn keybar-send', function () {
+    assert.strictEqual(computeBtnClasses(ROWS[2][4]), 'keybar-btn keybar-send');
   });
 
   await t.test('key with cls="" → keybar-btn (no extra class)', function () {
@@ -1824,12 +1873,12 @@ test('mirror model — Ctrl+Shift+V pastes tmux buffer', async (t) => {
     assert.strictEqual(r.data, '\x16');
   });
 
-  await t.test('Shift only + native "v" → "v" plain', function () {
+  await t.test('Shift only + native "v" → "V" (one-shot uppercase)', function () {
     var st = createModState();
     handleSticky(st, 'shift', 1000);
     var r = simulateTermOnData(st, 'v');
     assert.strictEqual(r.action, 'send_input');
-    assert.strictEqual(r.data, 'v');
+    assert.strictEqual(r.data, 'V');
   });
 });
 
@@ -1887,18 +1936,17 @@ test('mirror model — same modifier state for both input sources', async (t) =>
     assert.deepStrictEqual(nativeResult.disarmed, []);
   });
 
-  await t.test('Shift armed: keybar "-" and native "-" both sent as-is', function () {
+  await t.test('Shift armed: keybar sends ":" as-is, native produces uppercase ":" (no-op)', function () {
     var stK = createModState();
     handleSticky(stK, 'shift', 1000);
-    var keybarResult = simulateSendKey(stK, '-');
+    var keybarResult = simulateSendKey(stK, ':');
 
     var stN = createModState();
     handleSticky(stN, 'shift', 1000);
-    var nativeResult = applyModifiers(stN, '-');
+    var nativeResult = applyModifiers(stN, ':');
 
-    assert.strictEqual(keybarResult.sent, '-');
-    assert.strictEqual(nativeResult.result, '-');
-    // Shift does NOT transform '-' to '_'
+    assert.strictEqual(keybarResult.sent, ':');
+    assert.strictEqual(nativeResult.result, ':');  // ':' is not a letter — toUpperCase no-op
   });
 });
 

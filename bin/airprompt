@@ -10,6 +10,41 @@ CMD="${1:-}"
 shift || true
 # Remaining positional args in "$@" after shift
 
+# Default: no args → run status + help
+if [ -z "$CMD" ]; then
+  # Resolve install dir for sub-scripts
+  for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
+    [ -d "$d" ] || continue
+    STATUS_SH="$d/bin/airprompt-status.sh"
+    if [ -x "$STATUS_SH" ]; then
+      bash "$STATUS_SH"
+      echo ""
+      echo ""
+    fi
+    break
+  done
+  # Print help
+  echo "AirPrompt — remote mobile access and voice dictation for Claude sessions"
+  echo ""
+  echo "ALL COMMANDS EXECUTE IMMEDIATELY — NO CONFIRMATION EVER."
+  echo ""
+  echo "Usage: /airprompt <command>"
+  echo ""
+  echo "Commands:"
+  echo "  on [<name>]         Start daemon + register session (optional name)"
+  echo "  on --name <name>    Same, explicit flag form"
+  echo "  off                 Unregister session + hide statusline badge"
+  echo "  status              Show daemon status and active sessions"
+  echo "  clean               Full teardown — kill all sessions, remove markers"
+  echo "  restart             Restart daemon — sessions survive via disk recovery"
+  echo "  name [<text>]       Set or clear session name (empty or \"\" clears)"
+  echo "  autostart on|off    Auto-start AirPrompt on Claude session start"
+  echo "  help                Show this help"
+  echo ""
+  echo "Entrypoint: always use 'airprompt <command>' — never call bin/airprompt-*.sh directly."
+  exit 0
+fi
+
 # Resolve install dir
 for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
   [ -d "$d" ] || continue

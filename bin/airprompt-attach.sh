@@ -41,18 +41,11 @@ DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
 
-# ── Detect protocol: daemon.json SSOT → cert fallback → http ──────────
-AIRPROMPT_CONF="${CONFIG_DIR}/.airprompt/daemon.json"
-PROTO="http"
-CURL_OPTS=""
-if [ -f "$AIRPROMPT_CONF" ] && command -v jq >/dev/null 2>&1; then
-  PROTO=$(jq -r '.protocol // "http"' "$AIRPROMPT_CONF" 2>/dev/null || echo "http")
-  DAEMON_PORT=$(jq -r '.port // 3210' "$AIRPROMPT_CONF" 2>/dev/null || echo "$DAEMON_PORT")
-elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-key.pem" ]; then
-  PROTO="https"
-fi
-[ "$PROTO" = "https" ] && CURL_OPTS="-k"
-API_URL="${PROTO}://localhost:${DAEMON_PORT}"
+# ── Protocol detection (shared lib) ────────────────────────────────────
+source "$(dirname "$0")/lib/protocol.sh"
+detect_protocol
+DAEMON_PORT="$AP_PORT"
+API_URL="${AP_PROTO}://localhost:${DAEMON_PORT}"
 
 # ── Target PID ─────────────────────────────────────────────────────
 TARGET_PID="${1:-}"
@@ -96,14 +89,14 @@ if echo "$PANELINE" | grep -q "Unable to attach\|ptrace\|denied\|error"; then
 fi
 
 # ── Ensure daemon is running ─────────────────────────────────────────
-if ! curl -s $CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then
+if ! curl -s $AP_CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then
   echo "Starting AirPrompt daemon..."
   cd "$DAEMON_DIR"
   nohup node server.js > /tmp/airprompt.log 2>&1 &
   DAEMON_PID=$!
   disown "$DAEMON_PID" 2>/dev/null || true
   for i in $(seq 1 20); do
-    if curl -s $CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then break; fi
+    if curl -s $AP_CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then break; fi
     if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
       echo "Error: server process died. Check /tmp/airprompt.log" >&2
       exit 1
@@ -114,7 +107,7 @@ if ! curl -s $CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then
 fi
 
 # ── Register with daemon ────────────────────────────────────────────
-RESP=$(curl -s $CURL_OPTS -X POST "${API_URL}/api/sessions/register" \
+RESP=$(curl -s $AP_CURL_OPTS -X POST "${API_URL}/api/sessions/register" \
   -H "Content-Type: application/json" \
   -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\"}")
 
@@ -125,14 +118,14 @@ if echo "$RESP" | grep -q '"ok":true'; then
 
   MY_DIR="${SESSIONS_DIR}/${TMUX_SESSION}"
   mkdir -p "$MY_DIR"
-  echo "${PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
+  echo "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   touch "${MY_DIR}/active"
   touch "${MY_DIR}/mirror"  # AirPrompt-created session — auto-cleanup when process exits
   echo ""
   echo "AirPrompt session registered: $SESSION_ID"
-  echo "Mobile URL: ${PROTO}://${LAN_IP}:${DAEMON_PORT}"
+  echo "Mobile URL: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
   echo ""
   echo "Reconnect locally: tmux attach -t $TMUX_SESSION"
 else

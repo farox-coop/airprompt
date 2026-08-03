@@ -16,6 +16,11 @@ DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
 
+# ── Protocol detection (shared lib) ────────────────────────────────────
+source "$(dirname "$0")/lib/protocol.sh"
+detect_protocol
+DAEMON_PORT="$AP_PORT"
+
 SESSION_ID="${1:-}"
 
 # ── Detect current tmux session ──────────────────────────────────────
@@ -45,17 +50,6 @@ if [ -z "$SESSION_ID" ]; then
   exit 0
 fi
 
-# ── Detect protocol: daemon.json SSOT → cert fallback → http ──────────
-AIRPROMPT_CONF="${CONFIG_DIR}/.airprompt/daemon.json"
-PROTO="http"
-CURL_OPTS=""
-if [ -f "$AIRPROMPT_CONF" ] && command -v jq >/dev/null 2>&1; then
-  PROTO=$(jq -r '.protocol // "http"' "$AIRPROMPT_CONF" 2>/dev/null || echo "http")
-  DAEMON_PORT=$(jq -r '.port // 3210' "$AIRPROMPT_CONF" 2>/dev/null || echo "$DAEMON_PORT")
-elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-cert.pem" ] && [ -f "${CONFIG_DIR}/.airprompt/airprompt-key.pem" ]; then
-  PROTO="https"
-fi
-[ "$PROTO" = "https" ] && CURL_OPTS="-k"
 
 # ── Kill airprompt tmux session before unregister ──────────────────
 TMUX_TO_KILL=""
@@ -70,7 +64,7 @@ fi
 # ── Unregister from daemon (force: true — user explicitly asked) ────
 UNREG_OK=false
 if [ -n "$SESSION_ID" ]; then
-  RESP=$(curl -s $CURL_OPTS -X POST "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+  RESP=$(curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
     -H "Content-Type: application/json" \
     -d "{\"sessionId\":\"${SESSION_ID}\",\"force\":true}" 2>/dev/null || echo "")
   if echo "$RESP" | grep -q '"ok":true'; then
@@ -105,7 +99,7 @@ if [ -d "$SESSIONS_DIR" ]; then
       echo "Cleaning up dead session dir: $DN" >&2
       SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r')
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
-      curl -s $CURL_OPTS -X POST "${PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+      curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
         -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
       rm -rf "$d"
@@ -116,15 +110,22 @@ fi
 # ── Stop daemon if no sessions remain ────────────────────────────────
 # Count with python3 if available, fallback to grep counting — safer
 # than defaulting to "0" which would kill daemon with active sessions.
-REMAINING=$(curl -s $CURL_OPTS "${PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "[]")
-if command -v python3 &>/dev/null; then
-  REMAINING_COUNT=$(echo "$REMAINING" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "-1")
-elif command -v python &>/dev/null; then
-  REMAINING_COUNT=$(echo "$REMAINING" | python -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "-1")
+REMAINING=$(curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null)
+CURL_OK=$?
+# If curl failed, default to "unreachable" — never kill daemon on a failed fetch.
+# An empty "[]" from a successful fetch means truly zero sessions.
+if [ $CURL_OK -ne 0 ]; then
+  REMAINING_COUNT="-1"
 else
-  # No Python — count '"id":' occurrences as rough estimate.
-  # Overestimate is safe: daemon won't be killed spuriously.
-  REMAINING_COUNT=$(echo "$REMAINING" | grep -o '"id":"[^"]*"' | wc -l)
+  if command -v python3 &>/dev/null; then
+    REMAINING_COUNT=$(echo "$REMAINING" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "-1")
+  elif command -v python &>/dev/null; then
+    REMAINING_COUNT=$(echo "$REMAINING" | python -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "-1")
+  else
+    # No Python — count '"id":' occurrences as rough estimate.
+    # Overestimate is safe: daemon won't be killed spuriously.
+    REMAINING_COUNT=$(echo "$REMAINING" | grep -o '"id":"[^"]*"' | wc -l)
+  fi
 fi
 if [ "$REMAINING_COUNT" = "0" ]; then
   if tmux has-session -t airprompt-daemon 2>/dev/null; then

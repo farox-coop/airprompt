@@ -30,11 +30,12 @@ body, html {
 #session-label.no-session { color: #8b949e; }
 #refresh-btn {
   width: 32px; height: 32px; background: #21262d; color: #c9d1d9;
-  border: 1px solid #30363d; border-radius: 6px; font-size: 20px;
+  border: 1px solid #d29922; border-radius: 6px; font-size: 20px;
   cursor: pointer; flex-shrink: 0; margin-left: 8px;
   display: flex; align-items: center; justify-content: center;
   user-select: none; -webkit-user-select: none; touch-action: manipulation;
   padding: 0; line-height: 1;
+  box-shadow: 0 0 10px rgba(210, 153, 34, 0.6), 0 0 20px rgba(210, 153, 34, 0.25);
 }
 #refresh-btn:active { background: #30363d; }
 #dictate-btn {

@@ -1093,9 +1093,15 @@ if (_useTouch) {
   // Chrome fires pointerup BEFORE pointercancel on many devices, making
   // it impossible to distinguish short tap from long tap.
 
+  // Android long-press fires touchcancel instead of touchend.
+  // For a genuine long-press, the timer already fired (longTapFired=true).
+  // For aborted gestures (scroll starting on the button), clear the timer
+  // so it doesn't trigger long-tap actions after the gesture ends.
+  var _touchStartT = 0;
   dictateBtn.addEventListener('touchstart', function (e) {
     e.stopPropagation();
     longTapFired = false;
+    _touchStartT = Date.now();
     clearTimeout(longTapTimer);
     longTapTimer = setTimeout(onLongTap, 500);
   });
@@ -1107,9 +1113,13 @@ if (_useTouch) {
     onShortTap(e);
   });
 
-  // Android long tap fires touchcancel — timer stays alive
   dictateBtn.addEventListener('touchcancel', function () {
-    /* timer survives — longTapFired gate in touchend handles the rest */ });
+    // If long-press already fired → nothing to do (longTapFired gate handles it).
+    // If aborted before 500ms → clear timer (it was a scroll/swipe, not a long-tap).
+    if (!longTapFired && Date.now() - _touchStartT < 500) {
+      clearTimeout(longTapTimer);
+    }
+  });
 
   dictateBtn.addEventListener('contextmenu', function (e) {
     e.preventDefault();
@@ -1156,6 +1166,7 @@ function resumeDictation() {
   if (!isPaused) return;
   isPaused = false;
   isListening = true;
+  _onendGen++;  // Prevent stale onend from pauseDictation from restarting
   recognition.start();
   dictateBtn.classList.remove('paused');
   dictateBtn.classList.add('recording');
@@ -1218,12 +1229,53 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
     _xtermTA.style.pointerEvents = 'none';
   }
 
+  // Document-level focus guard: any time focus lands on xterm's hidden
+  // textarea, redirect to our mobile input. This catches ALL cases —
+  // xterm.js internal focus(), rapid taps, race conditions, etc.
+  // No timing-based workaround needed.
+  document.addEventListener('focusin', function (e) {
+    var tag = e.target.tagName;
+    if (tag === 'TEXTAREA' && e.target.closest('.xterm')) {
+      e.preventDefault();
+      e.stopPropagation();
+      inputEl.focus();
+    }
+  });
+
   // Focus input bar when tapping terminal area
   document.getElementById('terminal-container').addEventListener('click', function () {
+    var kb = window._airpromptKeybar;
+    if (kb && kb.suppressDisarm) kb.suppressDisarm(500);
     inputEl.focus();
   });
 
   // ── Helpers: code-point-aware string ops (emoji-safe) ─────────────
+
+  // Route mobile input through keybar modifier pipeline so one-shot
+  // Ctrl/Alt/Shift apply to native-keyboard keystrokes.
+  // Also checks copy/paste combo BEFORE modifier application so
+  // Ctrl+Shift+C/V from mobile input works like term.onData.
+  function _sendWithModifiers(data) {
+    var kb = window._airpromptKeybar;
+    if (kb && kb.isCopyPasteCombo && kb.isCopyPasteCombo(data)) {
+      if (data === 'c') {
+        var sel = term.getSelection();
+        if (sel) send({ type: 'copy_buffer', data: sel });
+      } else if (data === 'v') {
+        send({ type: 'paste_buffer' });
+      }
+      if (kb.disarmCopyPaste) kb.disarmCopyPaste();
+      return;
+    }
+    if (kb && kb.applyModifiers) {
+      kb.applyModifiers(data).then(function (modified) {
+        if (modified) send({ type: 'input', data: modified });
+      });
+    } else {
+      send({ type: 'input', data: data });
+    }
+  }
+
   function _toArray(s) { return Array.from(s); }
   function _join(a)   { return a.join(''); }
   function _prevArr() { return _toArray(_prev); }
@@ -1244,28 +1296,29 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
     var curLen  = curArr.length;
 
     if (curLen > prevLen) {
-      // Characters added — send the new ones.
+      // Characters added — route through keybar modifier pipeline
+      // so one-shot Ctrl/Alt/Shift apply to native-keyboard input.
       if (cur.lastIndexOf(_prev, 0) === 0) {
-        send({ type: 'input', data: cur.slice(_prev.length) });
+        _sendWithModifiers(cur.slice(_prev.length));
       } else {
         // Insertion not at end (autocorrect, IME replacement mid-text).
         if (prevLen) send({ type: 'input', data: '\x7f'.repeat(prevLen) });
-        send({ type: 'input', data: cur });
+        _sendWithModifiers(cur);
       }
     } else if (curLen < prevLen) {
-      // Characters deleted.
+      // Characters deleted — modifiers don't apply to backspace.
       if (_prev.lastIndexOf(cur, 0) === 0) {
         var delCount = prevLen - curLen;
         send({ type: 'input', data: '\x7f'.repeat(delCount) });
       } else {
         // Deletion not from end (selected text then typed over, etc.).
         if (prevLen) send({ type: 'input', data: '\x7f'.repeat(prevLen) });
-        if (cur) send({ type: 'input', data: cur });
+        if (cur) _sendWithModifiers(cur);
       }
     } else {
       // Same length, different content (IME replacement / autocorrect).
       if (prevLen) send({ type: 'input', data: '\x7f'.repeat(prevLen) });
-      send({ type: 'input', data: cur });
+      _sendWithModifiers(cur);
     }
 
     _prev = cur;
@@ -1287,6 +1340,11 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
   };
 
   inputEl.addEventListener('keydown', function (e) {
+    // Ignore keydown during IME composition — Gboard and other IMEs fire
+    // spurious keydown events (Backspace, Delete, arrow keys) mid-composition.
+    // Processing them corrupts _prev state and sends stray control chars.
+    if (e.isComposing) return;
+
     var seq = SPECIAL_KEYS[e.key];
     if (seq) {
       e.preventDefault();
@@ -1358,6 +1416,14 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
     }
   });
 
-  // Initial focus so keyboard opens on page load
-  setTimeout(function () { inputEl.focus(); }, 500);
+  // Initial focus so keyboard opens on page load.
+  // xterm.js refocuses its textarea after open/fit — race it with retries.
+  var _focusRetries = 5;
+  function _initialFocus() {
+    inputEl.focus();
+    if (document.activeElement !== inputEl && --_focusRetries > 0) {
+      setTimeout(_initialFocus, 100);
+    }
+  }
+  setTimeout(_initialFocus, 300);
 })();

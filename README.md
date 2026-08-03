@@ -70,6 +70,8 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | `autostart on|off` | Auto-start AirPrompt on Claude session start |
 | `help` | Print usage |
 
+**`/airprompt` with no arguments** runs `status` + `help` — shows daemon status followed by the command reference.
+
 **Always use `airprompt <command>`** — never call `bin/airprompt-*.sh` directly. Those are internal scripts.
 
 ## Make Targets

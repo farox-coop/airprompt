@@ -219,7 +219,7 @@ function createApp() {
     log('info', 'notification received', { type: input.notification_type, session_id: input.session_id });
     // Broadcast to all connected web clients
     // auto_dismiss: false = user must swipe to dismiss
-    const msg = JSON.stringify({ ...input, type: 'notification', auto_dismiss: false });
+    const msg = JSON.stringify({ ...input, type: 'notification', auto_dismiss: input.auto_dismiss === true });
     wss.clients.forEach((client) => {
       if (client.readyState === 1) {
         try { client.send(msg); } catch (e) { /* ok */ }
@@ -254,23 +254,29 @@ function createApp() {
       // Phase 2: Wait up to 5s for session to die
       var deadline = Date.now() + 5000;
       var died = false;
+      var wasGraceful = false;
       while (Date.now() < deadline) {
         await new Promise(function (r) { setTimeout(r, 300); });
-        if (!tmuxExists(tmux)) { died = true; break; }
+        if (!tmuxExists(tmux)) { died = true; wasGraceful = true; break; }
       }
 
       // Phase 3: If still alive, force kill (airprompt-* only)
       if (!died && tmuxExists(tmux)) {
         if (tmux.startsWith('airprompt-')) {
           spawnSync('tmux', ['kill-session', '-t', tmux], { timeout: 2000 });
+          died = true;
+          // wasGraceful stays false — this was a force kill
         }
         // Non-airprompt sessions are real Claude sessions — never kill them.
-        // The stale interval will clean up when Claude eventually exits.
+        // Leave the entry intact; the stale interval will clean up when
+        // Claude eventually exits.
       }
 
-      sessions.delete(sessionId);
+      if (died) {
+        sessions.delete(sessionId);
+      }
       broadcastSessionList(wss);
-      res.json({ ok: true, killed: !died, graceful: died });
+      res.json({ ok: true, killed: died, graceful: wasGraceful });
     } catch (err) {
       log('error', 'session kill failed', { sessionId: req.body && req.body.sessionId, error: err.message });
       res.status(500).json({ error: 'Internal server error' });
@@ -377,8 +383,14 @@ function createApp() {
         log('info', 'pty exited', { clientId, webSession, exitCode, signal: signal || 0 });
         // Guard: only clean up if THIS pty is still the active one
         if (ptyProcess !== thisPty) return;
-        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'output', data: '\r\n\x1b[33m[AirPrompt: session ended]\x1b[0m\r\n' }));
+        if (ws.readyState === 1) {
+          try { ws.send(JSON.stringify({ type: 'output', data: '\r\n\x1b[33m[AirPrompt: session ended]\x1b[0m\r\n' })); } catch (_) {}
+        }
         ptyProcess = null;
+        // Kill the per-client grouped tmux session — otherwise detaching or
+        // exiting leaves an orphan airprompt-web-* session grouped to the
+        // live parent, invisible to the stale sweep.
+        try { spawnSync('tmux', ['kill-session', '-t', thisPty._airpromptWebSession], { timeout: 1000 }); } catch (_) {}
         // Discard queued input — stale keystrokes from dead session must
         // not replay into a freshly spawned PTY.
         _inputQueue = [];

@@ -854,7 +854,27 @@ test('WS receives notification broadcast when POST /api/notify is called', (t, d
       assert.strictEqual(msg.cwd, '/tmp');
       assert.strictEqual(msg.permission_mode, 'default');
       assert.deepStrictEqual(msg.effort, { level: 'medium' });
-      assert.strictEqual(msg.auto_dismiss, false);
+      assert.strictEqual(msg.auto_dismiss, false);  // default: false when not explicitly true
+      ws.close();
+      done();
+    }
+  });
+  ws.on('error', (e) => { assert.fail('WS error: ' + e.message); });
+});
+
+test('WS receives notification with auto_dismiss:true', (t, done) => {
+  const ws = new WebSocket(`ws://localhost:${port}`);
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type === 'session_list') {
+      post('/api/notify', {
+        notification_type: 'idle_prompt',
+        session_id: 'test-notify2',
+        cwd: '/tmp',
+        auto_dismiss: true,
+      });
+    } else if (msg.type === 'notification') {
+      assert.strictEqual(msg.auto_dismiss, true);
       ws.close();
       done();
     }
