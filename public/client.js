@@ -256,6 +256,7 @@ function connect() {
 
   ws.onclose = () => {
     log('warn', 'ws disconnected');
+    hideLoadSpinner();  // spinner blocks banner at z-index 500 — must hide
     term.write('\r\n\x1b[31m[AirPrompt: disconnected]\x1b[0m\r\n');
     // Stop ping timer
     if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
@@ -267,7 +268,7 @@ function connect() {
         position: 'fixed', top: '0', left: '0', right: '0',
         background: '#dc2626', color: '#fff', textAlign: 'center',
         padding: '14px 8px', fontSize: '16px', fontWeight: '700',
-        zIndex: '300', cursor: 'pointer',
+        zIndex: '600', cursor: 'pointer',
       });
       banner.addEventListener('click', () => {
         if (banner.parentNode) banner.remove();
@@ -393,13 +394,14 @@ function updateUI() {
         const time = new Date(s.createdAt).toLocaleString();
         const label = escHtml(sessionDisplayLabel(s));
         const cwd = s.name ? escHtml(s.cwd) : '';
+        const escId = escHtml(s.id);
         const subHtml = cwd ? `<div class="cwd">${cwd}</div>` : '';
-        return `<button class="session-item${activeClass}" data-id="${s.id}">
+        return `<button class="session-item${activeClass}" data-id="${escId}">
           <div class="name">${label}</div>
           ${subHtml}
           <div class="sid">${escHtml(s.id)}</div>
           <div class="time">${escHtml(time)}</div>
-          <span class="session-kill" data-id="${s.id}" title="Kill session" role="button" tabindex="0">🗑️</span>
+          <span class="session-kill" data-id="${escId}" title="Kill session" role="button" tabindex="0">🗑️</span>
         </button>`;
       })
       .join('');
@@ -421,7 +423,9 @@ function updateUI() {
 }
 
 async function killSession(sessionId) {
-  const btn = document.querySelector('.session-kill[data-id="' + sessionId + '"]');
+  let btn;
+  try { btn = document.querySelector('.session-kill[data-id="' + CSS.escape(sessionId) + '"]'); }
+  catch (e) { return; }  // invalid sessionId chars → bail
   if (!btn) return;
   btn.classList.add('killing');
   btn.textContent = '⏳';
@@ -791,7 +795,7 @@ function setLang(code) {
       // Only restart if no newer lang switch happened
       if (gen !== _langSwitchGen) return;
       isListening = true;
-      recognition.start();
+      _safeRecognitionStart();
       dictateBtn.classList.add('recording');
       dictateIcon.textContent = '🔴';
       dictateLabel.textContent = tr('recording');
@@ -924,7 +928,7 @@ if (SpeechRecognition) {
     // the active one. Prevents stale onend from pauseDictation() restarting
     // after resumeDictation() already started a fresh session.
     const myGen = _onendGen;
-    if (isListening && myGen === _onendGen && !_stopPending) recognition.start();
+    if (isListening && myGen === _onendGen && !_stopPending) _safeRecognitionStart();
   };
 
   updateFlag();
@@ -934,6 +938,24 @@ if (SpeechRecognition) {
   dictateIcon.textContent = '🚫';
   dictateLabel.textContent = tr('dictate');
   dictateBtn.disabled = true;
+}
+
+// ── Safe recognition start — guards against InvalidStateError ─────────
+// Chrome throws InvalidStateError if start() is called while the
+// recognizer is still in the 'stopping' state — a real race on
+// fast pause→resume or lang-switch→restart cycles.
+function _safeRecognitionStart() {
+  try { recognition.start(); return true; }
+  catch (e) {
+    // Resync UI state: recognition is dead, not listening
+    isListening = false;
+    isPaused = false;
+    dictateBtn.classList.remove('recording', 'paused');
+    dictateIcon.textContent = '🎤';
+    dictateLabel.textContent = tr('dictate');
+    log('warn', 'recognition.start() failed', { error: e.message });
+    return false;
+  }
 }
 
 function toggleDictation(e) {
@@ -964,7 +986,7 @@ function toggleDictation(e) {
     dictateOverlay.classList.remove('dictate-hidden');
     dictateText.textContent = '';
     dictateText.style.height = '';
-    recognition.start();
+    _safeRecognitionStart();
     dictateBtn.classList.add('recording');
     dictateIcon.textContent = '🔴';
     dictateLabel.textContent = tr('recording');
@@ -1167,7 +1189,7 @@ function resumeDictation() {
   isPaused = false;
   isListening = true;
   _onendGen++;  // Prevent stale onend from pauseDictation from restarting
-  recognition.start();
+  _safeRecognitionStart();
   dictateBtn.classList.remove('paused');
   dictateBtn.classList.add('recording');
   dictateIcon.textContent = '🔴';

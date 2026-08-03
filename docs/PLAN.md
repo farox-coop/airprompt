@@ -1,5 +1,9 @@
 # AirPrompt — Multi-Session Remote Access Plan
 
+> **⚠️ SUPERSEDED — This document describes the original design and is no longer maintained.**
+> The implementation has diverged significantly. See the source code and README.md for current state.
+> Kept for historical reference only.
+
 ## Context
 
 AirPrompt lets you watch and control Claude CLI sessions from your Android phone

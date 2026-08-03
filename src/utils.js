@@ -20,7 +20,7 @@ function tmuxExists(sessionName) {
 // sessionToJSON — canonical serialisation. Every session served by the daemon
 // (REST + WebSocket) goes through this. Shape is the single source of truth.
 function sessionToJSON(entry) {
-  const safeName = entry.tmuxSession.replace(/[^a-zA-Z0-9_.-]/g, '');
+  const safeName = String(entry.tmuxSession || '').replace(/[^a-zA-Z0-9_.-]/g, '');
   const markerDir = path.join(SESSIONS_DIR, safeName);
 
   const json = {

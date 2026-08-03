@@ -110,11 +110,10 @@ fi
 # ── Stop daemon if no sessions remain ────────────────────────────────
 # Count with python3 if available, fallback to grep counting — safer
 # than defaulting to "0" which would kill daemon with active sessions.
-REMAINING=$(curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null)
-CURL_OK=$?
-# If curl failed, default to "unreachable" — never kill daemon on a failed fetch.
-# An empty "[]" from a successful fetch means truly zero sessions.
-if [ $CURL_OK -ne 0 ]; then
+REMAINING=$(curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "")
+# If curl failed or returned empty, default to "unreachable" — never
+# kill daemon on a failed fetch.  Empty "[]" = truly zero sessions.
+if [ -z "$REMAINING" ]; then
   REMAINING_COUNT="-1"
 else
   if command -v python3 &>/dev/null; then

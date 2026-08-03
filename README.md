@@ -10,6 +10,7 @@ AirPrompt lets you view and interact with remote Claude CLI sessions running on 
 
 - **Node.js** ≥ 18
 - **tmux** (`sudo apt install tmux`)
+- **curl** — API communication with daemon
 - **jq** (`sudo apt install jq`) — JSON parsing for daemon protocol detection and notifications
 - **reptyr** (`sudo apt install reptyr`) — optional, for `airprompt-attach.sh` (attach running processes to tmux)
 - **openssl** — TLS certificate generation for HTTPS voice dictation
@@ -27,18 +28,18 @@ Every tmux feature AirPrompt depends on, where it's used, and why:
 
 | tmux command | Used in | Purpose |
 |---|---|---|
-| `new-session -d` | `on.sh:65`, `activate.js:258`, `server.js:52,346` | Create detached sessions (mirror + daemon + web proxy) |
-| `attach-session` | `server.js:356` | Web client connects to tmux session via node-pty |
-| `has-session` | `server.js:44`, `clean.sh`, `off.sh`, `status.sh` | Check if session exists |
-| `kill-session` | `server.js:57`, `clean.sh:56-63`, `off.sh:66` | Destroy sessions (mirror, daemon, cleanup) |
-| `send-keys` | `server.js:257` | Inject `/airprompt off` into session without attaching |
-| `list-clients` | `server.js:449` | Detect orphaned mirror sessions (no attached clients) |
-| `display-message` | `activate.js:167`, `server.js:130` | Read session name `#S`, group `#{session_group}`, cwd `#{pane_current_path}` |
-| `set-option` | `server.js:353-354`, `claude:111` | Disable status bar in web sessions, enable focus-events |
-| `load-buffer` / `save-buffer` | `server.js:413,421` | Clipboard sync between web client and session |
-| `list-panes -F '#{pane_dead}'` | `claude:102` | Detect zombie panes from previous `/exit` |
-| `respawn-pane -k` | `claude:104`, `on.sh:107` | Revive zombie pane or restart daemon |
-| Session grouping (`-t parent`) | `server.js:346` | Web proxy sessions inherit from real session — kill parent, children die
+| `new-session -d` | `on.sh`, `activate.js`, `server.js` | Create detached sessions (mirror + daemon + web proxy) |
+| `attach-session` | `server.js` | Web client connects to tmux session via node-pty |
+| `has-session` | `src/utils.js`, `clean.sh`, `off.sh`, `status.sh` | Check if session exists |
+| `kill-session` | `server.js`, `clean.sh`, `off.sh` | Destroy sessions (mirror, daemon, cleanup) |
+| `send-keys` | `server.js` | Inject `/airprompt off` into session without attaching |
+| `list-clients` | `server.js`, `src/utils.js` | Detect orphaned mirror sessions (no attached clients) |
+| `display-message` | `activate.js`, `server.js` | Read session name `#S`, group `#{session_group}`, cwd `#{pane_current_path}` |
+| `set-option` | `server.js`, `airprompt-claude` | Disable status bar in web sessions, enable focus-events |
+| `load-buffer` / `save-buffer` | `server.js` | Clipboard sync between web client and session |
+| `list-panes -F '#{pane_dead}'` | `airprompt-claude` | Detect zombie panes from previous `/exit` |
+| `respawn-pane -k` | `airprompt-claude`, `on.sh` | Revive zombie pane or restart daemon |
+| Session grouping (`-t parent`) | `server.js` | Web proxy sessions inherit from real session — kill parent, children die
 
 ## Quick Start
 
@@ -88,7 +89,9 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | `test-all` | Run unit and integration tests |
 | `test-unit` | Run Node.js unit tests |
 | `test-integration` | Run shell integration tests |
-| `clean` | Remove PID, logs, node_modules |
+| `install-plugin` | Install AirPrompt as a Claude Code plugin |
+| `uninstall-plugin` | Remove plugin registration |
+| `clean` | Remove PID, daemon.json, sessions, logs, node_modules |
 
 ## TLS & Voice Dictation
 

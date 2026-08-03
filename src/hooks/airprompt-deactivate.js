@@ -215,14 +215,15 @@ async function main() {
     try { fs.rmSync(myDir, { recursive: true, force: true }); } catch (_) {}
   }
 
-  // 5. Stop daemon if no sessions remain
+  // 5. Stop daemon only when we can confirm zero sessions remain.
+  //   - Definitive empty array → stop (safe)
+  //   - Non-array / parse failure / unreachable → leave running (daemon
+  //     self-cleans via stale sweep + recovery)
   try {
     const resp = await get('/api/sessions');
-    const sessions = Array.isArray(resp) ? resp : [];
-    if (sessions.length === 0) stopDaemon();
+    if (Array.isArray(resp) && resp.length === 0) stopDaemon();
   } catch (_) {
-    // Daemon unreachable — try killing by PID
-    stopDaemon();
+    // Daemon unreachable — don't kill; it may still have sessions
   }
 
   if (serverOk) {
@@ -263,7 +264,7 @@ function get(p) {
       let data = '';
       res.on('data', (c) => data += c);
       res.on('end', () => {
-        try { resolve(JSON.parse(data)); } catch (_) { resolve([]); }
+        try { resolve(JSON.parse(data)); } catch (_) { resolve(null); }
       });
     });
     req.on('timeout', () => { req.destroy(); reject(new Error('request timeout')); });

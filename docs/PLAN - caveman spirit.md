@@ -570,7 +570,7 @@ Each would get its own skill/command files adapted to that agent's format. The i
 All steps (1–11) implemented. Key differences from original plan:
 
 - **Per-session isolation**: marker files moved from global flat files to
-  `~/.claude/.airprompt-sessions/{tmux-name}/` directories. Multiple Claude sessions coexist
+  `~/.claude/.airprompt/sessions/{tmux-name}/` directories. Multiple Claude sessions coexist
   without fighting over global files. Legacy global markers cleaned up during migration.
 - **Session naming**: `/airprompt name <name>` sets a human-readable label. Shows in
   statusline badge as `[<name>@https://<IP>:3210]` and in web UI session bar/modal.
@@ -591,7 +591,7 @@ All steps (1–11) implemented. Key differences from original plan:
 - **`activate.js` idempotency**: SessionStart hook skips registration if this tmux session
   already has per-session `active` marker (from `/airprompt on`). Sweeps dead session dirs.
 - **Statusline badge format**: named sessions show `[<name>@<url>]`, unnamed show
-  `[AirPrompt: <url>]`. Per-session isolation via `~/.claude/.airprompt-sessions/`.
+  `[AirPrompt: <url>]`. Per-session isolation via `~/.claude/.airprompt/sessions/`.
 - **`status.sh`**: shows session name when set, cwd fallback otherwise.
 
 Original steps 1–11 all implemented. No steps removed. See git log for full history.

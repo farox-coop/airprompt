@@ -69,7 +69,7 @@ function showNotification(n) {
   metaEl.className = 'notify-meta';
   metaEl.innerHTML = metaHtml;
 
-  if (n.turn_info) summary += '  (' + esc(n.turn_info) + ')';
+  if (n.turn_info) summary += '  (' + n.turn_info + ')';
 
   var summaryEl = document.createElement('div');
   summaryEl.className = 'notify-summary';
@@ -94,7 +94,7 @@ function showNotification(n) {
 
   // ── Tap to navigate to source session ──
   toast.addEventListener('click', function (e) {
-    if (toast._swiped) return;
+    if (toast._swiped || toast._dragged) return;
     var targetSessionId = toast.getAttribute('data-session-id');
     // sessions / selectSession are globals from client.js
     if (targetSessionId && typeof sessions !== 'undefined' && typeof selectSession === 'function') {
@@ -113,6 +113,7 @@ function showNotification(n) {
     startY = t.clientY;
     deltaX = 0;
     swiping = false;
+    toast._dragged = false;
     toast.classList.remove('swiping');
   }
   function onMove(e) {
@@ -120,6 +121,7 @@ function showNotification(n) {
     var t = e.touches ? e.touches[0] : e;
     var dx = t.clientX - startX;
     var dy = Math.abs(t.clientY - startY);
+    toast._dragged = true;  // any movement → skip click-to-navigate
     if (!swiping && Math.abs(dx) > SWIPE_DEAD_ZONE_PX && Math.abs(dx) > dy) {
       swiping = true;
       toast.classList.add('swiping');
@@ -160,7 +162,12 @@ function showNotification(n) {
     if (swiping) onEnd();
   });
 
-  getNotifyContainer().appendChild(toast);
+  // Cap toast stack at 5 — dismiss oldest when exceeded
+  var container = getNotifyContainer();
+  var toasts = container.querySelectorAll('.notify-toast');
+  if (toasts.length >= 5) dismissToast(toasts[0]);
+
+  container.appendChild(toast);
 
   // Auto-dismiss only when server says so
   if (n.auto_dismiss) {

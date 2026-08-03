@@ -109,7 +109,7 @@ fi
 # ── Register with daemon ────────────────────────────────────────────
 RESP=$(curl -s $AP_CURL_OPTS -X POST "${API_URL}/api/sessions/register" \
   -H "Content-Type: application/json" \
-  -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\"}")
+  -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\"}" || echo "")
 
 if echo "$RESP" | grep -q '"ok":true'; then
   mkdir -p "$CONFIG_DIR"

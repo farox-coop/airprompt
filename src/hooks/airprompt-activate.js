@@ -73,6 +73,9 @@ function startDaemon() {
   const child = spawn('node', [serverJs], {
     cwd: INSTALL_DIR, env, detached: true, stdio: 'ignore',
   });
+  child.on('error', (err) => {
+    process.stderr.write(`airprompt: daemon spawn failed: ${err.message}\n`);
+  });
   child.unref();
   for (let i = 0; i < 30; i++) {
     if (daemonRunning()) return true;

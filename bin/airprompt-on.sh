@@ -190,7 +190,7 @@ REG_PAYLOAD="${REG_PAYLOAD}}"
 
 RESP=$(curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/register" \
   -H "Content-Type: application/json" \
-  -d "$REG_PAYLOAD")
+  -d "$REG_PAYLOAD" || echo "")
 
 if echo "$RESP" | grep -q '"ok":true'; then
   mkdir -p "$MY_DIR"
