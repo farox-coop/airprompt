@@ -4,13 +4,13 @@
 
 const NOTIFY_EMOJIS = {
   idle_prompt:       '⏳',
-  permission_prompt: '🔐',
+  permission_prompt: '✋',
   agent_needs_input: '📥',
   agent_completed:   '✅',
 };
 const NOTIFY_SUMMARIES = {
   idle_prompt:       'Done — ready for input',
-  permission_prompt: 'Permission needed',
+  permission_prompt: 'User action needed',
   agent_needs_input: 'Background agent needs input',
   agent_completed:   'Background agent finished',
 };

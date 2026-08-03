@@ -109,12 +109,20 @@
 .keybar-btn.keybar-combo {
   background: #3b2e1a;
   border-color: #6b4c20;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
 }
 /* ── Arrow keys ──────────────────────────────── */
 .keybar-btn.keybar-arrow {
   font-size: 18px;
+  background: #1a2b3b;
+  border-color: #2a5a7a;
+  color: #79c0ff;
+  box-shadow: 0 0 8px rgba(42, 90, 122, 0.4);
+}
+.keybar-btn.keybar-arrow:active {
+  background: #2a5a7a;
+  box-shadow: 0 0 12px rgba(42, 90, 122, 0.6);
 }
 
 /* ── Spacer (invisible layout placeholder) ───── */

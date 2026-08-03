@@ -96,6 +96,52 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ── Helper: run claude inside tmux with pane-capture on exit ──────────
+# Usage: launch_with_capture <tmux_session> <capture_file> [claude-args...]
+# The wrapper bash script owns the capture file — it writes the last 100
+# lines of pane output when claude exits. The caller reads + cleans up.
+launch_tmux_capture() {
+  local session="$1"
+  local capture_file="$2"
+  shift 2
+  # Single-quoted script: inner bash expands $AIRPROMPT_CAPTURE from env.
+  # Uses capture-pane -S -100 to grab the last 100 lines of scrollback
+  # plus the visible screen. -J joins wrapped lines for readability.
+  tmux new-session -d -s "$session" bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ env AIRPROMPT_CAPTURE="$capture_file" "${FORWARD_ENV[@]}" "$@"
+  tmux set-option -t "$session" focus-events on
+}
+
+# ── Helper: attach to session, print captured output when it ends ─────
+# When outside tmux: blocks until session exits, then prints capture if
+# the session is really dead (not a Ctrl-B d detach).
+# When inside tmux: execs switch-client — can't block, so no capture print.
+attach_and_capture() {
+  local session="$1"
+  local capture_file="$2"
+
+  if [ -n "${TMUX:-}" ]; then
+    # Nested tmux: switch client immediately. We cannot block or print
+    # captured output here — switch-client returns instantly. The user
+    # will see claude's final output inside the inner tmux pane.
+    rm -f "$capture_file"
+    exec tmux switch-client -t "$session"
+  fi
+
+  # Outside tmux: attach and block until session exits.
+  tmux attach-session -t "$session" || true
+
+  # Only print if session actually ended (not a detach via Ctrl-B d).
+  if ! tmux has-session -t "$session" 2>/dev/null; then
+    echo
+    echo "Session ended."
+    [ -s "$capture_file" ] && cat "$capture_file"
+    rm -f "$capture_file"
+  fi
+  # Session still alive = user detached. Capture file stays — wrapper
+  # will overwrite it when claude eventually exits. Orphaned in /tmp
+  # until reboot; acceptable for a LAN PoC. Silent exit is correct.
+}
+
 # ── Resume path ──────────────────────────────────────────────────────
 if [ -n "$RESUME_SESSION" ]; then
   save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
@@ -105,17 +151,19 @@ if [ -n "$RESUME_SESSION" ]; then
     # Kill zombie pane (dead from previous /exit) silently, respawn fresh.
     dead=$(tmux list-panes -t "$RESUME_SESSION" -F '#{pane_dead}' 2>/dev/null || true)
     if echo "$dead" | tr -d '[:space:]' | grep -q '1'; then
-      tmux respawn-pane -k -t "$RESUME_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Closing..."; sleep 3; exit 0' _ env "${FORWARD_ENV[@]}" "$REAL_CLAUDE" "${args[@]}" 2>/dev/null || {
+      AIRPROMPT_CAPTURE=$(mktemp)
+      tmux respawn-pane -k -t "$RESUME_SESSION" bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ env AIRPROMPT_CAPTURE="$AIRPROMPT_CAPTURE" "${FORWARD_ENV[@]}" "$REAL_CLAUDE" "${args[@]}" 2>/dev/null || {
         # respawn failed — kill zombie session and create new one
         tmux kill-session -t "$RESUME_SESSION" 2>/dev/null || true
         RESUME_CLAUDE_ID=""
         RESUME_SESSION="claude-$$-$(date +%s)"
         save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
-        tmux new-session -d -s "$RESUME_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Closing..."; sleep 3; exit 0' _ env "${FORWARD_ENV[@]}" "$REAL_CLAUDE" "${args[@]}"
-        tmux set-option -t "$RESUME_SESSION" focus-events on
+        launch_tmux_capture "$RESUME_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_CLAUDE" "${args[@]}"
       }
+      attach_and_capture "$RESUME_SESSION" "$AIRPROMPT_CAPTURE"
+      exit 0
     fi
-    # Attach
+    # pane alive — just attach to running session, no capture needed
     if [ -n "${TMUX:-}" ]; then
       exec tmux switch-client -t "$RESUME_SESSION"
     else
@@ -126,13 +174,10 @@ if [ -n "$RESUME_SESSION" ]; then
     RESUME_CLAUDE_ID="$RESUME_SESSION"
     TMUX_SESSION="claude-$$-$(date +%s)"
     save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
-    tmux new-session -d -s "$TMUX_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Closing..."; sleep 3; exit 0' _ env "${FORWARD_ENV[@]}" "$REAL_CLAUDE" --resume "$RESUME_CLAUDE_ID"
-    tmux set-option -t "$TMUX_SESSION" focus-events on
-    if [ -n "${TMUX:-}" ]; then
-      exec tmux switch-client -t "$TMUX_SESSION"
-    else
-      exec tmux attach-session -t "$TMUX_SESSION"
-    fi
+    AIRPROMPT_CAPTURE=$(mktemp)
+    launch_tmux_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_CLAUDE" --resume "$RESUME_CLAUDE_ID"
+    attach_and_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE"
+    exit 0
   fi
 fi
 
@@ -152,9 +197,6 @@ else
 fi
 save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
 
-# Bash wrapper runs Claude via "$@". When Claude exits (regardless of
-# exit code), prints the resume message that Claude outputs then waits
-# for Enter.
-tmux new-session -d -s "$TMUX_SESSION" bash -c '"$@" || true; echo; echo "Session ended. Closing..."; sleep 3; exit 0' _ env "${FORWARD_ENV[@]}" "$REAL_CLAUDE" "${args[@]}"
-tmux set-option -t "$TMUX_SESSION" focus-events on
-exec tmux attach-session -t "$TMUX_SESSION"
+AIRPROMPT_CAPTURE=$(mktemp)
+launch_tmux_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_CLAUDE" "${args[@]}"
+attach_and_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE"
