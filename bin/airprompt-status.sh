@@ -14,7 +14,6 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
@@ -22,12 +21,9 @@ source "$(dirname "$0")/lib/protocol.sh"
 detect_protocol
 DAEMON_PORT="$AP_PORT"
 
-# Resolve formatter — same priority as dispatcher: plugin → ~/.airprompt → dev
-FORMATTER=""
-for d in "${CLAUDE_PLUGIN_ROOT:-}" "$HOME/.airprompt" "$HOME/projects/airprompt"; do
-  if [ -f "$d/src/status-formatter.js" ]; then FORMATTER="$d/src/status-formatter.js"; break; fi
-done
-[ -z "$FORMATTER" ] && { echo "Error: status-formatter.js not found" >&2; exit 1; }
+# Resolve formatter — derive from script location (avoids stale ~/.airprompt)
+FORMATTER="$(cd "$(dirname "$0")/.." && pwd)/src/status-formatter.js"
+[ -f "$FORMATTER" ] || { echo "Error: status-formatter.js not found" >&2; exit 1; }
 
 
 LAN_IP=""

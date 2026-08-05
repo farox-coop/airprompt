@@ -10,8 +10,11 @@ fi
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-export CLAUDE_CONFIG_DIR="$TMPDIR"
 SESSIONS_DIR="${TMPDIR}/.airprompt/sessions"
+
+# Provider-aware setup
+export AIRPROMPT_PROVIDER="claude"
+export AIRPROMPT_SESSIONS_DIR="$SESSIONS_DIR"
 
 # Use test override so hook doesn't need a real tmux session
 CURRENT_TMUX="airprompt-test-fake"
@@ -19,7 +22,7 @@ export AIRPROMPT_TEST_TMUX="$CURRENT_TMUX"
 
 # Sanitize (same as statusline.sh)
 SAFE_NAME=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
-MY_DIR="${SESSIONS_DIR}/${SAFE_NAME}"
+MY_DIR="${SESSIONS_DIR}/${AIRPROMPT_PROVIDER}-${SAFE_NAME}"
 URL_FILE="${MY_DIR}/url"
 NAME_FILE="${MY_DIR}/name"
 

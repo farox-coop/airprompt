@@ -17,25 +17,12 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const child_process = require('child_process');
-const readline = require('readline');
-const crypto = require('crypto');
 
-const SETTINGS = require('./lib/settings');
+const registry = require('../src/providers/registry');
+const { expandHome } = require('../src/install-helpers');
 
 const REPO = 'diegomanuel/airprompt';
-const PINNED_REF = process.env.AIRPROMPT_REF || 'main';
-const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/${PINNED_REF}`;
-
-const HOOK_FILES = [
-  'airprompt-activate.js',
-  'airprompt-deactivate.js',
-  'airprompt-statusline.sh',
-];
-
-const PROVIDERS = [
-  { id: 'claude', label: 'Claude Code', mech: 'claude plugin install', detect: 'command:claude' },
-];
+const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/main`;
 
 // ── Argv ───────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -87,7 +74,7 @@ function parseArgs(argv) {
     }
   }
   if (opts.only.length) {
-    const knownIds = new Set(PROVIDERS.map(p => p.id));
+    const knownIds = new Set(registry.listProviders());
     for (const id of opts.only) {
       if (!knownIds.has(id)) die(`error: unknown agent: ${id}\n  see 'airprompt --list' for valid ids`);
     }
@@ -113,81 +100,6 @@ function checkNodeVersion() {
   if (major < 18) die(`airprompt: Node ${process.versions.node} too old. Need Node ≥18. https://nodejs.org`);
 }
 
-function checkJq(ctx) {
-  const { note, warn, ok, opts } = ctx;
-  if (hasCmd('jq')) { note('  jq: found'); return true; }
-  warn('  jq is required but not installed.');
-  warn('  Please run this command in another terminal:');
-  warn('    sudo apt install jq');
-  warn('');
-  if (opts.dryRun) return false;
-  process.stdout.write('  Press Enter after installing jq to continue...');
-  child_process.spawnSync('bash', ['-c', 'read -r _'], { stdio: 'inherit' });
-  if (hasCmd('jq')) {
-    ok('  jq: ready');
-    return true;
-  }
-  warn('  jq still not found — notifications may not work.');
-  return false;
-}
-
-function generateCert(ctx, targetDir) {
-  const { say, note, warn, ok, opts } = ctx;
-  const certScript = path.join(targetDir, 'bin', 'generate-cert.sh');
-  if (!fs.existsSync(certScript)) {
-    warn('  cert script not found — HTTPS will not be enforced');
-    return false;
-  }
-  const configDir = claudeConfigDir(opts);
-  const certFile = path.join(configDir, '.airprompt', 'airprompt-cert.pem');
-  const keyFile = path.join(configDir, '.airprompt', 'airprompt-key.pem');
-  if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
-    note('  TLS certificate already present');
-    return true;
-  }
-  say('  → generating TLS certificate (required for HTTPS)');
-  if (!opts.dryRun) {
-    const r = spawnXplat('bash', [certScript], { stdio: 'inherit', env: { ...process.env, CLAUDE_CONFIG_DIR: configDir } });
-    if (!spawnOk(r)) {
-      warn('  cert generation failed — voice dictation needs HTTPS. Run: make cert');
-      return false;
-    }
-    ok('  TLS certificate generated');
-  } else {
-    note('  would generate TLS certificate');
-  }
-  return true;
-}
-
-// ── Detection ─────────────────────────────────────────────────────────────
-function hasCmd(cmd) {
-  try {
-    if (process.platform === 'win32') {
-      const r = child_process.spawnSync('where', [cmd], { stdio: 'ignore' });
-      return r.status === 0;
-    }
-    const r = child_process.spawnSync('sh', ['-c', `command -v ${shellEscape(cmd)}`], { stdio: 'ignore' });
-    return r.status === 0;
-  } catch (_) { return false; }
-}
-
-function shellEscape(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
-
-function expandHome(p) { return p.replace(/^\$HOME/, os.homedir()).replace(/^~/, os.homedir()); }
-
-function detectMatch(spec) {
-  if (!spec) return false;
-  for (const clause of spec.split('||')) {
-    const c = clause.trim();
-    if (!c) continue;
-    const colon = c.indexOf(':');
-    const kind = colon === -1 ? c : c.slice(0, colon);
-    const val  = colon === -1 ? '' : expandHome(c.slice(colon + 1));
-    if (kind === 'command' && hasCmd(val)) return true;
-  }
-  return false;
-}
-
 // ── Repo root resolution ───────────────────────────────────────────────────
 function detectRepoRoot() {
   const here = path.dirname(__filename);
@@ -199,463 +111,16 @@ function detectRepoRoot() {
   return null;
 }
 
-// ── Run helpers ────────────────────────────────────────────────────────────
-const IS_WIN = process.platform === 'win32';
-
-function spawnXplat(cmd, args, opts) {
-  if (IS_WIN) {
-    const quoted = args.map(a => {
-      if (a === '' || /[\s"]/.test(a)) return '"' + String(a).replace(/"/g, '\\"') + '"';
-      return a;
-    }).join(' ');
-    return child_process.spawnSync(`${cmd} ${quoted}`, [], Object.assign({ shell: true }, opts || {}));
-  }
-  return child_process.spawnSync(cmd, args, opts || {});
-}
-
-function runSpawn(cmd, args, opts, dry) {
-  if (dry) { process.stdout.write(`  would run: ${cmd} ${args.join(' ')}\n`); return { status: 0 }; }
-  process.stdout.write(`  $ ${cmd} ${args.join(' ')}\n`);
-  return spawnXplat(cmd, args, Object.assign({ stdio: 'inherit' }, opts || {}));
-}
-
-function captureSpawn(cmd, args) {
-  try { return spawnXplat(cmd, args, { encoding: 'utf8' }); }
-  catch (_) { return { status: 1, stdout: '', stderr: '' }; }
-}
-
-function spawnOk(r) { return !!r && !r.error && r.status === 0; }
-
-function absoluteNodePath() { return process.execPath; }
-
-function copyDirRecursive(src, dest) {
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const s = path.join(src, entry.name);
-    const d = path.join(dest, entry.name);
-    if (entry.isDirectory()) copyDirRecursive(s, d);
-    else if (entry.isFile()) fs.copyFileSync(s, d);
-  }
-}
-
-// Create env with TMPDIR inside configDir for same-filesystem renames
-function sameFilesystemTmpEnv(configDir) {
-  const tmpDir = path.join(configDir, 'tmp');
-  try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (_) {}
-  return Object.assign({}, process.env, { TMPDIR: tmpDir, TEMP: tmpDir, TMP: tmpDir });
-}
-
-// ── perClaudeConfigDir ─────────────────────────────────────────────────────
-function claudeConfigDir(opts) {
+// ── Config dir resolution (shared) ─────────────────────────────────────────
+function resolveConfigDir(opts, provider) {
   if (opts && opts.configDir) return opts.configDir;
-  if (process.env.CLAUDE_CONFIG_DIR) return process.env.CLAUDE_CONFIG_DIR;
-  return path.join(os.homedir(), '.claude');
-}
-
-// ── Per-provider installers ────────────────────────────────────────────────
-async function installClaude(ctx) {
-  const { say, note, warn, ok, opts, results, configDir } = ctx;
-  results.detected++;
-  say('→ Claude Code detected');
-
-  const targetDir = opts.targetDir || path.join(os.homedir(), '.airprompt');
-
-  // 1. Clone or verify repo at target dir
-  if (!fs.existsSync(targetDir)) {
-    say('  → cloning AirPrompt repo');
-    if (!opts.dryRun) {
-      const r = spawnXplat('git', ['clone', '--depth', '1', `https://github.com/${REPO}.git`, targetDir],
-        { stdio: 'inherit' });
-      if (!spawnOk(r)) {
-        warn('  failed to clone repo');
-        results.failed.push(['claude', 'git clone failed']);
-        return;
-      }
-    } else {
-      note(`  would clone ${REPO} → ${targetDir}`);
-    }
-  } else {
-    note(`  ${targetDir} exists — using existing install`);
-  }
-
-  // 2. Ensure node_modules exist
-  const nmDir = path.join(targetDir, 'node_modules');
-  if (!fs.existsSync(nmDir) || !fs.existsSync(path.join(nmDir, 'express'))) {
-    say('  → installing npm dependencies');
-    if (!opts.dryRun) {
-      const r = spawnXplat('npm', ['install', '--no-audit', '--no-fund', '--omit=dev'],
-        { cwd: targetDir, stdio: 'inherit' });
-      if (!spawnOk(r)) {
-        warn('  npm install failed — daemon will not start until deps are installed');
-      }
-    } else {
-      note('  would run: npm install in ' + targetDir);
-    }
-  } else {
-    note('  dependencies already installed');
-  }
-
-  // 2c. Check jq dependency (required for daemon protocol detection)
-  checkJq(ctx);
-
-  // 2d. Enforce HTTPS — generate TLS certificate
-  if (!generateCert(ctx, targetDir)) {
-    warn('  HTTPS not available — voice dictation and notifications may not work');
-  }
-
-  // 2b. Create ~/bin/airprompt + ~/bin/airprompt-claude symlinks
-  {
-    const homeBin = path.join(os.homedir(), 'bin');
-    const entries = [
-      { name: 'airprompt',        target: path.join(targetDir, 'bin', 'airprompt') },
-      { name: 'airprompt-claude',  target: path.join(targetDir, 'bin', 'airprompt-claude') },
-    ];
-    if (!opts.dryRun) {
-      try {
-        fs.mkdirSync(homeBin, { recursive: true });
-        for (const { name, target } of entries) {
-          const linkPath = path.join(homeBin, name);
-          try { fs.unlinkSync(linkPath); } catch (_) {}
-          fs.symlinkSync(target, linkPath);
-          process.stdout.write(`  symlink: ${linkPath} → ${target}\n`);
-        }
-      } catch (e) {
-        note(`  could not create ~/bin symlinks: ${e.message} (non-fatal)`);
-      }
-    } else {
-      for (const { name, target } of entries) {
-        note(`  would symlink ${path.join(homeBin, name)} → ${target}`);
-      }
-    }
-  }
-
-  // 3. Claude Code plugin install (idempotent unless --force)
-  let alreadyInstalled = false;
-  if (!opts.force && hasCmd('claude')) {
-    const r = captureSpawn('claude', ['plugin', 'list']);
-    if (r.status === 0 && /airprompt/i.test(r.stdout || '')) alreadyInstalled = true;
-  }
-  let pluginInstallSucceeded = false;
-  if (alreadyInstalled) {
-    note('  airprompt plugin already installed (use --force to reinstall)');
-    results.skipped.push(['claude', 'plugin already installed']);
-    pluginInstallSucceeded = true;
-  } else if (hasCmd('claude')) {
-    say('  → installing Claude Code plugin');
-    const pluginEnv = sameFilesystemTmpEnv(configDir);
-    const r1 = runSpawn('claude', ['plugin', 'marketplace', 'add', REPO], { env: pluginEnv }, opts.dryRun);
-    const r2 = runSpawn('claude', ['plugin', 'install', 'airprompt@airprompt'], { env: pluginEnv }, opts.dryRun);
-    if (spawnOk(r1) && spawnOk(r2)) {
-      results.installed.push('claude');
-      pluginInstallSucceeded = true;
-    } else {
-      if (r1.error || r2.error) {
-        warn('  claude CLI not found on PATH (or could not be spawned)');
-      }
-      results.failed.push(['claude', 'claude plugin install failed']);
-    }
-  } else {
-    warn('  claude CLI not found — skipping plugin install');
-    note('  hooks will be wired standalone instead');
-  }
-
-  // 4. Self-heal: prune orphaned hook entries
-  {
-    const settingsPath = path.join(configDir, 'settings.json');
-    const settings = SETTINGS.readSettings(settingsPath);
-    if (settings) {
-      const pruned = SETTINGS.pruneOrphanedManagedHooks(settings, configDir);
-      if (pruned > 0) {
-        note(`  removed ${pruned} orphaned airprompt hook entr${pruned === 1 ? 'y' : 'ies'} from settings.json`);
-        if (!opts.dryRun) {
-          SETTINGS.validateHookFields(settings);
-          SETTINGS.writeSettings(settingsPath, settings);
-        }
-      }
-    }
-  }
-
-  // 5. Hook wiring decision
-  let shouldWireHooks;
-  if (opts.withHooks === false) {
-    shouldWireHooks = false;
-  } else if (opts.withHooks === true) {
-    shouldWireHooks = true;
-    if (pluginInstallSucceeded) {
-      warn('  --with-hooks wires hooks in settings.json alongside the plugin manifest.');
-      warn('  Both will fire on every event. Pass --no-hooks to keep only the plugin path.');
-    }
-  } else {
-    shouldWireHooks = !pluginInstallSucceeded;
-    if (!shouldWireHooks) {
-      note('  hooks: plugin manifest handles SessionStart + Stop');
-      note('  (pass --with-hooks to also wire standalone hooks in settings.json)');
-      results.skipped.push(['claude-hooks', 'plugin manifest handles hooks']);
-    } else {
-      note('  hooks: plugin install did not succeed; falling back to standalone wiring');
-    }
-  }
-
-  if (shouldWireHooks) {
-    say('  → installing hooks');
-    const r = await installHooks(ctx, targetDir);
-    if (r === 'ok') results.installed.push('claude-hooks');
-    else if (r === 'skip') results.skipped.push(['claude-hooks', 'already wired']);
-    else results.failed.push(['claude-hooks', r]);
-  }
-
-  // 6. Copy skill + command files for non-plugin installs
-  if (!pluginInstallSucceeded) {
-    say('  → installing skill + command files');
-    copyUserFiles(ctx, targetDir);
-    results.installed.push('claude-skills-commands');
-  }
-
-  process.stdout.write('\n');
-}
-
-// ── Hook installer ─────────────────────────────────────────────────────────
-async function installHooks(ctx, targetDir) {
-  const { note, warn, opts, configDir } = ctx;
-  const hooksDir = path.join(configDir, 'hooks');
-  const settingsPath = path.join(configDir, 'settings.json');
-  const sourceDir = path.join(targetDir, 'src', 'hooks');
-
-  if (opts.dryRun) {
-    note(`  would mkdir -p ${hooksDir}`);
-    for (const f of HOOK_FILES) note(`  would install ${path.join(hooksDir, f)}`);
-    note(`  would merge SessionStart + Stop + statusline into ${settingsPath}`);
-    return 'ok';
-  }
-
-  fs.mkdirSync(hooksDir, { recursive: true });
-
-  for (const f of HOOK_FILES) {
-    const dest = path.join(hooksDir, f);
-    if (fs.existsSync(path.join(sourceDir, f))) {
-      fs.copyFileSync(path.join(sourceDir, f), dest);
-    } else {
-      return `source hook not found: ${f}`;
-    }
-    process.stdout.write(`  installed: ${dest}\n`);
-  }
-
-  try { fs.chmodSync(path.join(hooksDir, 'airprompt-statusline.sh'), 0o755); } catch (_) {}
-
-  let settings = SETTINGS.readSettings(settingsPath);
-  if (settings === null) {
-    warn('  settings.json unparseable; will not touch it. Edit manually then re-run.');
-    return 'settings.json unparseable';
-  }
-
-  const bak = settingsPath + '.bak';
-  if (fs.existsSync(settingsPath) && !fs.existsSync(bak)) {
-    try { fs.copyFileSync(settingsPath, bak); } catch (_) {}
-  }
-
-  const node = absoluteNodePath();
-  const activate = path.join(hooksDir, 'airprompt-activate.js');
-  const deactivate = path.join(hooksDir, 'airprompt-deactivate.js');
-  const statusline = path.join(hooksDir, 'airprompt-statusline.sh');
-
-  SETTINGS.rewriteLegacyManagedHookCommands(settings, node);
-
-  SETTINGS.addCommandHook(settings, 'SessionStart', {
-    command: `"${node}" "${activate}"`,
-    marker: 'airprompt-activate',
-    timeout: 10,
-    statusMessage: 'Registering AirPrompt session...',
-  });
-
-  SETTINGS.addCommandHook(settings, 'Stop', {
-    command: `"${node}" "${deactivate}"`,
-    marker: 'airprompt-deactivate',
-    timeout: 5,
-    statusMessage: 'Unregistering AirPrompt session...',
-  });
-
-  if (!settings.statusLine) {
-    settings.statusLine = { type: 'command', command: `bash "${statusline}"` };
-    process.stdout.write('  statusline badge configured.\n');
-  } else {
-    const existing = typeof settings.statusLine === 'string'
-      ? settings.statusLine
-      : (settings.statusLine.command || '');
-    if (existing.includes(statusline) || existing.includes('airprompt-statusline')) {
-      process.stdout.write('  statusline badge already configured.\n');
-    } else {
-      process.stdout.write('  NOTE: existing statusline detected — airprompt badge NOT added.\n');
-    }
-  }
-
-  SETTINGS.validateHookFields(settings);
-  SETTINGS.writeSettings(settingsPath, settings);
-  process.stdout.write(`  hooks wired in ${settingsPath}\n`);
-  return 'ok';
-}
-
-// ── User skill + command files (non-plugin fallback) ───────────────────────
-function copyUserFiles(ctx, targetDir) {
-  const { note, opts, configDir } = ctx;
-  const commandsDir = path.join(configDir, 'commands');
-  const skillsDir = path.join(configDir, 'skills');
-
-  if (opts.dryRun) {
-    note(`  would install ${path.join(commandsDir, 'airprompt.md')}`);
-    note(`  would install ${path.join(skillsDir, 'airprompt.md')}`);
-    return;
-  }
-
-  fs.mkdirSync(commandsDir, { recursive: true });
-  fs.mkdirSync(skillsDir, { recursive: true });
-
-  // Command files
-  const cmdSrcMd = path.join(targetDir, 'commands', 'airprompt.md');
-  const cmdSrcToml = path.join(targetDir, 'commands', 'airprompt.toml');
-  if (fs.existsSync(cmdSrcMd)) {
-    fs.copyFileSync(cmdSrcMd, path.join(commandsDir, 'airprompt.md'));
-    process.stdout.write(`  installed: ${path.join(commandsDir, 'airprompt.md')}\n`);
-  }
-  if (fs.existsSync(cmdSrcToml)) {
-    fs.copyFileSync(cmdSrcToml, path.join(commandsDir, 'airprompt.toml'));
-    process.stdout.write(`  installed: ${path.join(commandsDir, 'airprompt.toml')}\n`);
-  }
-
-  // sync-claude skill (directory)
-  const skillSrc = path.join(targetDir, '.claude', 'skills', 'sync-claude');
-  const skillDest = path.join(skillsDir, 'sync-claude');
-  if (fs.existsSync(skillSrc)) {
-    fs.cpSync(skillSrc, skillDest, { recursive: true });
-    process.stdout.write(`  installed: ${skillDest}\n`);
-  } else {
-    process.stdout.write(`  (skip skill — source not found: ${skillSrc})\n`);
-  }
-}
-
-// ── Uninstall ──────────────────────────────────────────────────────────────
-function uninstall(ctx) {
-  const { say, note, warn, ok, opts, configDir } = ctx;
-  say('airprompt uninstall');
-
-  if (opts.dryRun) note('  (dry run — nothing will be removed)');
-
-  // 1. Stop daemon
-  const pidFile = '/tmp/airprompt-server.pid';
-  if (fs.existsSync(pidFile)) {
-    try {
-      const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
-      process.kill(pid, 'SIGTERM');
-      note('  stopped daemon');
-    } catch (_) { /* already dead */ }
-    if (!opts.dryRun) { try { fs.unlinkSync(pidFile); } catch (_) {} }
-  }
-
-  // 2. Remove hooks from settings.json
-  const hooksDir = path.join(configDir, 'hooks');
-  const settingsPath = path.join(configDir, 'settings.json');
-  if (fs.existsSync(settingsPath)) {
-    const settings = SETTINGS.readSettings(settingsPath);
-    if (settings) {
-      const removed = SETTINGS.removeAirPromptHooks(settings);
-      if (settings.statusLine) {
-        const cmd = typeof settings.statusLine === 'string' ? settings.statusLine : (settings.statusLine.command || '');
-        if (cmd.includes('airprompt-statusline')) delete settings.statusLine;
-      }
-      SETTINGS.validateHookFields(settings);
-      if (!opts.dryRun) SETTINGS.writeSettings(settingsPath, settings);
-      ok(`  removed ${removed} airprompt hook entr${removed === 1 ? 'y' : 'ies'} from settings.json`);
-    }
-  }
-
-  // 3. Delete hook files
-  if (fs.existsSync(hooksDir)) {
-    for (const f of HOOK_FILES) {
-      const p = path.join(hooksDir, f);
-      if (!fs.existsSync(p)) continue;
-      if (!opts.dryRun) { try { fs.unlinkSync(p); } catch (_) {} }
-      note(`  removed ${p}`);
-    }
-  }
-
-  // 3b. Remove ~/bin/airprompt + ~/bin/airprompt-claude symlinks
-  {
-    const homeBin = path.join(os.homedir(), 'bin');
-    const entries = ['airprompt', 'airprompt-claude'];
-    for (const name of entries) {
-      const linkPath = path.join(homeBin, name);
-      if (!fs.existsSync(linkPath)) continue;
-      try {
-        const st = fs.lstatSync(linkPath);
-        if (st.isSymbolicLink()) {
-          if (!opts.dryRun) { try { fs.unlinkSync(linkPath); } catch (_) {} }
-          note(`  removed symlink ${linkPath}`);
-        } else {
-          note(`  ${linkPath} is not a symlink — skipping (manual installation?)`);
-        }
-      } catch (_) {
-        if (!opts.dryRun) { try { fs.unlinkSync(linkPath); } catch (_) {} }
-      }
-    }
-  }
-
-  // 4. Remove skill + command files
-  for (const type of ['commands', 'skills']) {
-    const dest = path.join(configDir, type, 'airprompt.md');
-    if (fs.existsSync(dest)) {
-      if (!opts.dryRun) { try { fs.unlinkSync(dest); } catch (_) {} }
-      note(`  removed ${dest}`);
-    }
-  }
-
-  // 5. Claude Code plugin uninstall
-  if (hasCmd('claude')) {
-    const probe = captureSpawn('claude', ['plugin', 'list']);
-    if (probe.status === 0 && /airprompt/i.test(probe.stdout || '')) {
-      const r = runSpawn('claude', ['plugin', 'uninstall', 'airprompt@airprompt'], null, opts.dryRun);
-      if (spawnOk(r)) ok('  removed claude plugin');
-    } else {
-      note('  claude plugin not installed — skipping');
-    }
-  }
-
-  // 6. Remove per-session directories
-  const sessionsDir = path.join(configDir, '.airprompt', 'sessions');
-  if (fs.existsSync(sessionsDir)) {
-    if (!opts.dryRun) {
-      try {
-        const entries = fs.readdirSync(sessionsDir);
-        for (const entry of entries) {
-          const p = path.join(sessionsDir, entry);
-          if (fs.statSync(p).isDirectory()) {
-            fs.rmSync(p, { recursive: true, force: true });
-          }
-        }
-        fs.rmdirSync(sessionsDir);
-      } catch (_) {}
-    }
-    note(`  removed ${sessionsDir}`);
-  }
-
-  // 6b. Remove .airprompt data directory
-  const airpromptDir = path.join(configDir, '.airprompt');
-  if (fs.existsSync(airpromptDir)) {
-    if (!opts.dryRun) {
-      try { fs.rmSync(airpromptDir, { recursive: true, force: true }); } catch (_) {}
-    }
-    note(`  removed ${airpromptDir}`);
-  }
-
-  // 7. Target dir removal prompt
-  const targetDir = opts.targetDir || path.join(os.homedir(), '.airprompt');
-  if (fs.existsSync(targetDir)) {
-    note(`  airprompt install dir at ${targetDir} left in place.`);
-    note(`  Remove manually: rm -rf ${targetDir}`);
-  }
+  if (provider && typeof provider.configDir === 'function') return provider.configDir();
+  throw new Error('airprompt: cannot resolve config dir — no provider, no --config-dir flag');
 }
 
 // ── Help ───────────────────────────────────────────────────────────────────
 function printHelp() {
-  process.stdout.write(`airprompt installer — one command to set up remote Claude Code access.
+  process.stdout.write(`airprompt installer — one command to set up remote IDE/CLI access.
 
 USAGE
   curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash
@@ -670,7 +135,7 @@ FLAGS
   --with-hooks          Wire standalone hooks into settings.json.
   --no-hooks            Skip hook wiring (plugin manifest handles hooks).
   --uninstall, -u       Remove airprompt from this machine.
-  --config-dir <path>   Claude Code config dir. Default: \$CLAUDE_CONFIG_DIR or ~/.claude.
+  --config-dir <path>   IDE config dir. Default: provider-specific (~/.claude, ~/.codex, ...).
   --target-dir <path>   Where to install. Default: ~/.airprompt/.
   --port <n>            Daemon port. Default: 3210.
   --non-interactive     Never prompt; use defaults.
@@ -692,13 +157,30 @@ function printList(noColor) {
   process.stdout.write(c.orange('airprompt supported agents') + '\n\n');
   process.stdout.write(`  ${pad('ID', 10)} ${pad('AGENT', 18)} INSTALL MECHANISM\n`);
   process.stdout.write(`  ${pad('--', 10)} ${pad('-----', 18)} -----------------\n`);
-  for (const p of PROVIDERS) {
-    process.stdout.write(`  ${pad(p.id, 10)} ${pad(p.label, 18)} ${p.mech}\n`);
+  for (const prov of registry.allProviders()) {
+    process.stdout.write(`  ${pad(prov.id, 10)} ${pad(prov.label, 18)} ${prov.mech}\n`);
   }
   process.stdout.write('\n');
 }
 
 function pad(s, n) { s = String(s); return s + ' '.repeat(Math.max(0, n - s.length)); }
+
+// ── Uninstall (provider dispatch) ──────────────────────────────────────────
+async function uninstall(ctx) {
+  const { opts } = ctx;
+  const want = (id) => opts.only.length === 0 || opts.only.includes(id);
+
+  for (const prov of registry.allProviders()) {
+    if (!want(prov.id)) continue;
+    const configDir = resolveConfigDir(opts, prov);
+    const provCtx = { ...ctx, configDir };
+    try {
+      await prov.uninstall(provCtx);
+    } catch (e) {
+      ctx.warn(`  ${prov.id} uninstall failed: ${e.message}`);
+    }
+  }
+}
 
 // ── Main ───────────────────────────────────────────────────────────────────
 async function main() {
@@ -708,8 +190,11 @@ async function main() {
 
   checkNodeVersion();
 
-  const configDir = claudeConfigDir(opts);
   const repoRoot = detectRepoRoot();
+
+  // Default configDir from first provider (or --config-dir flag)
+  const firstProv = registry.allProviders()[0];
+  const configDir = resolveConfigDir(opts, firstProv);
 
   const ctx = {
     opts, configDir, repoRoot,
@@ -720,7 +205,7 @@ async function main() {
     results: { installed: [], skipped: [], failed: [], detected: 0 },
   };
 
-  if (opts.uninstall) { uninstall(ctx); return 0; }
+  if (opts.uninstall) { await uninstall(ctx); return 0; }
 
   ctx.say('airprompt installer');
   ctx.note(`  ${REPO}`);
@@ -729,9 +214,16 @@ async function main() {
 
   const want = (id) => opts.only.length === 0 || opts.only.includes(id);
 
-  for (const prov of PROVIDERS) {
+  for (const prov of registry.allProviders()) {
     if (!want(prov.id)) continue;
-    if (prov.id === 'claude') { await installClaude(ctx); continue; }
+    const provConfigDir = resolveConfigDir(opts, prov);
+    const provCtx = { ...ctx, configDir: provConfigDir };
+    try {
+      await prov.install(provCtx);
+    } catch (e) {
+      ctx.warn(`  ${prov.id} install failed: ${e.message}`);
+      ctx.results.failed.push([prov.id, e.message]);
+    }
   }
 
   // Summary
@@ -749,10 +241,11 @@ async function main() {
     for (const [id, why] of ctx.results.failed) process.stderr.write(`    • ${id} — ${why}\n`);
   }
   process.stdout.write('\n');
-  const certFile = path.join(claudeConfigDir(opts), '.airprompt', 'airprompt-cert.pem');
-  const keyFile = path.join(claudeConfigDir(opts), '.airprompt', 'airprompt-key.pem');
+  const stateDir = process.env.AIRPROMPT_STATE_DIR || path.join(os.homedir(), '.airprompt', 'state');
+  const certFile = path.join(stateDir, 'airprompt-cert.pem');
+  const keyFile = path.join(stateDir, 'airprompt-key.pem');
   const hasTls = fs.existsSync(certFile) && fs.existsSync(keyFile);
-  ctx.note('  start Claude Code and AirPrompt will auto-register each session');
+  ctx.note('  start your IDE and AirPrompt will auto-register each session');
   ctx.note(`  mobile URL: ${hasTls ? 'https' : 'http'}://<your-lan-ip>:${opts.port}`);
   ctx.note(`  uninstall: node ${path.join(opts.targetDir || path.join(os.homedir(), '.airprompt'), 'bin', 'install.js')} --uninstall`);
 

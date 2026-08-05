@@ -21,7 +21,7 @@ fi
 echo "=== Syncing to ${#CACHES[@]} cache dirs + ~/.claude/hooks/ + ~/.claude/commands/ ==="
 
 HOOKS=(airprompt-activate.js airprompt-deactivate.js airprompt-statusline.sh)
-BINS=(airprompt airprompt-attach.sh airprompt-autostart.sh airprompt-claude airprompt-clean.sh airprompt-name.sh airprompt-off.sh airprompt-on.sh airprompt-restart.sh airprompt-status.sh generate-cert.sh install.js)
+BINS=(airprompt airprompt-attach.sh airprompt-autostart.sh airprompt-clean.sh airprompt-launch airprompt-name.sh airprompt-off.sh airprompt-on.sh airprompt-restart.sh airprompt-status.sh generate-cert.sh install.js)
 
 # Copy to caches
 for d in "${CACHES[@]}"; do
@@ -35,11 +35,56 @@ for d in "${CACHES[@]}"; do
   if [ -d "$REPO/bin/lib" ]; then
     cp -r "$REPO/bin/lib" "$d/bin/"
   fi
-  # src/ utilities used by bin scripts (status-formatter.js)
-  for s in status-formatter.js; do
+  # src/ utilities used by bin scripts
+  for s in status-formatter.js utils.js install-helpers.js; do
     mkdir -p "$d/src"
     cp "$REPO/src/$s" "$d/src/"
   done
+  # src/providers/ — provider adapter + registry
+  if [ -d "$REPO/src/providers" ]; then
+    mkdir -p "$d/src/providers"
+    cp "$REPO/src/providers/"*.js "$d/src/providers/"
+  fi
+  # src/hooks/core/ — shared hook logic
+  if [ -d "$REPO/src/hooks/core" ]; then
+    mkdir -p "$d/src/hooks/core"
+    cp "$REPO/src/hooks/core/"*.js "$d/src/hooks/core/"
+  fi
+done
+
+# ── ~/bin/ symlinks + provider wrappers ───────────────────────────────
+# airprompt + airprompt-launch must be available from any terminal.
+# All symlinks point directly to repo source — no ~/.airprompt/ middleman needed.
+HOME_BIN="$HOME/bin"
+LAUNCH_SRC="$REPO/bin/airprompt-launch"
+DISPATCH_SRC="$REPO/bin/airprompt"
+
+mkdir -p "$HOME_BIN"
+
+# ~/bin/airprompt → repo (dispatcher)
+if [ ! -L "$HOME_BIN/airprompt" ] || [ "$(readlink "$HOME_BIN/airprompt" 2>/dev/null)" != "$DISPATCH_SRC" ]; then
+	rm -f "$HOME_BIN/airprompt"
+	ln -s "$DISPATCH_SRC" "$HOME_BIN/airprompt"
+	echo "  symlinked: $HOME_BIN/airprompt → $DISPATCH_SRC"
+fi
+
+# ~/bin/airprompt-launch → repo
+if [ ! -L "$HOME_BIN/airprompt-launch" ] || [ "$(readlink "$HOME_BIN/airprompt-launch" 2>/dev/null)" != "$LAUNCH_SRC" ]; then
+	rm -f "$HOME_BIN/airprompt-launch"
+	ln -s "$LAUNCH_SRC" "$HOME_BIN/airprompt-launch"
+	echo "  symlinked: $HOME_BIN/airprompt-launch → $LAUNCH_SRC"
+fi
+
+# Provider wrappers: ~/bin/airprompt-{provider}
+KNOWN_PROVIDERS=(claude codex cursor windsurf)
+for prov in "${KNOWN_PROVIDERS[@]}"; do
+	wrapper="$HOME_BIN/airprompt-$prov"
+	cat > "$wrapper" << PROVIDEREOF
+#!/bin/bash
+exec airprompt-launch --provider $prov "\$@"
+PROVIDEREOF
+	chmod +x "$wrapper"
+	echo "  wrapper: $wrapper"
 done
 
 # Sync hooks to ~/.claude/ — prefer symlinks into repo. If symlink was
@@ -175,6 +220,35 @@ if [ -d "$REPO/bin/lib" ]; then
       debug_mismatch "lib" "$libfile" "$d/bin" "$rel"
     done
   done < <(find "$REPO/bin/lib" -type f -print0)
+fi
+
+# Verify src/ files in caches (utils, install-helpers, status-formatter)
+for s in status-formatter.js utils.js install-helpers.js; do
+  for d in "${CACHES[@]}"; do
+    debug_mismatch "src" "$REPO/src/$s" "$d/src" "$s"
+  done
+done
+
+# Verify src/providers/ in caches
+if [ -d "$REPO/src/providers" ]; then
+  for prov in "$REPO/src/providers/"*.js; do
+    [ ! -f "$prov" ] && continue
+    bn=$(basename "$prov")
+    for d in "${CACHES[@]}"; do
+      debug_mismatch "providers" "$prov" "$d/src/providers" "$bn"
+    done
+  done
+fi
+
+# Verify src/hooks/core/ in caches
+if [ -d "$REPO/src/hooks/core" ]; then
+  for coref in "$REPO/src/hooks/core/"*.js; do
+    [ ! -f "$coref" ] && continue
+    bn=$(basename "$coref")
+    for d in "${CACHES[@]}"; do
+      debug_mismatch "hooks/core" "$coref" "$d/src/hooks/core" "$bn"
+    done
+  done
 fi
 
 # Verify commands in caches

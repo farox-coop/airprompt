@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-CERT_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.airprompt"
+CERT_DIR="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
 CERT_FILE="${CERT_DIR}/airprompt-cert.pem"
 KEY_FILE="${CERT_DIR}/airprompt-key.pem"
 
@@ -13,7 +13,7 @@ fi
 
 mkdir -p "$CERT_DIR"
 
-# Detect LAN IP for SAN (filter out Docker/VPN — same logic as register.sh)
+# Detect LAN IP for SAN (filter out Docker/VPN)
 LAN_IP=""
 if command -v hostname &>/dev/null; then
   LAN_IP=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.' | grep -v '^10\.' | head -1)

@@ -45,7 +45,7 @@ echo "Starting AirPrompt server on port $PORT..."
 TEST_PID_FILE="/tmp/airprompt-server-test.pid"
 rm -f "$TEST_PID_FILE"
 cd "$PROJECT_DIR"
-AIRPROMPT_NO_TLS=1 AIRPROMPT_PID_FILE="$TEST_PID_FILE" CLAUDE_CONFIG_DIR="$TMPDIR" AIRPROMPT_SKIP_RECOVERY=1 PORT="$PORT" node server.js 2>/dev/null &
+AIRPROMPT_NO_TLS=1 AIRPROMPT_PID_FILE="$TEST_PID_FILE" AIRPROMPT_STATE_DIR="$TMPDIR/state" AIRPROMPT_SESSIONS_DIR="$TMPDIR/sessions" AIRPROMPT_SKIP_RECOVERY=1 PORT="$PORT" node server.js 2>/dev/null &
 SERVER_PID=$!
 
 for i in $(seq 1 20); do
@@ -68,7 +68,7 @@ if $TMUX_OK; then
 
   REG=$(curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${PROJECT_DIR}\"}")
+    -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${PROJECT_DIR}\",\"providerId\":\"test-int\"}")
   if echo "$REG" | grep -q '"ok":true'; then ok "register"; else not_ok "register: $REG"; fi
 
   LIST=$(curl -s "http://localhost:${PORT}/api/sessions")
@@ -80,7 +80,7 @@ if $TMUX_OK; then
 
   UNREG=$(curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${SESSION_ID}\"}")
+    -d "{\"sessionId\":\"${SESSION_ID}\",\"providerId\":\"test-int\"}")
   if echo "$UNREG" | grep -q '"ok":true'; then ok "unregister"; else not_ok "unregister: $UNREG"; fi
 
   LIST2=$(curl -s "http://localhost:${PORT}/api/sessions")
@@ -99,10 +99,10 @@ if $TMUX_OK; then
 
   curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${ID_A}\",\"cwd\":\"/tmp/a\"}" > /dev/null
+    -d "{\"sessionId\":\"${ID_A}\",\"cwd\":\"/tmp/a\",\"providerId\":\"test-int\"}" > /dev/null
   curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${ID_B}\",\"cwd\":\"/tmp/b\"}" > /dev/null
+    -d "{\"sessionId\":\"${ID_B}\",\"cwd\":\"/tmp/b\",\"providerId\":\"test-int\"}" > /dev/null
 
   LIST=$(curl -s "http://localhost:${PORT}/api/sessions")
   if echo "$LIST" | grep -q "$ID_A" && echo "$LIST" | grep -q "$ID_B"; then
@@ -117,9 +117,9 @@ if $TMUX_OK; then
   sleep 0.2
 
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
-    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_A}\"}" > /dev/null
+    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_A}\",\"providerId\":\"test-int\"}" > /dev/null
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
-    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_B}\"}" > /dev/null
+    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_B}\",\"providerId\":\"test-int\"}" > /dev/null
   ok "both sessions unregistered"
 else
   skipped "tmux not available"
@@ -133,7 +133,7 @@ if $TMUX_OK; then
 
   curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${ID_M}\",\"cwd\":\"${PROJECT_DIR}\"}" > /dev/null
+    -d "{\"sessionId\":\"${ID_M}\",\"cwd\":\"${PROJECT_DIR}\",\"providerId\":\"test-int\"}" > /dev/null
 
   # Kill tmux session — server guard rejects unregister if tmux alive
   tmux kill-session -t "airprompt-${ID_M}" 2>/dev/null || true
@@ -141,7 +141,7 @@ if $TMUX_OK; then
 
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${ID_M}\"}" > /dev/null
+    -d "{\"sessionId\":\"${ID_M}\",\"providerId\":\"test-int\"}" > /dev/null
 
   LIST=$(curl -s "http://localhost:${PORT}/api/sessions")
   if ! echo "$LIST" | grep -q "$ID_M"; then ok "session gone from API"; else not_ok "session still in API"; fi
@@ -173,11 +173,11 @@ if $TMUX_OK; then
   FIRST=$(curl -s -o /dev/null -w "%{http_code}" \
     -X POST "http://localhost:${PORT}/api/sessions/register" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${ID_D}\",\"cwd\":\"${PROJECT_DIR}\"}")
+    -d "{\"sessionId\":\"${ID_D}\",\"cwd\":\"${PROJECT_DIR}\",\"providerId\":\"test-int\"}")
   SECOND=$(curl -s -o /dev/null -w "%{http_code}" \
     -X POST "http://localhost:${PORT}/api/sessions/register" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${ID_D}\",\"cwd\":\"${PROJECT_DIR}\"}")
+    -d "{\"sessionId\":\"${ID_D}\",\"cwd\":\"${PROJECT_DIR}\",\"providerId\":\"test-int\"}")
   if [ "$FIRST" = "200" ] && [ "$SECOND" = "409" ]; then
     ok "duplicate rejected (200 then 409)"
   else
@@ -185,7 +185,7 @@ if $TMUX_OK; then
   fi
 
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
-    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_D}\"}" > /dev/null
+    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_D}\",\"providerId\":\"test-int\"}" > /dev/null
 else
   skipped "tmux not available"
 fi
@@ -199,7 +199,7 @@ if $TMUX_OK; then
   # Register with initial name
   REG_N=$(curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${ID_N}\",\"cwd\":\"${PROJECT_DIR}\",\"name\":\"first\"}")
+    -d "{\"sessionId\":\"${ID_N}\",\"cwd\":\"${PROJECT_DIR}\",\"name\":\"first\",\"providerId\":\"test-int\"}")
   if echo "$REG_N" | grep -q '"ok":true'; then ok "register with initial name"; else not_ok "register: $REG_N"; fi
 
   # Verify initial name in GET
@@ -209,7 +209,7 @@ if $TMUX_OK; then
   # Simulate already-registered name update (what _name_update does)
   PUT_N=$(curl -s -X PUT "http://localhost:${PORT}/api/sessions/name" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${ID_N}\",\"name\":\"second\"}")
+    -d "{\"sessionId\":\"${ID_N}\",\"name\":\"second\",\"providerId\":\"test-int\"}")
   if echo "$PUT_N" | grep -q '"ok":true'; then ok "name updated via PUT"; else not_ok "PUT name: $PUT_N"; fi
 
   # Verify updated name in GET
@@ -219,7 +219,7 @@ if $TMUX_OK; then
   # Clear name with empty string
   PUT_CLEAR=$(curl -s -X PUT "http://localhost:${PORT}/api/sessions/name" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"${ID_N}\",\"name\":\"\"}")
+    -d "{\"sessionId\":\"${ID_N}\",\"name\":\"\",\"providerId\":\"test-int\"}")
   if echo "$PUT_CLEAR" | grep -q '"ok":true'; then ok "name cleared via PUT empty string"; else not_ok "name clear: $PUT_CLEAR"; fi
 
   # Verify name is gone from session list
@@ -234,7 +234,7 @@ if $TMUX_OK; then
   tmux kill-session -t "airprompt-${ID_N}" 2>/dev/null || true
   sleep 0.2
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
-    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_N}\"}" > /dev/null
+    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_N}\",\"providerId\":\"test-int\"}" > /dev/null
 else
   skipped "tmux not available — 6 subtests skipped"
 fi
@@ -246,7 +246,7 @@ TMP_SETTINGS="${TMPDIR}/settings.json"
 
 if [ -x "$AUTOSTART_SCRIPT" ]; then
   # Run 'on' with temp settings file
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" on
   if [ -f "$TMP_SETTINGS" ]; then
     ok "autostart on created settings file"
@@ -260,7 +260,7 @@ if [ -x "$AUTOSTART_SCRIPT" ]; then
   fi
 
   # Run 'on' again — should be idempotent (no duplicate hooks)
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" on
   HOOK_COUNT=$(grep -c 'airprompt-activate.js' "$TMP_SETTINGS" || true)
   if [ "$HOOK_COUNT" = "1" ]; then
@@ -270,7 +270,7 @@ if [ -x "$AUTOSTART_SCRIPT" ]; then
   fi
 
   # Run 'off'
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" off
   if grep -q 'airprompt-activate.js' "$TMP_SETTINGS" 2>/dev/null; then
     not_ok "autostart off did not remove hook"
@@ -279,12 +279,12 @@ if [ -x "$AUTOSTART_SCRIPT" ]; then
   fi
 
   # Run 'off' again — idempotent
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" off
   ok "autostart off idempotent (already off)"
 
   # Run with invalid arg
-  if ! AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  if ! AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" invalid 2>/dev/null; then
     ok "autostart rejects invalid arg"
   else
@@ -302,7 +302,7 @@ if [ -x "$AUTOSTART_SCRIPT" ]; then
   }
 }
 JSONEOF
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" off
   if grep -q 'airprompt-activate.js' "$TMP_SETTINGS" 2>/dev/null; then
     not_ok "off did not remove airprompt hook"
@@ -317,11 +317,11 @@ JSONEOF
 
   # on -> off -> on round-trip
   rm -f "$TMP_SETTINGS"
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" on
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" off
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" on
   if grep -q 'airprompt-activate.js' "$TMP_SETTINGS" 2>/dev/null; then
     ok "on -> off -> on round-trip works"
@@ -341,7 +341,7 @@ JSONEOF
   }
 }
 JSONCEOF
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" off
   if grep -q 'airprompt-activate.js' "$TMP_SETTINGS" 2>/dev/null; then
     not_ok "off failed with JSONC comments"
@@ -357,7 +357,7 @@ JSONCEOF
 
   # Corrupted settings.json — autostart must refuse, not overwrite
   echo '{broken' > "$TMP_SETTINGS"
-  if AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  if AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" on 2>/dev/null; then
     not_ok "autostart on accepted corrupted settings"
   else
@@ -369,7 +369,7 @@ JSONCEOF
     not_ok "autostart on overwrote corrupted settings"
   fi
 
-  if AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  if AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" off 2>/dev/null; then
     not_ok "autostart off accepted corrupted settings"
   else
@@ -380,7 +380,7 @@ JSONCEOF
   cat > "$TMP_SETTINGS" << 'JSONEOF3'
 {"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo preexisting"}]}],"PreMessage":[{"hooks":[{"type":"command","command":"echo other"}]}]}}
 JSONEOF3
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" on
   if grep -q 'echo preexisting' "$TMP_SETTINGS" 2>/dev/null && \
      grep -q 'echo other' "$TMP_SETTINGS" 2>/dev/null && \
@@ -392,12 +392,12 @@ JSONEOF3
 
   # SessionStart=string (not an array) — off must not crash
   echo '{"hooks":{"SessionStart":"not-an-array"}}' > "$TMP_SETTINGS"
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" off 2>/dev/null && ok "off handles SessionStart=string" || not_ok "off crashed on SessionStart=string"
 
   # No hooks key at all — off must not crash
   echo '{"otherKey":true}' > "$TMP_SETTINGS"
-  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" CLAUDE_PLUGIN_ROOT="$PROJECT_DIR" \
+  AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
     bash "$AUTOSTART_SCRIPT" off 2>/dev/null && ok "off handles settings without hooks key" || not_ok "off crashed on missing hooks key"
 else
   skipped "autostart script not found"

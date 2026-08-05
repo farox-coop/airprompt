@@ -9,14 +9,14 @@
 # only child processes can be traced. Set scope=0 for full access:
 #   echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
 #
-# USAGE (run from a SEPARATE terminal, NOT from within Claude itself):
-#   1. Find Claude's PID:  ps aux | grep claude
+# USAGE (run from a SEPARATE terminal, NOT from within the IDE itself):
+#   1. Find the IDE process PID:  ps aux | grep -E 'claude|codex|cursor'
 #   2. Run:  bash bin/airprompt-attach.sh <PID>
-#   3. Your Claude session is now inside tmux + registered with AirPrompt
+#   3. Your IDE session is now inside tmux + registered with AirPrompt
 #   4. Reconnect locally:  tmux attach -t airprompt-<id>
 #   5. Open on phone:  https://<LAN-IP>:3210
 #
-# NOTE: Running this from WITHIN Claude won't work — reptyr cannot steal
+# NOTE: Running this from WITHIN the IDE won't work — reptyr cannot steal
 # the process that's running the script itself. Use a second terminal.
 
 set -euo pipefail
@@ -38,8 +38,23 @@ done
 # ── Config ─────────────────────────────────────────────────────────
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
+SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+# Auto-detect provider if not set (attach.sh can be invoked directly)
+if [ -z "${AIRPROMPT_PROVIDER:-}" ]; then
+  for prov in claude codex cursor windsurf; do
+    if command -v "$prov" >/dev/null 2>&1; then
+      export AIRPROMPT_PROVIDER="$prov"
+      break
+    fi
+  done
+fi
+if [ -z "${AIRPROMPT_PROVIDER:-}" ]; then
+  echo "AirPrompt: no provider detected and AIRPROMPT_PROVIDER not set." >&2
+  echo "  Install one of: claude, codex, cursor, windsurf" >&2
+  echo "  Or set AIRPROMPT_PROVIDER manually." >&2
+  exit 1
+fi
+PROVIDER="${AIRPROMPT_PROVIDER}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
 source "$(dirname "$0")/lib/protocol.sh"
@@ -51,7 +66,7 @@ API_URL="${AP_PROTO}://localhost:${DAEMON_PORT}"
 TARGET_PID="${1:-}"
 if [ -z "$TARGET_PID" ]; then
   echo "Usage: $0 <PID>" >&2
-  echo "  Find Claude's PID: ps aux | grep claude" >&2
+  echo "  Find IDE PID: ps aux | grep -E 'claude|codex|cursor'" >&2
   exit 1
 fi
 
@@ -84,8 +99,8 @@ if echo "$PANELINE" | grep -q "Unable to attach\|ptrace\|denied\|error"; then
   echo "  ptrace_scope=$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo unknown)"
   echo "  Try: echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope"
   echo ""
-  echo "Fallback: empty tmux session registered. Start Claude inside it:"
-  echo "  tmux send-keys -t $TMUX_SESSION 'claude' Enter"
+  echo "Fallback: empty tmux session registered. Start your IDE inside it:"
+  echo "  tmux send-keys -t $TMUX_SESSION '$PROVIDER' Enter"
 fi
 
 # ── Ensure daemon is running ─────────────────────────────────────────
@@ -109,18 +124,18 @@ fi
 # ── Register with daemon ────────────────────────────────────────────
 RESP=$(curl -s $AP_CURL_OPTS -X POST "${API_URL}/api/sessions/register" \
   -H "Content-Type: application/json" \
-  -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\"}" || echo "")
+  -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\",\"providerId\":\"${PROVIDER}\"}" || echo "")
 
 if echo "$RESP" | grep -q '"ok":true'; then
-  mkdir -p "$CONFIG_DIR"
   LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
   [ -z "$LAN_IP" ] && LAN_IP="localhost"
 
-  MY_DIR="${SESSIONS_DIR}/${TMUX_SESSION}"
+  MY_DIR="${SESSIONS_DIR}/${PROVIDER}-${TMUX_SESSION}"
   mkdir -p "$MY_DIR"
   echo "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
+  echo "$PROVIDER" > "${MY_DIR}/provider"
   touch "${MY_DIR}/active"
   touch "${MY_DIR}/mirror"  # AirPrompt-created session — auto-cleanup when process exits
   echo ""

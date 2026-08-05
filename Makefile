@@ -1,4 +1,4 @@
-.PHONY: setup cert start stop clean refresh logs lint test-unit test-integration test-all install-plugin uninstall-plugin
+.PHONY: setup cert start stop clean refresh logs lint test-unit test-integration test-all agnostic-check install-plugin uninstall-plugin
 
 LOG_FILE := /tmp/airprompt.log
 PID_FILE := /tmp/airprompt-server.pid
@@ -26,9 +26,9 @@ stop:
 
 clean:
 	@rm -f $(PID_FILE) $(LOG_FILE)
-	@rm -f $(HOME)/.claude/.airprompt/daemon.json
-	@rm -rf $(HOME)/.claude/.airprompt/sessions
-	@rmdir $(HOME)/.claude/.airprompt 2>/dev/null || true
+	@rm -f $(HOME)/.airprompt/state/daemon.json
+	@rm -rf $(HOME)/.airprompt/sessions
+	@rm -rf $(HOME)/.airprompt/state
 	@rm -rf node_modules
 
 refresh: stop clean setup start
@@ -43,8 +43,18 @@ lint:
 	@node --check bin/lib/settings.js
 	@node --check src/utils.js
 	@node --check src/status-formatter.js
+	@node --check src/install-helpers.js
+	@node --check src/providers/provider.js
+	@node --check src/providers/claude.js
+	@node --check src/providers/registry.js
 	@node --check src/hooks/airprompt-activate.js
 	@node --check src/hooks/airprompt-deactivate.js
+	@node --check src/hooks/core/activate.js
+	@node --check src/hooks/core/deactivate.js
+	@node --check src/hooks/core/shared.js
+	@node --check bin/lib/resolve-config-dir.js
+	@node --check bin/lib/project-names.js
+	@node --check bin/lib/autostart.js
 
 test-unit:
 	@node --test test/unit/*.test.js
@@ -56,6 +66,9 @@ test-integration:
 	@bash test/integration/run.sh
 
 test-all: test-unit test-integration
+
+agnostic-check:
+	@bash bin/airprompt-agnostic-check.sh
 
 install-plugin:
 	@node bin/install.js

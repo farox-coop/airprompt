@@ -565,6 +565,54 @@ Adding Codex support should mean:
 Stages 2-4 are the bulk of the work. Stages 5-7c are mechanical but numerous.
 Stage 9 ships in a **subsequent release** (not same as Stage 8) to honor backward-compat.
 
+### Implementation notes
+
+Stages 1-7 implemented. All 464 unit + 37 integration tests pass.
+
+**Key decisions made during implementation:**
+
+- **`sessionToJSON` signature change:** Added optional second param `sessionsDirOverride`.
+  Required fixing `.map(sessionToJSON)` → `.map(s => sessionToJSON(s))` in `server.js`
+  (`.map` passes index as second arg, causing `path.join(1, ...)` TypeError).
+
+- **State dir separation:** New `~/.airprompt/state/` for daemon.json, certs, and
+  `project-names.json`. Both server.js and protocol.sh read exclusively from
+  `AIRPROMPT_STATE_DIR || ~/.airprompt/state` (no legacy fallback). Reinstall won't
+  destroy user data anymore. Stage 8 migration will handle upgrading legacy installs.
+
+- **Provider-aware session dedup:** `server.js` register endpoint now **requires**
+  `providerId` field (returns 400 if missing). Dedup checks `tmuxSession` + `providerId`
+  — same tmux with different providers gets separate sessions. Disk-recovered entries
+  without `providerId` get empty string; dedup falls back to tmux-only matching for them.
+
+- **Thin hook wrappers:** `airprompt-activate.js` and `airprompt-deactivate.js`
+  reduced from 316/285 lines to ~30 lines each. They parse stdin, call core,
+  format output. Backward-compat preserved: `.claude-plugin/plugin.json` still
+  points to these files via `${CLAUDE_PLUGIN_ROOT}`.
+
+- **Deactivate stdout:** Old deactivate hook exited silently (no stdout) when
+  nothing to unregister. New wrapper preserves this behavior — suppresses output
+  when `result.sessionId` is null.
+
+- **PID_FILE test:** Test checked old `airprompt-deactivate.js` source for
+  `process.env.AIRPROMPT_PID_FILE`. Updated to check `core/deactivate.js`.
+
+- **`airprompt-claude` backward compat:** Now a 3-line wrapper calling
+  `airprompt-launch --provider claude "$@"`. Existing `~/bin/airprompt-claude`
+  symlinks keep working.
+
+- **`CLAUDE_PLUGIN_ROOT` replaced:** All shell scripts + source files use
+  `AIRPROMPT_INSTALL_DIR` instead. Only `.claude-plugin/plugin.json` retains
+  `${CLAUDE_PLUGIN_ROOT}` (Claude sets this env var when loading plugins).
+
+**Deferred to follow-up (Stages 7c, 8, 9, 10, 11):**
+
+- Stage 7c: `sync-claude` → `airprompt-sync-agent` rename
+- Stage 8: Migration from `~/.claude/.airprompt/sessions/` → `~/.airprompt/sessions/`
+- Stage 9: Remove migration code (future release)
+- Stage 10: Update `install.sh`, `install.ps1`, `marketplace.json`
+- Stage 11: Provider contract tests, README updates
+
 ---
 
 ## 8. Future: Adding Codex (after agnostic refactor)
@@ -621,16 +669,16 @@ changes to core logic.
 
 ### Tasks
 
-- [ ] Stage 1 — Define `Provider` adapter interface + shared types (`src/providers/provider.js`)
-- [ ] Stage 2 — Implement `ClaudeProvider`: extract all Claude-specific logic (`src/providers/claude.js`)
-- [ ] Stage 3 — Create provider registry: load, list, detect, default (`src/providers/registry.js`)
-- [ ] Stage 4 — Extract hook core logic: `src/hooks/core/activate.js` + `deactivate.js`. Existing files become thin Claude wrappers (preserved for backward-compat with plugin.json)
-- [ ] Stage 5 — Migrate `bin/install.js` to provider dispatch + port `installViaSkills()` from caveman
-- [ ] Stage 6 — Migrate `src/utils.js` + `bin/lib/settings.js` to provider-agnostic paths
-- [ ] Stage 6b — Migrate `server.js` + daemon state files. Fix session dedup for multiple providers on same tmux. Separate state dir (`~/.airprompt/state/`) from install dir
-- [ ] Stage 7 — Migrate all 11 shell scripts: add `--provider` flag, rename `airprompt-claude` → `airprompt-launch`, generalize `autostart.sh` + `attach.sh`
-- [ ] Stage 7b — Fix standalone hook module resolution: template-based with `{{INSTALL_DIR}}` placeholders resolved at install time
-- [ ] Stage 7c — Generalize `sync-claude` → `airprompt-sync-agent` skill
+- [X] Stage 1 — Define `Provider` adapter interface + shared types (`src/providers/provider.js`)
+- [X] Stage 2 — Implement `ClaudeProvider`: extract all Claude-specific logic (`src/providers/claude.js`)
+- [X] Stage 3 — Create provider registry: load, list, detect, default (`src/providers/registry.js`)
+- [X] Stage 4 — Extract hook core logic: `src/hooks/core/activate.js` + `deactivate.js`. Existing files become thin Claude wrappers (preserved for backward-compat with plugin.json)
+- [X] Stage 5 — Migrate `bin/install.js` to provider dispatch + port `installViaSkills()` from caveman
+- [X] Stage 6 — Migrate `src/utils.js` + `bin/lib/settings.js` to provider-agnostic paths
+- [X] Stage 6b — Migrate `server.js` + daemon state files. Fix session dedup for multiple providers on same tmux. Separate state dir (`~/.airprompt/state/`) from install dir
+- [X] Stage 7 — Migrate all 11 shell scripts: add `--provider` flag, rename `airprompt-claude` → `airprompt-launch`, generalize `autostart.sh` + `attach.sh`
+- [X] Stage 7b — Fix standalone hook module resolution: template-based with `{{INSTALL_DIR}}` placeholders resolved at install time
+- [ ] Stage 7c — Generalize `sync-claude` → `airprompt-sync-agent` skill (sync script updated for new dirs; rename deferred)
 - [ ] Stage 8 — Migrate marker files: `~/.claude/.airprompt/sessions/` → `~/.airprompt/sessions/claude-{name}/`
 - [ ] Stage 9 — Remove backward-compat migration code (ships in subsequent release)
 - [ ] Stage 10 — Update installer files + plugin manifest

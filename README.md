@@ -1,10 +1,10 @@
 # <img src="public/favicon.svg" alt="AirPrompt logo" width="56" height="56"> AirPrompt
 
-### Remote control interface for Claude CLI with voice dictation support.
+### Remote control interface for IDE/CLI terminals with voice dictation support.
 
 ## Overview
 
-AirPrompt lets you view and interact with remote Claude CLI sessions running on your local network machine from your mobile phone using voice prompts.
+AirPrompt lets you view and interact with remote IDE/CLI sessions running on your local network machine from your mobile phone using voice prompts. Provider-agnostic: supports multiple IDEs via adapters (Claude Code first, Codex/Cursor/Windsurf planned).
 
 ## Requirements
 
@@ -17,10 +17,10 @@ AirPrompt lets you view and interact with remote Claude CLI sessions running on 
 
 ## Architecture
 
-- **Daemon**: Single `server.js` instance on port 3210 managing multiple Claude sessions
-- **Sessions**: One tmux session per Claude instance
+- **Daemon**: Single `server.js` instance on port 3210 managing multiple IDE sessions
+- **Sessions**: One tmux session per IDE/CLI instance
 - **Mobile UI**: Web-based terminal with session selector, xterm.js, push-to-talk voice dictation, and keyboard input fallback
-- **Statusline**: Integrated badge `[airprompt: https://<IP>:3210]` in Claude Code
+- **Statusline**: Integrated badge `[AirPrompt: https://<IP>:3210]` in IDE terminal
 
 ### tmux feature usage
 
@@ -35,10 +35,10 @@ Every tmux feature AirPrompt depends on, where it's used, and why:
 | `send-keys` | `server.js` | Inject `/airprompt off` into session without attaching |
 | `list-clients` | `server.js`, `src/utils.js` | Detect orphaned mirror sessions (no attached clients) |
 | `display-message` | `activate.js`, `server.js` | Read session name `#S`, group `#{session_group}`, cwd `#{pane_current_path}` |
-| `set-option` | `server.js`, `airprompt-claude` | Disable status bar in web sessions, enable focus-events |
+| `set-option` | `server.js`, `airprompt-launch` | Disable status bar in web sessions, enable focus-events |
 | `load-buffer` / `save-buffer` | `server.js` | Clipboard sync between web client and session |
-| `list-panes -F '#{pane_dead}'` | `airprompt-claude` | Detect zombie panes from previous `/exit` |
-| `respawn-pane -k` | `airprompt-claude`, `on.sh` | Revive zombie pane or restart daemon |
+| `list-panes -F '#{pane_dead}'` | `airprompt-launch` | Detect zombie panes from previous `/exit` |
+| `respawn-pane -k` | `airprompt-launch`, `on.sh` | Revive zombie pane or restart daemon |
 | Session grouping (`-t parent`) | `server.js` | Web proxy sessions inherit from real session — kill parent, children die
 
 ## Quick Start
@@ -68,7 +68,7 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | `name [<text>]` | Set display name for current session (empty or "" clears it) |
 | `clean` | Full teardown — kill daemon, remove all tmux sessions and markers |
 | `restart` | Restart daemon — sessions survive via disk recovery |
-| `autostart on|off` | Auto-start AirPrompt on Claude session start |
+| `autostart on|off` | Auto-start AirPrompt on IDE session start |
 | `help` | Print usage |
 
 **`/airprompt` with no arguments** runs `status` + `help` — shows daemon status followed by the command reference.
@@ -87,26 +87,32 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | `logs` | Tail daemon logs |
 | `lint` | Syntax-check JS files |
 | `test-all` | Run unit and integration tests |
+| `agnostic-check` | Audit codebase for hardcoded provider names (dev only) |
 | `test-unit` | Run Node.js unit tests |
 | `test-integration` | Run shell integration tests |
-| `install-plugin` | Install AirPrompt as a Claude Code plugin |
+| `install-plugin` | Install AirPrompt as an IDE plugin |
 | `uninstall-plugin` | Remove plugin registration |
 | `clean` | Remove PID, daemon.json, sessions, logs, node_modules |
 
 ## TLS & Voice Dictation
 
-Chrome/Android block `SpeechRecognition` over plain HTTP to LAN IPs. AirPrompt auto-detects TLS certs in `~/.claude/.airprompt/` and serves HTTPS. On first connect, accept the self-signed certificate warning. After that, push-to-talk voice dictation works.
+Chrome/Android block `SpeechRecognition` over plain HTTP to LAN IPs. AirPrompt auto-detects TLS certs in `~/.airprompt/state/` and serves HTTPS. On first connect, accept the self-signed certificate warning. After that, push-to-talk voice dictation works.
 
-## Claude Integration
+## IDE Integration
 
+AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter implementing a shared interface. Claude Code ships as the first provider.
+
+**Claude Code:**
 - `/airprompt on` — Register session and enable remote access
 - `/airprompt off` — Unregister session and hide statusline badge
 - `/airprompt status` — Show daemon status and all active sessions
 - `/airprompt name <text>` — Set session display name (empty or "" clears)
-- `/airprompt autostart on|off` — Auto-start on Claude session start
+- `/airprompt autostart on|off` — Auto-start on IDE session start
 - `/airprompt clean` — Full teardown: kill daemon, remove all sessions and markers
 - `/airprompt restart` — Restart daemon — active sessions survive via disk recovery
 - `/airprompt help` — Print usage
+
+**Adding new IDEs** (Codex, Cursor, Windsurf): create one provider file + thin hook wrappers. Provider auto-discovered by registry. Zero changes to core.
 
 ## License
 

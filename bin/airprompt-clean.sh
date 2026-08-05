@@ -15,9 +15,8 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
-AIRPROMPT_DIR="${CONFIG_DIR}/.airprompt"
+SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+AIRPROMPT_DIR="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 LOG_FILE="/tmp/airprompt.log"
 
@@ -51,7 +50,7 @@ if [ -f "$PID_FILE" ]; then
 fi
 # Also kill daemon tmux session (airprompt-on.sh starts it this way)
 rm -f "${AIRPROMPT_DIR}/daemon.json" && echo "  daemon.json removed" || true
-rm -rf "${AIRPROMPT_DIR}/sessions" 2>/dev/null || true
+rm -rf "${SESSIONS_DIR}" 2>/dev/null || true
 rmdir "${AIRPROMPT_DIR}" 2>/dev/null || true
 tmux kill-session -t airprompt-daemon 2>/dev/null && echo "  daemon tmux session killed" || true
 
@@ -76,7 +75,35 @@ if [ -d "$SESSIONS_DIR" ]; then
   rmdir "$SESSIONS_DIR" 2>/dev/null || true
 fi
 
-# 4. Remove logs
+# 4. Remove ~/bin/ symlinks and provider wrappers
+HOME_BIN="$HOME/bin"
+if [ -d "$HOME_BIN" ]; then
+  # Symlinks created by sync.sh / install.js
+  for name in airprompt airprompt-launch; do
+    link_path="$HOME_BIN/$name"
+    if [ -L "$link_path" ] || [ -f "$link_path" ]; then
+      rm -f "$link_path"
+      echo "  removed $link_path"
+    fi
+  done
+  # Provider wrappers (real files)
+  for name in airprompt-claude airprompt-codex airprompt-cursor airprompt-windsurf; do
+    wrapper_path="$HOME_BIN/$name"
+    if [ -f "$wrapper_path" ]; then
+      rm -f "$wrapper_path"
+      echo "  removed $wrapper_path"
+    fi
+  done
+fi
+
+# 5. Remove install directory (~/.airprompt/)
+AIRPROMPT_INSTALL="${AIRPROMPT_INSTALL_DIR:-$HOME/.airprompt}"
+if [ -d "$AIRPROMPT_INSTALL" ]; then
+  rm -rf "$AIRPROMPT_INSTALL"
+  echo "  removed $AIRPROMPT_INSTALL"
+fi
+
+# 6. Remove logs
 rm -f "$LOG_FILE"
 
 echo "  markers removed: $MARKERS_REMOVED"

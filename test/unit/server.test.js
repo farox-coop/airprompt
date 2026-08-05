@@ -9,6 +9,8 @@ const WebSocket = require('ws');
 
 const { createApp, sessions } = require('../../server');
 
+const TEST_PROVIDER = "test-prov";
+
 const TMUX_AVAILABLE = (() => {
   try { execSync('which tmux 2>/dev/null'); return true; } catch (e) { return false; }
 })();
@@ -83,7 +85,7 @@ beforeEach(() => {
 test('POST /api/sessions/register creates session', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-reg1');
   try {
-    const res = await post('/api/sessions/register', { sessionId: 'test-reg1', cwd: '/tmp' });
+    const res = await post('/api/sessions/register', { sessionId: 'test-reg1', cwd: '/tmp' , providerId: TEST_PROVIDER});
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.ok, true);
     assert.strictEqual(sessions.has('test-reg1'), true);
@@ -95,8 +97,8 @@ test('POST /api/sessions/register creates session', { skip: !TMUX_AVAILABLE }, a
 test('POST /api/sessions/register rejects duplicate', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-reg2');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-reg2', cwd: '/tmp' });
-    const res = await post('/api/sessions/register', { sessionId: 'test-reg2', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-reg2', cwd: '/tmp' , providerId: TEST_PROVIDER});
+    const res = await post('/api/sessions/register', { sessionId: 'test-reg2', cwd: '/tmp' , providerId: TEST_PROVIDER});
     assert.strictEqual(res.status, 409);
     assert.ok(res.body.error);
   } finally {
@@ -111,7 +113,7 @@ test('POST /api/sessions/register dedup by tmuxSession — same tmux, different 
     const r1 = await post('/api/sessions/register', {
       sessionId: 'test-dedup-1', cwd: '/tmp',
       tmuxSession: 'airprompt-test-dedup',
-    });
+      providerId: TEST_PROVIDER});
     assert.strictEqual(r1.status, 200);
     assert.strictEqual(sessions.has('test-dedup-1'), true);
 
@@ -119,7 +121,7 @@ test('POST /api/sessions/register dedup by tmuxSession — same tmux, different 
     const r2 = await post('/api/sessions/register', {
       sessionId: 'test-dedup-2', cwd: '/tmp/a',
       tmuxSession: 'airprompt-test-dedup',
-    });
+      providerId: TEST_PROVIDER});
     // Should succeed (dedup, not duplicate) — updates existing entry
     assert.strictEqual(r2.status, 200);
     // Old sessionId removed, new one present
@@ -140,25 +142,68 @@ test('POST /api/sessions/register rejects missing body', async () => {
 });
 
 test('POST /api/sessions/register rejects missing sessionId', async () => {
-  const res = await post('/api/sessions/register', { cwd: '/tmp' });
+  const res = await post('/api/sessions/register', { cwd: '/tmp' , providerId: TEST_PROVIDER});
   assert.strictEqual(res.status, 400);
 });
 
 test('POST /api/sessions/register rejects invalid sessionId chars', async () => {
-  const res = await post('/api/sessions/register', { sessionId: 'bad;rm -rf /', cwd: '/tmp' });
+  const res = await post('/api/sessions/register', { sessionId: 'bad;rm -rf /', cwd: '/tmp' , providerId: TEST_PROVIDER});
   assert.strictEqual(res.status, 400);
 });
 
 test('POST /api/sessions/register rejects sessionId too long', async () => {
   const longId = 'x'.repeat(65);
-  const res = await post('/api/sessions/register', { sessionId: longId, cwd: '/tmp' });
+  const res = await post('/api/sessions/register', { sessionId: longId, cwd: '/tmp' , providerId: TEST_PROVIDER});
   assert.strictEqual(res.status, 400);
 });
 
 test('POST /api/sessions/register rejects cwd too long', async () => {
   const longCwd = '/tmp/' + 'x'.repeat(512);
-  const res = await post('/api/sessions/register', { sessionId: 'test-cwdlen', cwd: longCwd });
+  const res = await post('/api/sessions/register', { sessionId: 'test-cwdlen', cwd: longCwd , providerId: TEST_PROVIDER});
   assert.strictEqual(res.status, 400);
+});
+
+test('POST /api/sessions/register rejects missing providerId', async () => {
+  const res = await post('/api/sessions/register', { sessionId: 'test-no-prov', cwd: '/tmp' });
+  assert.strictEqual(res.status, 400);
+  assert.ok(res.body.error.includes('providerId'));
+});
+
+test('POST /api/sessions/register rejects invalid providerId format', async () => {
+  const res = await post('/api/sessions/register', { sessionId: 'test-bad-prov', cwd: '/tmp', providerId: 'Bad_Format!' });
+  assert.strictEqual(res.status, 400);
+  assert.ok(res.body.error.includes('providerId'));
+});
+
+test('POST /api/sessions/register rejects providerId too long', async () => {
+  const longProv = 'x'.repeat(33);
+  const res = await post('/api/sessions/register', { sessionId: 'test-longprov', cwd: '/tmp', providerId: longProv });
+  assert.strictEqual(res.status, 400);
+});
+
+test('POST /api/sessions/register same tmux + different providerId = separate sessions', { skip: !TMUX_AVAILABLE }, async () => {
+  createTmux('airprompt-test-multi-prov');
+  try {
+    const r1 = await post('/api/sessions/register', {
+      sessionId: 'test-multi-prov-1', cwd: '/tmp',
+      tmuxSession: 'airprompt-test-multi-prov',
+      providerId: 'claude' });
+    assert.strictEqual(r1.status, 200);
+    assert.strictEqual(sessions.has('test-multi-prov-1'), true);
+
+    const r2 = await post('/api/sessions/register', {
+      sessionId: 'test-multi-prov-2', cwd: '/tmp/a',
+      tmuxSession: 'airprompt-test-multi-prov',
+      providerId: 'codex' });
+    assert.strictEqual(r2.status, 200);
+    // Both sessions coexist — different providers on same tmux
+    assert.strictEqual(sessions.has('test-multi-prov-1'), true);
+    assert.strictEqual(sessions.has('test-multi-prov-2'), true);
+    assert.strictEqual(sessions.get('test-multi-prov-1').providerId, 'claude');
+    assert.strictEqual(sessions.get('test-multi-prov-2').providerId, 'codex');
+  } finally {
+    killTmux('airprompt-test-multi-prov');
+  }
 });
 
 test('POST /api/sessions/register with existing tmuxSession', { skip: !TMUX_AVAILABLE }, async () => {
@@ -169,7 +214,7 @@ test('POST /api/sessions/register with existing tmuxSession', { skip: !TMUX_AVAI
       sessionId: 'test-use-existing',
       cwd: '/tmp',
       tmuxSession: realSession,
-    });
+      providerId: TEST_PROVIDER});
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.ok, true);
     // The entry should use the provided tmux session, not a generated one
@@ -186,7 +231,7 @@ test('POST /api/sessions/register with tmuxSession that does not exist falls thr
     sessionId: 'test-bad-tmux',
     cwd: '/tmp',
     tmuxSession: 'nonexistent-session-xyz',
-  });
+      providerId: TEST_PROVIDER});
   assert.strictEqual(res.status, 200);
   // Should create airprompt-<sessionId> instead
   const entry = sessions.get('test-bad-tmux');
@@ -205,8 +250,8 @@ test('GET /api/sessions returns all sessions', { skip: !TMUX_AVAILABLE }, async 
   createTmux('airprompt-test-a');
   createTmux('airprompt-test-b');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-a', cwd: '/tmp/a' });
-    await post('/api/sessions/register', { sessionId: 'test-b', cwd: '/tmp/b' });
+    await post('/api/sessions/register', { sessionId: 'test-a', cwd: '/tmp/a' , providerId: TEST_PROVIDER});
+    await post('/api/sessions/register', { sessionId: 'test-b', cwd: '/tmp/b' , providerId: TEST_PROVIDER});
     const res = await get('/api/sessions');
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.length, 2);
@@ -221,7 +266,7 @@ test('GET /api/sessions returns all sessions', { skip: !TMUX_AVAILABLE }, async 
 test('POST /api/sessions/unregister removes session when tmux dead', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-unreg');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-unreg', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-unreg', cwd: '/tmp' , providerId: TEST_PROVIDER});
     // Kill tmux session first — server guard rejects unregister if tmux alive
     killTmux('airprompt-test-unreg');
     const res = await post('/api/sessions/unregister', { sessionId: 'test-unreg' });
@@ -235,7 +280,7 @@ test('POST /api/sessions/unregister removes session when tmux dead', { skip: !TM
 test('POST /api/sessions/unregister refuses when tmux session alive', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-refuse');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-refuse', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-refuse', cwd: '/tmp' , providerId: TEST_PROVIDER});
     const res = await post('/api/sessions/unregister', { sessionId: 'test-refuse' });
     assert.strictEqual(res.status, 409);
     assert.strictEqual(sessions.has('test-refuse'), true);
@@ -279,7 +324,7 @@ function put(path, body) {
 test('PUT /api/sessions/name sets name on registered session', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-name1');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-name1', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-name1', cwd: '/tmp' , providerId: TEST_PROVIDER});
     const res = await put('/api/sessions/name', { sessionId: 'test-name1', name: 'My Session' });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.ok, true);
@@ -293,7 +338,7 @@ test('PUT /api/sessions/name sets name on registered session', { skip: !TMUX_AVA
 test('PUT /api/sessions/name clears name with empty string', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-name2');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-name2', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-name2', cwd: '/tmp' , providerId: TEST_PROVIDER});
     await put('/api/sessions/name', { sessionId: 'test-name2', name: 'Temp Name' });
     const res = await put('/api/sessions/name', { sessionId: 'test-name2', name: '' });
     assert.strictEqual(res.status, 200);
@@ -312,7 +357,7 @@ test('PUT /api/sessions/name rejects missing sessionId', async () => {
 test('PUT /api/sessions/name rejects invalid name (special chars)', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-name3');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-name3', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-name3', cwd: '/tmp' , providerId: TEST_PROVIDER});
     const res = await put('/api/sessions/name', { sessionId: 'test-name3', name: 'bad@chars!' });
     assert.strictEqual(res.status, 400);
   } finally {
@@ -323,7 +368,7 @@ test('PUT /api/sessions/name rejects invalid name (special chars)', { skip: !TMU
 test('PUT /api/sessions/name rejects name too long', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-name4');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-name4', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-name4', cwd: '/tmp' , providerId: TEST_PROVIDER});
     const res = await put('/api/sessions/name', { sessionId: 'test-name4', name: 'x'.repeat(65) });
     assert.strictEqual(res.status, 400);
   } finally {
@@ -339,7 +384,7 @@ test('PUT /api/sessions/name returns 404 for unknown session', async () => {
 test('POST /api/sessions/register with valid name', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-reg-name');
   try {
-    const res = await post('/api/sessions/register', { sessionId: 'test-reg-name', cwd: '/tmp', name: 'My Label' });
+    const res = await post('/api/sessions/register', { sessionId: 'test-reg-name', cwd: '/tmp', name: 'My Label' , providerId: TEST_PROVIDER});
     assert.strictEqual(res.status, 200);
     assert.strictEqual(sessions.get('test-reg-name').name, 'My Label');
   } finally {
@@ -348,14 +393,14 @@ test('POST /api/sessions/register with valid name', { skip: !TMUX_AVAILABLE }, a
 });
 
 test('POST /api/sessions/register rejects invalid name', async () => {
-  const res = await post('/api/sessions/register', { sessionId: 'test-badname', cwd: '/tmp', name: 'bad@chars!' });
+  const res = await post('/api/sessions/register', { sessionId: 'test-badname', cwd: '/tmp', name: 'bad@chars!' , providerId: TEST_PROVIDER});
   assert.strictEqual(res.status, 400);
 });
 
 test('POST /api/sessions/register stores null name when omitted', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-no-name');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-no-name', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-no-name', cwd: '/tmp' , providerId: TEST_PROVIDER});
     assert.strictEqual(sessions.get('test-no-name').name, null);
   } finally {
     killTmux('airprompt-test-no-name');
@@ -365,7 +410,7 @@ test('POST /api/sessions/register stores null name when omitted', { skip: !TMUX_
 test('GET /api/sessions returns name field', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-getname');
   try {
-    await post('/api/sessions/register', { sessionId: 'test-getname', cwd: '/tmp', name: 'Visible' });
+    await post('/api/sessions/register', { sessionId: 'test-getname', cwd: '/tmp', name: 'Visible' , providerId: TEST_PROVIDER});
     const res = await get('/api/sessions');
     assert.strictEqual(res.status, 200);
     const session = res.body.find((s) => s.id === 'test-getname');
@@ -392,7 +437,7 @@ test('WS receives session_list on connect', (t, done) => {
 
 test('WS list_sessions request returns session_list', { skip: !TMUX_AVAILABLE }, (t, done) => {
   createTmux('airprompt-test-wslist');
-  post('/api/sessions/register', { sessionId: 'test-wslist', cwd: '/tmp' }).then(() => {
+  post('/api/sessions/register', { sessionId: 'test-wslist', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     ws.on('message', (raw) => {
       const msg = JSON.parse(raw.toString());
@@ -412,7 +457,7 @@ test('WS list_sessions request returns session_list', { skip: !TMUX_AVAILABLE },
 
 test('WS input echoes back via pty', { skip: !TMUX_AVAILABLE }, (t, done) => {
   createTmux('airprompt-test-wsinput');
-  post('/api/sessions/register', { sessionId: 'test-wsinput', cwd: '/tmp' }).then(() => {
+  post('/api/sessions/register', { sessionId: 'test-wsinput', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     ws.on('open', () => ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-wsinput' })));
     // Send input after switching
@@ -458,7 +503,7 @@ test('WS switch_session for unknown id returns error', (t, done) => {
 
 test('input sent before switch_session is queued and flushed after PTY spawn', { skip: !TMUX_AVAILABLE }, (t, done) => {
   createTmux('airprompt-test-q1');
-  post('/api/sessions/register', { sessionId: 'test-q1', cwd: '/tmp' }).then(() => {
+  post('/api/sessions/register', { sessionId: 'test-q1', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     let gotOutput = false;
 
@@ -488,7 +533,7 @@ test('input sent before switch_session is queued and flushed after PTY spawn', {
 
 test('input sent after pty_spawned is written directly (not queued)', { skip: !TMUX_AVAILABLE }, (t, done) => {
   createTmux('airprompt-test-q2');
-  post('/api/sessions/register', { sessionId: 'test-q2', cwd: '/tmp' }).then(() => {
+  post('/api/sessions/register', { sessionId: 'test-q2', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     let gotOutput = false;
 
@@ -519,7 +564,7 @@ test('input sent after pty_spawned is written directly (not queued)', { skip: !T
 
 test('input queue capped at 200 messages — excess dropped', { skip: !TMUX_AVAILABLE }, (t, done) => {
   createTmux('airprompt-test-qcap');
-  post('/api/sessions/register', { sessionId: 'test-qcap', cwd: '/tmp' }).then(() => {
+  post('/api/sessions/register', { sessionId: 'test-qcap', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     // Send 250 echo commands BEFORE spawn. Each `echo CAP_NN\r` is a self-
     // identifying input that echoes its index back. Only 200 should be queued.
@@ -563,7 +608,7 @@ test('input queue capped at 200 messages — excess dropped', { skip: !TMUX_AVAI
 
 test('non-string input data is rejected', { skip: !TMUX_AVAILABLE }, (t, done) => {
   createTmux('airprompt-test-qtval');
-  post('/api/sessions/register', { sessionId: 'test-qtval', cwd: '/tmp' }).then(() => {
+  post('/api/sessions/register', { sessionId: 'test-qtval', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     ws.on('open', () => {
       // Should not crash the server
@@ -584,7 +629,7 @@ test('non-string input data is rejected', { skip: !TMUX_AVAILABLE }, (t, done) =
 
 test('input queue cleared on WS close', { skip: !TMUX_AVAILABLE }, (t, done) => {
   createTmux('airprompt-test-qclose');
-  post('/api/sessions/register', { sessionId: 'test-qclose', cwd: '/tmp' }).then(() => {
+  post('/api/sessions/register', { sessionId: 'test-qclose', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     ws.on('open', () => {
       ws.send(JSON.stringify({ type: 'input', data: 'orphan input\r' }));
@@ -620,10 +665,11 @@ function runDeactivate(envOverrides = {}) {
     ...process.env,
     PATH: process.env.PATH,
     HOME: process.env.HOME,
-    AIRPROMPT_PORT: String(port),
+    AIRPROMPT_PORT: String(port), // resolvePort checks this first
     AIRPROMPT_PID_FILE: '/tmp/airprompt-server-test.pid',
     AIRPROMPT_SKIP_RECOVERY: '1',
-    CLAUDE_CONFIG_DIR: TEMP_DIR,
+    AIRPROMPT_SESSIONS_DIR: TEMP_DIR + '/.airprompt/sessions',
+    AIRPROMPT_STATE_DIR: TEMP_DIR + '/.airprompt/state',
     AIRPROMPT_NO_TLS: '1', // match test server
     ...envOverrides,
   };
@@ -634,6 +680,7 @@ function runDeactivate(envOverrides = {}) {
     env,
     timeout: 10000,
     encoding: 'utf8',
+    input: '', // close stdin so for-await exits immediately
   });
   return { status: r.status, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
 }
@@ -669,7 +716,7 @@ test('deactivate hook exits 0 when tmux session is alive (spurious Stop guard)',
     const fs = require('fs');
     const path = require('path');
     const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
-    const myDir = path.join(sessionsDir, aliveSession);
+    const myDir = path.join(sessionsDir, "claude-" + aliveSession);
     fs.mkdirSync(myDir, { recursive: true });
     fs.writeFileSync(path.join(myDir, 'session'), 'test-guard-session\n');
     fs.writeFileSync(path.join(myDir, 'tmux'), aliveSession + '\n');
@@ -677,7 +724,7 @@ test('deactivate hook exits 0 when tmux session is alive (spurious Stop guard)',
     fs.writeFileSync(path.join(myDir, 'url'), 'http://192.168.0.10:3210\n');
 
     // Register the session first (so deactivate has something to unregister if guard fails)
-    await post('/api/sessions/register', { sessionId: 'test-guard-session', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-guard-session', cwd: '/tmp' , providerId: TEST_PROVIDER});
 
     const r = runDeactivate();
     // Guard should detect session is alive → exit 0 without unregistering
@@ -705,7 +752,7 @@ test('deactivate hook proceeds with cleanup when tmux session is gone', { skip: 
   const path = require('path');
   // New per-session dir structure — deactivate.js checks here first
   const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
-  const myDir = path.join(sessionsDir, deadSession);
+  const myDir = path.join(sessionsDir, "claude-" + deadSession);
   fs.mkdirSync(myDir, { recursive: true });
   fs.writeFileSync(path.join(myDir, 'session'), 'test-guard-dead-session\n');
   fs.writeFileSync(path.join(myDir, 'tmux'), deadSession + '\n');
@@ -713,7 +760,7 @@ test('deactivate hook proceeds with cleanup when tmux session is gone', { skip: 
   fs.writeFileSync(path.join(myDir, 'url'), 'http://192.168.0.10:3210\n');
 
   // Register session with server so unregister works, then kill tmux
-  await post('/api/sessions/register', { sessionId: 'test-guard-dead-session', cwd: '/tmp' });
+  await post('/api/sessions/register', { sessionId: 'test-guard-dead-session', cwd: '/tmp' , providerId: TEST_PROVIDER});
   // Server auto-creates airprompt-<sessionId> when no tmuxSession given.
   // Kill it so the server-side guard passes.
   killTmux('airprompt-test-guard-dead-session');
@@ -736,7 +783,7 @@ test('deactivate hook exits 0 when tmux is not available (safe fallback)', { ski
     const path = require('path');
     // Per-session dir structure
     const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
-    const myDir = path.join(sessionsDir, aliveSession);
+    const myDir = path.join(sessionsDir, "claude-" + aliveSession);
     fs.mkdirSync(myDir, { recursive: true });
     fs.writeFileSync(path.join(myDir, 'session'), 'test-tmuxless-session\n');
     fs.writeFileSync(path.join(myDir, 'tmux'), aliveSession + '\n');
@@ -784,10 +831,11 @@ test('recoverSessionsFromDisk skipped when AIRPROMPT_SKIP_RECOVERY=1', () => {
 test('deactivate PID_FILE respects AIRPROMPT_PID_FILE env var', () => {
   const fs = require('fs');
   const path = require('path');
-  const deactivatePath = path.join(__dirname, '..', '..', 'src', 'hooks', 'airprompt-deactivate.js');
+  // Core deactivate logic lives in core/deactivate.js (provider-agnostic refactoring)
+  const deactivatePath = path.join(__dirname, '..', '..', 'src', 'hooks', 'core', 'deactivate.js');
   const source = fs.readFileSync(deactivatePath, 'utf8');
   assert.ok(source.includes('process.env.AIRPROMPT_PID_FILE'),
-    'deactivate.js must use AIRPROMPT_PID_FILE env var, not hardcoded /tmp/airprompt-server.pid');
+    'core/deactivate.js must use AIRPROMPT_PID_FILE env var, not hardcoded /tmp/airprompt-server.pid');
 });
 
 test('deactivate stopDaemon never targets production PID in test env', async () => {
@@ -898,7 +946,7 @@ test('POST /api/sessions/kill returns 404 for unknown', async () => {
 
 test('POST /api/sessions/kill handles already-dead tmux', async () => {
   // Register a session (server creates a tmux session for it)
-  await post('/api/sessions/register', { sessionId: 'test-kill-dead', cwd: '/tmp' });
+  await post('/api/sessions/register', { sessionId: 'test-kill-dead', cwd: '/tmp' , providerId: TEST_PROVIDER});
   assert.ok(sessions.has('test-kill-dead'), 'session should be registered');
   // Kill the tmux session directly so kill endpoint sees a dead session
   const entry = sessions.get('test-kill-dead');
@@ -917,7 +965,7 @@ test('POST /api/sessions/kill force-kills airprompt-* tmux session', { skip: !TM
   // Create a real airprompt tmux session
   spawnSync('tmux', ['new-session', '-d', '-s', 'airprompt-test-kill-live'], { timeout: 2000 });
   // Register via API
-  await post('/api/sessions/register', { sessionId: 'test-kill-live', cwd: '/tmp', tmuxSession: 'airprompt-test-kill-live' });
+  await post('/api/sessions/register', { sessionId: 'test-kill-live', cwd: '/tmp', tmuxSession: 'airprompt-test-kill-live' , providerId: TEST_PROVIDER});
   assert.ok(sessions.has('test-kill-live'), 'session should be registered');
   // Kill it — should force-kill the tmux and remove from sessions
   const res = await post('/api/sessions/kill', { sessionId: 'test-kill-live' });
@@ -929,13 +977,15 @@ test('POST /api/sessions/kill force-kills airprompt-* tmux session', { skip: !TM
   assert.notStrictEqual(status, 0, 'tmux session should be gone');
 });
 
-test('integration test sets CLAUDE_CONFIG_DIR for isolation', () => {
+test('integration test sets AIRPROMPT_STATE_DIR for isolation', () => {
   const fs = require('fs');
   const path = require('path');
   const integPath = path.join(__dirname, '..', 'integration', 'run.sh');
   const source = fs.readFileSync(integPath, 'utf8');
-  assert.ok(source.includes('CLAUDE_CONFIG_DIR="$TMPDIR"') || source.includes('CLAUDE_CONFIG_DIR="${TMPDIR}"'),
-    'integration test must set CLAUDE_CONFIG_DIR to temp dir for isolation');
+  assert.ok(source.includes('AIRPROMPT_STATE_DIR="$TMPDIR/state"') || source.includes('AIRPROMPT_STATE_DIR="${TMPDIR}/state"'),
+    'integration test must set AIRPROMPT_STATE_DIR to temp dir for isolation');
+  assert.ok(source.includes('AIRPROMPT_SESSIONS_DIR="$TMPDIR/sessions"') || source.includes('AIRPROMPT_SESSIONS_DIR="${TMPDIR}/sessions"'),
+    'integration test must set AIRPROMPT_SESSIONS_DIR to temp dir for isolation');
   assert.ok(source.includes('AIRPROMPT_SKIP_RECOVERY=1'),
     'integration test must set AIRPROMPT_SKIP_RECOVERY=1 to skip production session recovery');
 });
@@ -994,7 +1044,7 @@ test('deactivate hook kills mirror session when tmux is alive', { skip: !TMUX_AV
     const fs = require('fs');
     const path = require('path');
     const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
-    const myDir = path.join(sessionsDir, mirrorSession);
+    const myDir = path.join(sessionsDir, "claude-" + mirrorSession);
     fs.mkdirSync(myDir, { recursive: true });
     fs.writeFileSync(path.join(myDir, 'session'), 'test-mirror-kill\n');
     fs.writeFileSync(path.join(myDir, 'tmux'), mirrorSession + '\n');
@@ -1002,7 +1052,7 @@ test('deactivate hook kills mirror session when tmux is alive', { skip: !TMUX_AV
     fs.writeFileSync(path.join(myDir, 'mirror'), '');  // ← mirror marker
     fs.writeFileSync(path.join(myDir, 'url'), 'http://192.168.0.10:3210\n');
 
-    await post('/api/sessions/register', { sessionId: 'test-mirror-kill', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-mirror-kill', cwd: '/tmp', tmuxSession: mirrorSession , providerId: TEST_PROVIDER});
 
     const r = runDeactivate({ AIRPROMPT_DEACTIVATE_TEST_TMUX: mirrorSession });
     assert.strictEqual(r.status, 0, 'deactivate exit code — stderr: ' + r.stderr);
@@ -1027,7 +1077,7 @@ test('deactivate hook keeps alive real session (no mirror marker)', { skip: !TMU
     const fs = require('fs');
     const path = require('path');
     const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
-    const myDir = path.join(sessionsDir, realSession);
+    const myDir = path.join(sessionsDir, "claude-" + realSession);
     fs.mkdirSync(myDir, { recursive: true });
     fs.writeFileSync(path.join(myDir, 'session'), 'test-real-alive\n');
     fs.writeFileSync(path.join(myDir, 'tmux'), realSession + '\n');
@@ -1035,7 +1085,7 @@ test('deactivate hook keeps alive real session (no mirror marker)', { skip: !TMU
     // NOTE: NO mirror marker
     fs.writeFileSync(path.join(myDir, 'url'), 'http://192.168.0.10:3210\n');
 
-    await post('/api/sessions/register', { sessionId: 'test-real-alive', cwd: '/tmp' });
+    await post('/api/sessions/register', { sessionId: 'test-real-alive', cwd: '/tmp' , providerId: TEST_PROVIDER});
 
     const r = runDeactivate({ AIRPROMPT_DEACTIVATE_TEST_TMUX: realSession });
     assert.strictEqual(r.status, 0);
@@ -1056,7 +1106,7 @@ test('deactivate hook keeps alive real session (no mirror marker)', { skip: !TMU
 // ── lastActivity tracking ─────────────────────────────────────────────
 
 test('session registration sets lastActivity', async () => {
-  await post('/api/sessions/register', { sessionId: 'test-activity', cwd: '/tmp' });
+  await post('/api/sessions/register', { sessionId: 'test-activity', cwd: '/tmp' , providerId: TEST_PROVIDER});
   assert.strictEqual(sessions.has('test-activity'), true);
   assert.ok(typeof sessions.get('test-activity').lastActivity === 'number',
     'lastActivity must be a timestamp');

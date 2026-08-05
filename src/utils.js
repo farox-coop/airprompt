@@ -1,5 +1,7 @@
 // src/utils.js — Shared Node-side utilities.
 // Used by server.js. Not for browser (see public/utils.js).
+//
+// Provider-agnostic. Sessions live in ~/.airprompt/sessions/.
 'use strict';
 
 const fs = require('fs');
@@ -7,8 +9,19 @@ const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
 
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-const SESSIONS_DIR = path.join(CONFIG_DIR, '.airprompt', 'sessions');
+const { sessionsRootDir } = require('./providers/provider');
+
+// ── Sessions dir ──────────────────────────────────────────────────────────
+
+/**
+ * Root sessions directory for per-session marker files.
+ * @returns {string} ~/.airprompt/sessions/
+ */
+function getSessionsDir() {
+  return sessionsRootDir();
+}
+
+// ── Tmux helpers ──────────────────────────────────────────────────────────
 
 function tmuxExists(sessionName) {
   try {
@@ -17,17 +30,25 @@ function tmuxExists(sessionName) {
   } catch (_) { return false; }
 }
 
-// sessionToJSON — canonical serialisation. Every session served by the daemon
-// (REST + WebSocket) goes through this. Shape is the single source of truth.
-function sessionToJSON(entry) {
+// ── sessionToJSON — canonical serialisation ───────────────────────────────
+//
+// Every session served by the daemon (REST + WebSocket) goes through this.
+// Shape is the single source of truth.
+//
+// @param {object} entry — session entry with { sessionId, cwd, tmuxSession, ... }
+// @param {string} [sessionsDir] — override sessions directory (for testing)
+function sessionToJSON(entry, sessionsDirOverride) {
   const safeName = String(entry.tmuxSession || '').replace(/[^a-zA-Z0-9_.-]/g, '');
-  const markerDir = path.join(SESSIONS_DIR, safeName);
+  const providerId = entry.providerId || 'unknown';
+  const dirName = `${providerId}-${safeName}`;
+  const markerDir = path.join(sessionsDirOverride || getSessionsDir(), dirName);
 
   const json = {
     id:              entry.sessionId,
     cwd:             entry.cwd,
     name:            entry.name || null,
     tmuxSession:     entry.tmuxSession,
+    providerId:      entry.providerId || null,
     createdAt:       entry.createdAt,
     isMirror:        false,
     isActive:        false,
@@ -58,4 +79,10 @@ function sessionToJSON(entry) {
   return json;
 }
 
-module.exports = { tmuxExists, sessionToJSON };
+module.exports = {
+  tmuxExists,
+  sessionToJSON,
+  getSessionsDir,
+  sessionsRootDir,
+  sessionDir: require('./providers/provider').sessionDir,
+};
