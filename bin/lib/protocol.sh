@@ -44,3 +44,72 @@ daemon_env() {
   [ -n "${PORT:-}" ]                   && env_str="$env_str PORT=$PORT"
   printf '%s' "$env_str"
 }
+
+# ── Ensure ~/bin/ binaries exist ────────────────────────────────────────
+# Called by on.sh and autostart.sh after clean to restore symlinks + wrappers.
+# Idempotent — only creates if missing.
+_ensure_bin_symlinks() {
+  local home_bin="${HOME}/bin"
+  local repo_bin
+  repo_bin="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." 2>/dev/null && pwd)" || repo_bin="${AIRPROMPT_INSTALL_DIR:-$HOME/.airprompt}"
+  local bin_dir="${repo_bin}/bin"
+  local launch="${bin_dir}/airprompt-launch"
+  local dispatcher="${bin_dir}/airprompt"
+
+  mkdir -p "$home_bin"
+
+  # airprompt dispatcher symlink
+  if [ ! -e "$home_bin/airprompt" ]; then
+    ln -s "$dispatcher" "$home_bin/airprompt" 2>/dev/null || true
+    echo "  restored $home_bin/airprompt → $dispatcher"
+  fi
+
+  # airprompt-launch symlink
+  if [ ! -e "$home_bin/airprompt-launch" ]; then
+    ln -s "$launch" "$home_bin/airprompt-launch" 2>/dev/null || true
+    echo "  restored $home_bin/airprompt-launch → $launch"
+  fi
+
+  # Provider wrappers
+  for prov in claude codex cursor windsurf; do
+    local wrapper="$home_bin/airprompt-$prov"
+    if [ ! -e "$wrapper" ]; then
+      cat > "$wrapper" << PROVIDEREOF
+#!/bin/bash
+exec airprompt-launch --provider $prov "\$@"
+PROVIDEREOF
+      chmod +x "$wrapper"
+      echo "  restored $wrapper"
+    fi
+  done
+}
+
+# ── Safe rm -rf ─────────────────────────────────────────────────────────
+# Canonicalize path then verify it lives under $HOME/.airprompt/ before
+# allowing rm -rf. Prevents disaster on misconfigured env vars and blocks
+# the trivial `*airprompt*` substring bypass via `..` traversal.
+#
+# Usage: _safe_rm_rf "/path/to/dir" && echo "ok"
+# Returns 0 (safe, caller should rm -rf) or 1 (blocked, already printed).
+_safe_rm_rf() {
+  local path="$1"
+  local canonical
+
+  # Resolve .. first, then canonicalize. `readlink -f` works on nonexistent
+  # paths on GNU; on macOS readlink -f fails on nonexistent, so resolve
+  # parent first then append basename.
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    return 1  # nothing to delete — safe to skip
+  fi
+
+  canonical="$(cd "$(dirname "$path")" 2>/dev/null && pwd -P 2>/dev/null)" || {
+    echo "  SAFETY: cannot resolve parent of ${path} — refusing rm -rf" >&2
+    return 1
+  }
+  canonical="${canonical%/}/$(basename "$path")"
+
+  case "$canonical" in
+    "$HOME/.airprompt"|"$HOME/.airprompt/"*) return 0 ;;
+    *) echo "  SAFETY: refusing to rm -rf ${path} (canonical: ${canonical})" >&2; return 1 ;;
+  esac
+}

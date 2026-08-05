@@ -168,16 +168,6 @@ _name_update() {
 # Daemon recovers state from on-disk markers on startup, so a simple
 # file check is sufficient — no need to double-check with daemon API.
 if [ -f "$ACTIVE_FILE" ]; then
-  # Retroactive fix: add missing mirror marker for AirPrompt-created sessions.
-  # Covers both: sessions created by on.sh outside tmux, and mirror sessions
-  # created by the activate hook. Excludes daemon and web proxy sessions.
-  if [ ! -f "${MY_DIR}/mirror" ]; then
-    case "$TMUX_SESSION" in
-      airprompt-daemon|airprompt-web-*) ;;
-      airprompt-*) touch "${MY_DIR}/mirror" ;;
-      *) [ -z "${TMUX:-}" ] && touch "${MY_DIR}/mirror" ;;  # on.sh outside tmux
-    esac
-  fi
   if [ -n "$SESSION_NAME" ]; then
     MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
     if [ -n "$MY_SID" ]; then
@@ -236,7 +226,7 @@ else
 fi
 
 # ── Cleanup: sweep dead session dirs ─────────────────────────────────
-if [ -d "$SESSIONS_DIR" ]; then
+if _safe_rm_rf "$SESSIONS_DIR"; then
   for d in "$SESSIONS_DIR"/*/; do
     [ -d "$d" ] || continue
     DN=$(basename "$d")

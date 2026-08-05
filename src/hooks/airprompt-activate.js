@@ -27,7 +27,11 @@ async function main() {
   const result = await activateSession({ ...ctx, provider: ClaudeProvider });
 
   process.stdout.write(ClaudeProvider.formatHookOutput(result) + '\n');
-  process.exit(0);
+  // Let event loop drain: autoApplyName PUT and sweepDeadSessions POST
+  // are fire-and-forget async — process.exit would abort them mid-flight.
+  setImmediate(() => process.exit(0));
 }
 
-main().catch(() => process.exit(0));
+main().catch(() => {
+  setImmediate(() => process.exit(0));
+});

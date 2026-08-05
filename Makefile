@@ -55,6 +55,8 @@ lint:
 	@node --check bin/lib/resolve-config-dir.js
 	@node --check bin/lib/project-names.js
 	@node --check bin/lib/autostart.js
+	@node --check test/unit/provider-claude.test.js
+	@node --check test/unit/provider-interface.test.js
 
 test-unit:
 	@node --test test/unit/*.test.js

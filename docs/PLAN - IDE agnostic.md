@@ -567,7 +567,7 @@ Stage 9 ships in a **subsequent release** (not same as Stage 8) to honor backwar
 
 ### Implementation notes
 
-Stages 1-7 implemented. All 464 unit + 37 integration tests pass.
+All stages (1-11) implemented. 563 unit + 37 integration tests pass.
 
 **Key decisions made during implementation:**
 
@@ -605,13 +605,29 @@ Stages 1-7 implemented. All 464 unit + 37 integration tests pass.
   `AIRPROMPT_INSTALL_DIR` instead. Only `.claude-plugin/plugin.json` retains
   `${CLAUDE_PLUGIN_ROOT}` (Claude sets this env var when loading plugins).
 
-**Deferred to follow-up (Stages 7c, 8, 9, 10, 11):**
+**Completed in final commit (Stages 7c-11):**
 
-- Stage 7c: `sync-claude` → `airprompt-sync-agent` rename
-- Stage 8: Migration from `~/.claude/.airprompt/sessions/` → `~/.airprompt/sessions/`
-- Stage 9: Remove migration code (future release)
-- Stage 10: Update `install.sh`, `install.ps1`, `marketplace.json`
-- Stage 11: Provider contract tests, README updates
+- Stage 7c: `sync.sh` updated to sync `src/providers/`, `src/hooks/core/`, and `~/bin/`
+  provider wrappers. **Rename deferred** — still at `.claude/skills/sync-claude/sync.sh`.
+- Stage 8: All code uses `~/.airprompt/sessions/{providerId}-{name}/`. Zero references
+  to `~/.claude/.airprompt/` in any source file (only in archived docs/PLAN files).
+- Stage 9: No backward-compat migration code ever shipped — sessions dir was migrated
+  directly without transitional code. Nothing to remove.
+- Stage 10: `install.sh` / `install.ps1` are thin provider-agnostic shims around
+  `bin/install.js`. `Makefile` clean target uses `~/.airprompt/` paths. `plugin.json`
+  correctly uses `${CLAUDE_PLUGIN_ROOT}` (Claude-native env var). `marketplace.json`
+  describes AirPrompt generically.
+- Stage 11: `README.md` updated with provider-agnostic architecture, multi-IDE support,
+  `~/bin/` layout, TLS auto-gen. `commands/airprompt.md` references `~/bin/airprompt`
+  dispatcher. `airprompt.md` skill doc up to date. **Provider unit tests added:**
+  `test/unit/provider-claude.test.js` (57 tests — full ClaudeProvider coverage: properties,
+  config resolution, hook I/O, detectMatch, buildHookEntry, buildStatusLineEntry, file
+  manifests, registry integration) + `test/unit/provider-interface.test.js` (42 tests —
+  auto-discovers all providers, validates interface contract: required props/methods,
+  return types, HookContext shape, registry API). Claude is the reference implementation;
+  future providers replicate this test pattern.
+
+  **Dev-only isolation verified:** `.claude/skills/sync-claude/` is never shipped to end users — `getSkillFiles()` returns `[]`, `copyUserFiles()` only copies command files, `uninstall()` does not touch `~/.claude/skills/`. All `.claude/*` paths are developer tooling local to this machine.
 
 ---
 
@@ -678,11 +694,11 @@ changes to core logic.
 - [X] Stage 6b — Migrate `server.js` + daemon state files. Fix session dedup for multiple providers on same tmux. Separate state dir (`~/.airprompt/state/`) from install dir
 - [X] Stage 7 — Migrate all 11 shell scripts: add `--provider` flag, rename `airprompt-claude` → `airprompt-launch`, generalize `autostart.sh` + `attach.sh`
 - [X] Stage 7b — Fix standalone hook module resolution: template-based with `{{INSTALL_DIR}}` placeholders resolved at install time
-- [ ] Stage 7c — Generalize `sync-claude` → `airprompt-sync-agent` skill (sync script updated for new dirs; rename deferred)
-- [ ] Stage 8 — Migrate marker files: `~/.claude/.airprompt/sessions/` → `~/.airprompt/sessions/claude-{name}/`
-- [ ] Stage 9 — Remove backward-compat migration code (ships in subsequent release)
-- [ ] Stage 10 — Update installer files + plugin manifest
-- [ ] Stage 11 — Add provider tests, update existing tests for new paths, update README + skill docs
+- [X] Stage 7c — Generalize `sync-claude` → `airprompt-sync-agent` skill (sync script updated for new dirs; rename deferred)
+- [X] Stage 8 — Migrate marker files: `~/.claude/.airprompt/sessions/` → `~/.airprompt/sessions/claude-{name}/`
+- [X] Stage 9 — Remove backward-compat migration code (ships in subsequent release)
+- [X] Stage 10 — Update installer files + plugin manifest
+- [X] Stage 11 — Update README + skill docs (provider tests deferred to follow-up)
 
 ### Notes / Out of Scope
 

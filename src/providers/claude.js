@@ -145,22 +145,20 @@ async function installHooks(ctx, targetDir) {
   return 'ok';
 }
 
-// ── User skill + command files (non-plugin fallback) ───────────────────────
+// ── User command files (non-plugin fallback) ─────────────────────────────────
 
 function copyUserFiles(ctx, targetDir) {
   const { note, opts } = ctx;
   const configDir = ctx.configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const commandsDir = path.join(configDir, 'commands');
-  const skillsDir = path.join(configDir, 'skills');
 
   if (opts.dryRun) {
     note(`  would install ${path.join(commandsDir, 'airprompt.md')}`);
-    note(`  would install ${path.join(skillsDir, 'airprompt.md')}`);
+    note(`  would install ${path.join(commandsDir, 'airprompt.toml')}`);
     return;
   }
 
   fs.mkdirSync(commandsDir, { recursive: true });
-  fs.mkdirSync(skillsDir, { recursive: true });
 
   const cmdSrcMd = path.join(targetDir, 'commands', 'airprompt.md');
   const cmdSrcToml = path.join(targetDir, 'commands', 'airprompt.toml');
@@ -171,15 +169,6 @@ function copyUserFiles(ctx, targetDir) {
   if (fs.existsSync(cmdSrcToml)) {
     fs.copyFileSync(cmdSrcToml, path.join(commandsDir, 'airprompt.toml'));
     process.stdout.write(`  installed: ${path.join(commandsDir, 'airprompt.toml')}\n`);
-  }
-
-  const skillSrc = path.join(targetDir, '.claude', 'skills', 'sync-claude');
-  const skillDest = path.join(skillsDir, 'sync-claude');
-  if (fs.existsSync(skillSrc)) {
-    fs.cpSync(skillSrc, skillDest, { recursive: true });
-    process.stdout.write(`  installed: ${skillDest}\n`);
-  } else {
-    process.stdout.write(`  (skip skill — source not found: ${skillSrc})\n`);
   }
 }
 
@@ -509,11 +498,11 @@ const ClaudeProvider = {
       else results.failed.push(['claude-hooks', r]);
     }
 
-    // 7. Copy skill + command files for non-plugin installs
+    // 7. Copy command files for non-plugin installs
     if (!pluginInstallSucceeded) {
-      say('  → installing skill + command files');
+      say('  → installing command files');
       copyUserFiles(ctx, targetDir);
-      results.installed.push('claude-skills-commands');
+      results.installed.push('claude-commands');
     }
 
     process.stdout.write('\n');
@@ -594,7 +583,7 @@ const ClaudeProvider = {
       }
     }
 
-    // 5. Remove skill + command files (mirrors copyUserFiles at L150-184)
+    // 5. Remove command files (mirrors copyUserFiles)
     {
       const commandsDir = path.join(configDir, 'commands');
       for (const f of ['airprompt.md', 'airprompt.toml']) {
@@ -603,12 +592,6 @@ const ClaudeProvider = {
           if (!opts.dryRun) { try { fs.unlinkSync(dest); } catch (_) {} }
           note(`  removed ${dest}`);
         }
-      }
-
-      const syncSkillDir = path.join(configDir, 'skills', 'sync-claude');
-      if (fs.existsSync(syncSkillDir)) {
-        if (!opts.dryRun) { try { fs.rmSync(syncSkillDir, { recursive: true, force: true }); } catch (_) {} }
-        note(`  removed ${syncSkillDir}`);
       }
     }
 
@@ -640,13 +623,18 @@ const ClaudeProvider = {
       note(`  removed ${sessionsDir}`);
     }
 
-    // 9. Remove install directory (~/.airprompt/)
+    // 9. Remove install dir contents (~/.airprompt/) — keep state/ (user data)
     const targetDir = opts.targetDir || path.join(os.homedir(), '.airprompt');
     if (fs.existsSync(targetDir)) {
       if (!opts.dryRun) {
-        try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch (_) {}
+        try {
+          for (const entry of fs.readdirSync(targetDir)) {
+            if (entry === 'state') continue;  // preserve user data
+            fs.rmSync(path.join(targetDir, entry), { recursive: true, force: true });
+          }
+        } catch (_) {}
       }
-      note(`  removed ${targetDir}`);
+      note(`  removed ${targetDir} (state/ kept)`);
     }
   },
 
@@ -666,11 +654,9 @@ const ClaudeProvider = {
 
   /** @returns {{src: string, dest: string}[]} */
   getSkillFiles() {
-    const installDir = resolveInstallDir();
-    const skillsDir = this.skillsDir();
-    return [
-      { src: path.join(installDir, '.claude', 'skills', 'sync-claude'), dest: path.join(skillsDir, 'sync-claude') },
-    ];
+    // Claude ships skill functionality via plugin manifest + commands.
+    // No standalone skill files to copy to ~/.claude/skills/.
+    return [];
   },
 
   /** @returns {{src: string, dest: string}[]} */

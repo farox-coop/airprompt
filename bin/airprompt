@@ -6,6 +6,15 @@
 # /airprompt name something   → bash airprompt-name.sh "something"
 set -euo pipefail
 
+# Resolve real script dir (follow symlink from ~/bin/ → repo/bin/)
+_self="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+SELF_DIR="$(dirname "$_self")"
+
+# Restore ~/bin/ symlinks + wrappers if clean nuked them (before dispatching)
+# shellcheck source=/dev/null
+source "${SELF_DIR}/lib/protocol.sh"
+_ensure_bin_symlinks
+
 CMD="${1:-}"
 shift || true
 # Remaining positional args in "$@" after shift

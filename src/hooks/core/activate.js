@@ -43,6 +43,11 @@ function daemonRunning(pidFile) {
 }
 
 function startDaemon(installDir, port, pidFile) {
+  // Clean stale PID file before spawning — server.js writePid() uses 'wx'
+  // (exclusive write) which fails if the file exists, even if the PID is dead.
+  if (fs.existsSync(pidFile) && !daemonRunning(pidFile)) {
+    try { fs.unlinkSync(pidFile); } catch (_) {}
+  }
   const serverJs = path.join(installDir, 'server.js');
   if (!fs.existsSync(serverJs)) {
     process.stderr.write(`airprompt: server.js not found at ${serverJs}\n`);
@@ -99,6 +104,8 @@ function getLanIp() {
 
 function sweepDeadSessions(sessionsDir, port, tls) {
   if (!fs.existsSync(sessionsDir)) return;
+  // Safety: only sweep dirs under ~/.airprompt/sessions/
+  if (!sessionsDir.includes('.airprompt')) return;
   let entries;
   try { entries = fs.readdirSync(sessionsDir); } catch (_) { return; }
   for (const entry of entries) {
@@ -122,7 +129,7 @@ function sweepDeadSessions(sessionsDir, port, tls) {
 
 // ── Project name auto-apply ───────────────────────────────────────────────
 
-function autoApplyName(sessionId, cwd, myDir, port, tls) {
+async function autoApplyName(sessionId, cwd, myDir, port, tls) {
   const nameFilePath = path.join(myDir, 'name');
   let resolvedName = null;
 
@@ -151,12 +158,13 @@ function autoApplyName(sessionId, cwd, myDir, port, tls) {
   // 3. Write name to disk synchronously
   try { fs.writeFileSync(nameFilePath, resolvedName + '\n'); } catch (_) {}
 
-  // 4. Sync to daemon async
-  put('/api/sessions/name', { sessionId, name: resolvedName }, port, tls).then((resp) => {
+  // 4. Sync to daemon (await so name is set before hook returns)
+  try {
+    const resp = await put('/api/sessions/name', { sessionId, name: resolvedName }, port, tls);
     if (resp && resp.ok) {
       process.stdout.write(`airprompt: auto-named '${resolvedName}'\n`);
     }
-  }).catch(() => {});
+  } catch (_) {}
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────
@@ -211,17 +219,10 @@ async function activateSession(ctx) {
     if (fs.existsSync(activeFile)) {
       process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
 
-      // Add missing mirror marker for AirPrompt-created sessions
-      const mirrorFile = path.join(myDir, 'mirror');
-      if (!fs.existsSync(mirrorFile) && currentTmux.startsWith('airprompt-') &&
-          currentTmux !== 'airprompt-daemon' && !currentTmux.startsWith('airprompt-web-')) {
-        try { fs.writeFileSync(mirrorFile, ''); } catch (_) {}
-      }
-
       // Still auto-apply project name
       let sid = '';
       try { sid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
-      if (sid) autoApplyName(sid, ctx.cwd, myDir, port, tls);
+      if (sid) await autoApplyName(sid, ctx.cwd, myDir, port, tls);
 
       sweepDeadSessions(sessionsDir, port, tls);
 
@@ -278,7 +279,7 @@ async function activateSession(ctx) {
       process.stdout.write(`airprompt: registered ${sessionId}\n`);
       process.stdout.write(`airprompt: mobile URL ${url}\n`);
 
-      autoApplyName(sessionId, cwd, myDir, port, tls);
+      await autoApplyName(sessionId, cwd, myDir, port, tls);
       sweepDeadSessions(sessionsDir, port, tls);
 
       return {

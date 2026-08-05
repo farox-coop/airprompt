@@ -79,11 +79,11 @@ fi
 
 # ── Remove per-session directory ─────────────────────────────────────
 if [ -n "$MY_DIR" ] && [ -d "$MY_DIR" ]; then
-  rm -rf "$MY_DIR"
+  _safe_rm_rf "$MY_DIR" && { rm -rf "$MY_DIR"; }
 fi
 
 # ── Sweep dead session dirs ──────────────────────────────────────────
-if [ -d "$SESSIONS_DIR" ]; then
+if _safe_rm_rf "$SESSIONS_DIR"; then
   for d in "$SESSIONS_DIR"/*/; do
     [ -d "$d" ] || continue
     DN=$(basename "$d")

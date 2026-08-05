@@ -29,7 +29,9 @@ async function main() {
   if (result.sessionId) {
     process.stdout.write(ClaudeProvider.formatHookOutput(result) + '\n');
   }
-  process.exit(0);
+  setImmediate(() => process.exit(0));
 }
 
-main().catch(() => process.exit(0));
+main().catch(() => {
+  setImmediate(() => process.exit(0));
+});

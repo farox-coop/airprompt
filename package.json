@@ -7,6 +7,7 @@
     "bin/",
     "src/",
     "public/",
+    "commands/",
     "server.js",
     "install.sh",
     "install.ps1",
@@ -14,11 +15,11 @@
   ],
   "scripts": {
     "start": "nohup node server.js > /tmp/airprompt.log 2>&1 & echo \"AirPrompt daemon started\"",
-    "stop": "kill $$(cat ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid} 2>/dev/null) 2>/dev/null; rm -f ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}",
-    "register": "bash bin/airprompt-on.sh",
-    "unregister": "bash bin/airprompt-off.sh",
-    "test": "node --test test/unit/*.test.js && bash test/integration/run.sh",
-    "lint": "node --check server.js && node --check public/client.js && node --check bin/install.js"
+    "stop": "kill \"$(cat ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid} 2>/dev/null)\" 2>/dev/null; rm -f ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}",
+    "register": "bash bin/airprompt on",
+    "unregister": "bash bin/airprompt off",
+    "test": "node --test test/unit/*.test.js && for f in test/unit/*.test.sh; do bash \"$f\" || exit 1; done && bash test/integration/run.sh",
+    "lint": "for f in server.js public/client.js bin/install.js bin/lib/*.js src/providers/*.js src/hooks/*.js src/hooks/core/*.js src/*.js test/unit/*.test.js; do node --check \"$f\" || exit 1; done"
   },
   "author": "Farox",
   "license": "MIT",

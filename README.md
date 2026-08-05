@@ -30,7 +30,7 @@ Every tmux feature AirPrompt depends on, where it's used, and why:
 |---|---|---|
 | `new-session -d` | `on.sh`, `activate.js`, `server.js` | Create detached sessions (mirror + daemon + web proxy) |
 | `attach-session` | `server.js` | Web client connects to tmux session via node-pty |
-| `has-session` | `src/utils.js`, `clean.sh`, `off.sh`, `status.sh` | Check if session exists |
+| `has-session` | `on.sh`, `restart.sh`, `activate.js`, `airprompt-launch`, `src/utils.js` | Check if session exists |
 | `kill-session` | `server.js`, `clean.sh`, `off.sh` | Destroy sessions (mirror, daemon, cleanup) |
 | `send-keys` | `server.js` | Inject `/airprompt off` into session without attaching |
 | `list-clients` | `server.js`, `src/utils.js` | Detect orphaned mirror sessions (no attached clients) |
@@ -66,7 +66,7 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | `off` | Unregister current session + hide statusline badge |
 | `status` | Show daemon status and all active sessions |
 | `name [<text>]` | Set display name for current session (empty or "" clears it) |
-| `clean` | Full teardown — kill daemon, remove all tmux sessions and markers |
+| `clean` | Full teardown — kill daemon, remove all tmux sessions, markers, ~/bin/ symlinks, wrappers, and ~/.airprompt/ install dir |
 | `restart` | Restart daemon — sessions survive via disk recovery |
 | `autostart on|off` | Auto-start AirPrompt on IDE session start |
 | `help` | Print usage |
