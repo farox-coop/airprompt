@@ -2,7 +2,36 @@
 
 **Status:** planned, not started
 **Created:** 2026-07-31
+**Updated:** 2026-08-05 — added Phase 0 (auto-inject)
 **Goal:** Remove tmux dependency entirely. Replace with vendored holdpty code running on node-pty. Gain native Windows support.
+
+## Prerequisite: Phase 0 — Fix auto-inject (launched BEFORE holdpty work)
+
+**See full research:** [`REPORT - auto-inject.md`](./REPORT%20-%20auto-inject.md)
+
+### Problem
+
+When user runs `claude` directly (not through `airprompt-claude`), web UI shows raw bash, not Claude. Root cause: SessionStart hook fires AFTER TUI renders — can't retroactively capture Claude into tmux. Also Claude Code has no pre-launch hook.
+
+This affects holdpty too: if user launches `claude` outside AirPrompt's PTY, we have the same architectural problem — AirPrompt didn't own the PTY at spawn time.
+
+### Solution: PATH wrapper (`~/bin/claude`)
+
+Create `~/bin/claude` → resolves real binary → `airprompt-launch --provider claude --binary <REAL>`. Same for `codex`, `cursor`, `windsurf`. This ensures AirPrompt ALWAYS owns the process from launch — whether the backend is tmux (today) or holdpty (future).
+
+**Key constraint:** wrapper must pass `--binary <real-path>` to break recursion (`airprompt-launch` resolves binary from PATH → would find wrapper again → infinite loop).
+
+### Why Phase 0 matters for holdpty
+
+| Without Phase 0 | With Phase 0 |
+|---|---|
+| holdpty replaces tmux → same auto-inject bug persists | holdpty owns PTY from spawn → guaranteed to work |
+| User runs `claude` directly → holdpty can't see it | User runs `claude` → wrapper captures it → holdpty gets it |
+| Fixing auto-inject in holdpty world requires same PATH solution anyway | PATH wrapper ships first, de-risks migration |
+
+### Decision
+
+Auto-inject (Phase 0) ships FIRST as prerequisite. Then holdpty vendoring proceeds. The wrapper is transport-agnostic — works with tmux today, works with holdpty tomorrow.
 
 ## Why
 
@@ -34,12 +63,20 @@ holdpty is **archived** (read-only since May 2026). No upstream to contribute to
 | 6 | `list-clients` (attached client count) | `holder.ts` tracks `ClientConnection[]` | Exists |
 | 7 | `display-message` (session metadata) | Own registry (`session.ts` metadata) | Exists |
 | 8 | `set-option` (status bar, focus-events) | N/A — no status bar in raw PTY | Not needed |
-| 9 | Clipboard buffers | N/A — use OS clipboard directly | Not needed |
+| 9 | Clipboard buffers (`load-buffer` / `save-buffer`) | N/A — use OS clipboard directly | Not needed |
 | 10 | `list-panes` / `respawn-pane` (zombie handling) | N/A — no panes, just one PTY per session | Not needed |
 | 11 | Session grouping (parent/child) | N/A — each PTY is independent | Not needed |
 | 12 | Ring buffer / scrollback replay | `ring-buffer.ts` — 1MB ring buffer | Exists |
+| 13 | `capture-pane` (exit dump: last N lines on process exit) | `ring-buffer.ts` — read last N lines from buffer on PTY exit | Exists |
 
-**Verdict:** 8/12 features already exist in holdpty. 4 are tmux-specific and not needed in a node-pty world.
+**Verdict:** 9/13 features already exist in holdpty. 4 are tmux-specific and not needed in a node-pty world.
+
+### Files that become obsolete after Phase 5
+
+| File | Reason |
+|---|---|
+| `bin/airprompt-attach.sh` | reptyr-based manual attach — no tmux means no reptyr needed. PTY is owned from process start. |
+| `airprompt-daemon` tmux session | Daemon runs directly (systemd/nohup/child_process), not inside tmux. |
 
 ## holdpty source files (14 files, ~1,800 loc TypeScript)
 
@@ -78,16 +115,27 @@ MAX_PAYLOAD = 10 MB
 
 **Connection modes:** `attach` (exclusive writer), `view` (read-only), `logs` (disconnect after replay), `wait` (wait for exit, no output), `send` (write-only, non-exclusive)
 
-## Integration plan — 5 phases
+## Integration plan — 5 phases + Phase 0
 
-### Phase 1: Vendor the code (0.5 day)
+### Phase 0: Auto-inject PATH wrappers (prerequisite, ships first)
+
+**See:** [`REPORT - auto-inject.md`](./REPORT%20-%20auto-inject.md)
+
+- Create `~/bin/claude`, `~/bin/codex`, `~/bin/cursor`, `~/bin/windsurf` wrappers (minimal guard-block injection, never overwrite)
+- Fix `airprompt-launch` binary resolution to skip `~/bin` (avoid recursion)
+- Add `airprompt doctor` command for diagnostics
+- Handle pre-existing `~/bin/claude`: inject guard block at top, fall through to user code on failure
+- PATH injection into shell profiles (`~/.bashrc`, `~/.zshrc`)
+- Guarantee: `off`/`uninstall`/`clean` strips guard and restores original file bit-for-bit
+
+### Phase 1: Vendor the code
 
 - Copy `holder.ts`, `client.ts`, `protocol.ts`, `session.ts`, `ring-buffer.ts`, `platform.ts`, `line-filter.ts` into `src/holdpty/`
 - Rename classes: `Holder` → `AirPromptHolder`, `SessionManager` → keep separate (we have our own)
 - Port tests to use our test infrastructure
 - Remove `cli.ts` (AirPrompt has its own CLI via `bin/airprompt`)
 
-### Phase 2: Replace Unix sockets with WebSocket (1 day)
+### Phase 2: Replace Unix sockets with WebSocket
 
 This is the biggest change. holdpty uses Unix domain sockets (`holder.ts` creates socket, `client.ts` connects). AirPrompt needs WebSocket transport.
 
@@ -103,7 +151,7 @@ This is the biggest change. holdpty uses Unix domain sockets (`holder.ts` create
 Browser WS ───> daemon (server.js) ──IPC──> holder process (session)
 ```
 
-### Phase 3: Relax exclusive writer lock (0.5 day)
+### Phase 3: Relax exclusive writer lock
 
 holdpty's `attach` mode is exclusive (one writer). AirPrompt needs multiple web clients writing to same PTY.
 
@@ -112,7 +160,7 @@ holdpty's `attach` mode is exclusive (one writer). AirPrompt needs multiple web 
 - Allow multiple `DATA_IN` senders regardless of mode
 - `send()` already supports this — just make `attach()` not claim exclusivity
 
-### Phase 4: Integrate with AirPrompt session registry (1 day)
+### Phase 4: Integrate with AirPrompt session registry
 
 AirPrompt has its own session tracking: daemon `Map` + disk markers (`~/.claude/.airprompt/sessions/`).
 
@@ -132,15 +180,17 @@ airprompt off → POST /api/sessions/unregister → kill holder → remove marke
 client connect → WS → daemon → find session → relay to holder
 ```
 
-### Phase 5: Remove tmux from codebase (0.5 day)
+### Phase 5: Remove tmux from codebase
 
 Once all sessions run through holder processes:
 
 - Remove `spawnSync('tmux', ...)` calls from all files
 - Remove `airprompt-daemon` tmux session — daemon runs directly (systemd or nohup)
-- Remove `airprompt-claude` tmux wrapper → Claude runs in holder process
+- Remove `airprompt-launch` tmux wrapper — Claude (via Phase 0 `~/bin/claude` wrapper) now runs in holder process instead
 - Remove tmux from README requirements
 - Update install script: tmux → optional, not required
+- Phase 0 wrappers continue working — `~/bin/claude` delegates to `airprompt-launch` which now uses holdpty instead of tmux. Transparent to user.
+- **Cleanup note:** `bin/airprompt-clean.sh` must handle both `airprompt-{provider}` wrappers AND base-name `~/bin/{claude,codex,cursor,windsurf}` guard-strip restoration (Phase 0 injection).
 
 ## Migration strategy
 
@@ -162,17 +212,6 @@ Once `pty` backend is stable for a release, flip default. One release later, del
 | Cross-platform Windows PTY quirks | node-pty has ConPTY support. Test on Windows before flipping default. |
 | Protocol overhead vs raw tmux PTY | Binary protocol is 5-byte header + payload. Negligible vs tmux overhead. |
 | Multiple writers corrupting PTY state | tmux handles this natively. Without tmux, PTY serializes writes via OS tty layer. Acceptable for our use case (one human typing at a time). |
-
-## Estimated effort
-
-| Phase | Description | Duration |
-|-------|-------------|----------|
-| 1 | Vendor source code | 0.5 day |
-| 2 | WebSocket transport | 1 day |
-| 3 | Multi-writer support | 0.5 day |
-| 4 | Session registry integration | 1 day |
-| 5 | Remove tmux | 0.5 day |
-| **Total** | | **3.5 days** |
 
 ## References
 
