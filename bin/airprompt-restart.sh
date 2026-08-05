@@ -9,7 +9,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "Usage: bin/airprompt restart"
   echo ""
   echo "  Restart the AirPrompt daemon. Active sessions survive — they are"
-  echo "  recovered from ~/.claude/.airprompt/sessions/ on startup."
+  echo "  recovered from ~/.airprompt/sessions/{provider}-*/ on startup."
   echo ""
   echo "This is an internal script. Use 'bin/airprompt restart' directly."
   exit 0
@@ -18,13 +18,27 @@ fi
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-DEBUG="${AIRPROMPT_DEBUG:-1}"
+STATE_DIR="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
+DEBUG="${AIRPROMPT_DEBUG:-0}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
 source "$(dirname "$0")/lib/protocol.sh"
 detect_protocol
 DAEMON_PORT="$AP_PORT"
+
+# ── Auto-generate TLS certs if missing ─────────────────────────────
+CERT_DIR="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
+CERT_FILE="${CERT_DIR}/airprompt-cert.pem"
+KEY_FILE="${CERT_DIR}/airprompt-key.pem"
+if [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && { [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; }; then
+  GEN_CERT_SCRIPT="$(dirname "$0")/generate-cert.sh"
+  if [ -x "$GEN_CERT_SCRIPT" ]; then
+    bash "$GEN_CERT_SCRIPT" || true  # non-fatal: HTTP fallback if openssl missing
+    # Re-detect protocol after cert generation
+    detect_protocol
+    DAEMON_PORT="$AP_PORT"
+  fi
+fi
 
 echo "AirPrompt: restarting daemon..."
 
@@ -49,10 +63,12 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 
+DAEMON_ENV="$(daemon_env)"
+
 # ── 2. Restart daemon inside tmux ─────────────────────────────────────
 cd "$DAEMON_DIR"
 if tmux has-session -t airprompt-daemon 2>/dev/null; then
-  tmux respawn-pane -k -t airprompt-daemon "AIRPROMPT_DEBUG=$DEBUG node server.js 2>&1 | tee /tmp/airprompt.log" 2>/dev/null || {
+  tmux respawn-pane -k -t airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log" 2>/dev/null || {
     # respawn failed — kill zombie daemon session and create fresh one
     tmux kill-session -t airprompt-daemon 2>/dev/null || true
     rm -f "$PID_FILE"
@@ -61,7 +77,7 @@ fi
 
 # Fallback: create daemon session if it doesn't exist (e.g. killed above)
 if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
-  tmux new-session -d -s airprompt-daemon "AIRPROMPT_DEBUG=$DEBUG node server.js 2>&1 | tee /tmp/airprompt.log"
+  tmux new-session -d -s airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log"
 fi
 
 # ── 3. Wait for daemon to be ready ────────────────────────────────────

@@ -1,0 +1,294 @@
+#!/bin/bash
+# airprompt-launch — Start an IDE/CLI inside tmux so AirPrompt can
+# mirror it on your phone. Version-controlled in the AirPrompt repo.
+#
+# Provider-agnostic: use --provider to select the IDE, --binary to override
+# the IDE binary path.
+#
+# Usage:  airprompt-launch [--provider <id>] [--binary <path>] [ide-args...]
+#         airprompt-launch --continue [<session_id>]
+#         airprompt-launch --resume <session_id>
+#         airprompt-launch --name <name> [ide-args...]
+#
+# --provider <id>   IDE provider (required). Uses provider's binary.
+# --binary <path>   Override the IDE binary path.
+
+set -euo pipefail
+
+# ── Provider resolution ─────────────────────────────────────────────────
+PROVIDER_ID=""
+REAL_BINARY=""
+PROVIDER_EXPLICIT=false
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --provider)
+      if [ $# -lt 2 ]; then
+        echo "Error: --provider requires an argument" >&2
+        exit 1
+      fi
+      PROVIDER_ID="$2"
+      PROVIDER_EXPLICIT=true
+      shift 2
+      ;;
+    --binary)
+      if [ $# -lt 2 ]; then
+        echo "Error: --binary requires a path" >&2
+        exit 1
+      fi
+      REAL_BINARY="$2"
+      shift 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# Validate provider ID
+if [ -z "$PROVIDER_ID" ]; then
+  PROVIDER_ID="${AIRPROMPT_PROVIDER:-}"
+fi
+if [ -z "$PROVIDER_ID" ]; then
+  echo "Error: --provider is required (or set AIRPROMPT_PROVIDER)" >&2
+  exit 1
+fi
+if [ ${#PROVIDER_ID} -gt 32 ] || ! echo "$PROVIDER_ID" | grep -qE '^[a-z][a-z0-9-]*$'; then
+  echo "Error: invalid provider ID: $PROVIDER_ID (must be ≤32 chars, match ^[a-z][a-z0-9-]*$)" >&2
+  exit 1
+fi
+
+# Resolve binary from provider if not explicitly given
+if [ -z "$REAL_BINARY" ]; then
+  # Check PATH first, then common install locations
+  if command -v "$PROVIDER_ID" >/dev/null 2>&1; then
+    REAL_BINARY="$(command -v "$PROVIDER_ID")"
+  elif [ -x "$HOME/.local/bin/$PROVIDER_ID" ]; then
+    REAL_BINARY="$HOME/.local/bin/$PROVIDER_ID"
+  elif [ -x "/usr/local/bin/$PROVIDER_ID" ]; then
+    REAL_BINARY="/usr/local/bin/$PROVIDER_ID"
+  else
+    echo "Error: IDE binary '$PROVIDER_ID' not found" >&2
+    echo "  Checked: PATH, ~/.local/bin/$PROVIDER_ID, /usr/local/bin/$PROVIDER_ID" >&2
+    echo "  Use --binary <path> to specify the IDE path" >&2
+    exit 1
+  fi
+fi
+
+if [ ! -x "$REAL_BINARY" ]; then
+  echo "Error: IDE binary '$REAL_BINARY' is not executable" >&2
+  exit 1
+fi
+
+# ── Self-install: ensure ~/bin/ has airprompt-launch + provider wrapper ─
+_ensure_launcher() {
+  if [ "${AIRPROMPT_NO_SELF_INSTALL:-}" = "1" ]; then return 0; fi
+  if ! $PROVIDER_EXPLICIT; then return 0; fi  # only --provider flag, not env fallback
+
+  local home_bin="${HOME}/bin"
+  mkdir -p "$home_bin" 2>/dev/null || true
+
+  # Resolve this script's real location (follow symlinks)
+  local self
+  self="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+
+  # Symlink: ~/bin/airprompt-launch → this script
+  local launch_link="${home_bin}/airprompt-launch"
+  if [ ! -L "$launch_link" ] && [ ! -f "$launch_link" ]; then
+    ln -s "$self" "$launch_link" 2>/dev/null || true
+  fi
+
+  # Wrapper: ~/bin/airprompt-{provider}
+  local wrapper="${home_bin}/airprompt-${PROVIDER_ID}"
+  if [ ! -x "$wrapper" ] && [ ! -f "$wrapper" ]; then
+    cat > "$wrapper" << WRAPPEREOF
+#!/bin/bash
+exec airprompt-launch --provider ${PROVIDER_ID} "\$@"
+WRAPPEREOF
+    chmod +x "$wrapper"
+  fi
+}
+_ensure_launcher
+
+SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+
+# ── Collect env vars to forward to IDE inside tmux ───────────────────
+# Tmux does NOT forward all env vars to new sessions by default — only the
+# ones listed in update-environment (DISPLAY, SSH_*, etc.). Inline env vars
+# like CLAUDE_CODE_EFFORT_LEVEL=high airprompt-launch would never reach the
+# real IDE process. We collect everything except AirPrompt-internal vars
+# (AIRPROMPT_*) and pass them explicitly via `env` in every tmux command.
+declare -a FORWARD_ENV=()
+while IFS='=' read -r name value; do
+  case "$name" in
+    AIRPROMPT_*) ;;
+    *) FORWARD_ENV+=("$name=$value") ;;
+  esac
+done < <(env)
+
+# ── Per-session marker — writes name + tmux only.
+# Does NOT write `url`, `active`, or `session` — those are set by
+# the SessionStart hook (airprompt-activate.js) after daemon registration.
+# The daemon owns session IDs; this script does not invent them.
+save_session_marker() {
+  local tmux_name="$1"
+  local session_name="${2:-}"
+  # Sanitize: use same charset as statusline/activate/on.sh — tr -cd 'a-zA-Z0-9_.-'
+  local safe_name=$(printf '%s' "$tmux_name" | tr -cd 'a-zA-Z0-9_.-')
+  [ -z "$safe_name" ] && safe_name="$(echo "$tmux_name" | tr -cd 'a-zA-Z0-9')"  # fallback: strip dots/dashes too
+  [ -z "$safe_name" ] && safe_name="airprompt-unknown"
+  local my_dir="${SESSIONS_DIR}/${PROVIDER_ID}-${safe_name}"
+  mkdir -p "$my_dir" 2>/dev/null || true
+  [ -n "$session_name" ] && printf '%s\n' "$session_name" > "${my_dir}/name"
+  printf '%s\n' "$tmux_name" > "${my_dir}/tmux"
+  printf '%s\n' "$PROVIDER_ID" > "${my_dir}/provider"
+}
+
+# ── Parse args ────────────────────────────────────────────────────────
+RESUME_SESSION=""
+RESUME_IDE_ID=""   # set when <id> is an IDE session ID, not tmux
+SESSION_NAME=""       # human-readable name for the session
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --resume)
+      if [ $# -lt 2 ]; then
+        echo "Error: --resume requires a session name or ID" >&2
+        echo "Usage: airprompt-launch --resume <session_id>" >&2
+        exit 1
+      fi
+      RESUME_SESSION="$2"
+      shift 2
+      ;;
+    --continue)
+      if [ $# -ge 2 ] && echo "$2" | grep -qv '^-'; then
+        RESUME_SESSION="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    --name)
+      if [ $# -lt 2 ]; then
+        echo "Error: --name requires a name" >&2
+        exit 1
+      fi
+      SESSION_NAME="$2"
+      shift 2
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+# ── Helper: run IDE inside tmux with pane-capture on exit ──────────
+# Usage: launch_with_capture <tmux_session> <capture_file> [ide-args...]
+# The wrapper bash script owns the capture file — it writes the last 100
+# lines of pane output when IDE exits. The caller reads + cleans up.
+launch_tmux_capture() {
+  local session="$1"
+  local capture_file="$2"
+  shift 2
+  # env sets AIRPROMPT_CAPTURE + all FORWARD_ENV vars before running bash.
+  # The bash wrapper runs "$@" (the IDE), then captures pane output on exit.
+  # Previous code placed `env` as $1 inside bash -c — a positional param,
+  # not the env command. AIRPROMPT_CAPTURE was never set for the bash shell.
+  tmux new-session -d -s "$session" \
+    env AIRPROMPT_CAPTURE="$capture_file" "${FORWARD_ENV[@]}" \
+    bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ "$@"
+  tmux set-option -t "$session" focus-events on
+}
+
+# ── Helper: attach to session, print captured output when it ends ─────
+# When outside tmux: blocks until session exits, then prints capture if
+# the session is really dead (not a Ctrl-B d detach).
+# When inside tmux: execs switch-client — can't block, so no capture print.
+attach_and_capture() {
+  local session="$1"
+  local capture_file="$2"
+
+  if [ -n "${TMUX:-}" ]; then
+    # Nested tmux: switch client immediately. We cannot block or print
+    # captured output here — switch-client returns instantly. The user
+    # will see IDE's final output inside the inner tmux pane.
+    rm -f "$capture_file"
+    exec tmux switch-client -t "$session"
+  fi
+
+  # Outside tmux: attach and block until session exits.
+  tmux attach-session -t "$session" || true
+
+  # Only print if session actually ended (not a detach via Ctrl-B d).
+  if ! tmux has-session -t "$session" 2>/dev/null; then
+    echo
+    echo "Session ended."
+    [ -s "$capture_file" ] && cat "$capture_file"
+    rm -f "$capture_file"
+  fi
+  # Session still alive = user detached. Capture file stays — wrapper
+  # will overwrite it when IDE eventually exits. Orphaned in /tmp
+  # until reboot; acceptable for a LAN PoC. Silent exit is correct.
+}
+
+# ── Resume path ──────────────────────────────────────────────────────
+if [ -n "$RESUME_SESSION" ]; then
+  save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
+
+  if tmux has-session -t "$RESUME_SESSION" 2>/dev/null; then
+    # ── Known tmux session — reuse it ────────────────────────────────
+    # Kill zombie pane (dead from previous /exit) silently, respawn fresh.
+    dead=$(tmux list-panes -t "$RESUME_SESSION" -F '#{pane_dead}' 2>/dev/null || true)
+    if echo "$dead" | tr -d '[:space:]' | grep -q '1'; then
+      AIRPROMPT_CAPTURE=$(mktemp)
+      tmux respawn-pane -k -t "$RESUME_SESSION" \
+        env AIRPROMPT_CAPTURE="$AIRPROMPT_CAPTURE" "${FORWARD_ENV[@]}" \
+        bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ "$REAL_BINARY" "${args[@]}" 2>/dev/null || {
+        # respawn failed — kill zombie session and create new one
+        tmux kill-session -t "$RESUME_SESSION" 2>/dev/null || true
+        RESUME_IDE_ID=""
+        RESUME_SESSION="airprompt-$$-$(date +%s)"
+        save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
+        launch_tmux_capture "$RESUME_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_BINARY" "${args[@]}"
+      }
+      attach_and_capture "$RESUME_SESSION" "$AIRPROMPT_CAPTURE"
+      exit 0
+    fi
+    # pane alive — just attach to running session, no capture needed
+    if [ -n "${TMUX:-}" ]; then
+      exec tmux switch-client -t "$RESUME_SESSION"
+    else
+      exec tmux attach-session -t "$RESUME_SESSION"
+    fi
+  else
+    # ── Not a tmux session — treat as IDE session ID ──────────────
+    RESUME_IDE_ID="$RESUME_SESSION"
+    TMUX_SESSION="airprompt-$$-$(date +%s)"
+    save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
+    AIRPROMPT_CAPTURE=$(mktemp)
+    launch_tmux_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_BINARY" --resume "$RESUME_IDE_ID"
+    attach_and_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE"
+    exit 0
+  fi
+fi
+
+# ── Already inside tmux — just run real IDE, save session name ────
+if [ -n "${TMUX:-}" ]; then
+  SESSION_NAME_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
+  save_session_marker "$SESSION_NAME_TMUX" "$SESSION_NAME"
+  exec "$REAL_BINARY" "${args[@]}"
+fi
+
+# ── Not in tmux — create a tmux session and run IDE inside ────────
+if [ -n "$SESSION_NAME" ]; then
+  SANITIZED=$(echo "$SESSION_NAME" | tr -cd 'a-zA-Z0-9_-')
+  TMUX_SESSION="airprompt-${SANITIZED}"
+else
+  TMUX_SESSION="airprompt-$$-$(date +%s)"
+fi
+save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
+
+AIRPROMPT_CAPTURE=$(mktemp)
+launch_tmux_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_BINARY" "${args[@]}"
+attach_and_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE"

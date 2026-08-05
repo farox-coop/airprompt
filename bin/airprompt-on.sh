@@ -5,7 +5,7 @@ set -euo pipefail
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   echo "Usage: bin/airprompt on [--name <name>]"
   echo ""
-  echo "  Start AirPrompt daemon and register current Claude session."
+  echo "  Start AirPrompt daemon and register current IDE session."
   echo "  --name <name>  Optional display name shown in web UI session list."
   echo ""
   echo "This is an internal script. Use 'bin/airprompt on' directly."
@@ -24,15 +24,15 @@ done
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
+SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+PROVIDER="${AIRPROMPT_PROVIDER:?}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
 source "$(dirname "$0")/lib/protocol.sh"
 detect_protocol
 DAEMON_PORT="$AP_PORT"
 
-DEBUG="${AIRPROMPT_DEBUG:-1}"  # always debug during development
+DEBUG="${AIRPROMPT_DEBUG:-0}"
 
 # ── Dependency checks ───────────────────────────────────────────────
 for cmd in tmux node curl; do
@@ -91,15 +91,31 @@ if [ -f "$PID_FILE" ]; then
   fi
 fi
 
+# ── Auto-generate TLS certs if missing ─────────────────────────────
+CERT_DIR="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
+CERT_FILE="${CERT_DIR}/airprompt-cert.pem"
+KEY_FILE="${CERT_DIR}/airprompt-key.pem"
+if [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && { [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; }; then
+  GEN_CERT_SCRIPT="$(dirname "$0")/generate-cert.sh"
+  if [ -x "$GEN_CERT_SCRIPT" ]; then
+    bash "$GEN_CERT_SCRIPT" || true  # non-fatal: HTTP fallback if openssl missing
+    # Re-detect protocol after cert generation
+    detect_protocol
+    DAEMON_PORT="$AP_PORT"
+  fi
+fi
+
+DAEMON_ENV="$(daemon_env)"
+
 if [ ! -f "$PID_FILE" ]; then
   echo "Starting daemon..."
   cd "$DAEMON_DIR"
   # tmux: daemon owned by tmux server (immortal process), not this shell.
   # Avoids process-group death when the Bash tool/script shell exits.
   if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
-    tmux new-session -d -s airprompt-daemon "AIRPROMPT_DEBUG=$DEBUG node server.js 2>&1 | tee /tmp/airprompt.log"
+    tmux new-session -d -s airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log"
   else
-    tmux respawn-pane -k -t airprompt-daemon "AIRPROMPT_DEBUG=$DEBUG node server.js 2>&1 | tee /tmp/airprompt.log" 2>/dev/null || true
+    tmux respawn-pane -k -t airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log" 2>/dev/null || true
   fi
   for i in $(seq 1 20); do
     if curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
@@ -118,20 +134,14 @@ fi
 # ── Per-session directory ────────────────────────────────────────────
 # Sanitize tmux name to match statusline lookups (same as tr -cd 'a-zA-Z0-9_.-')
 SAFE_TMUX=$(printf '%s' "$TMUX_SESSION" | tr -cd 'a-zA-Z0-9_.-')
-MY_DIR="${SESSIONS_DIR}/${SAFE_TMUX}"
+MY_DIR="${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}"
 ACTIVE_FILE="${MY_DIR}/active"
 
 # ── Helper: persist cwd→name mapping for autostart reuse ────────────
 _persist_project_name() {
   local name_val="$1"
-  local names_file="${CONFIG_DIR}/.airprompt/project-names.json"
-  PWD_VAL="$ORIG_PWD" NAME_VAL="$name_val" FILE_VAL="$names_file" node -e '
-    var fs = require("fs");
-    var map = {};
-    try { map = JSON.parse(fs.readFileSync(process.env.FILE_VAL, "utf8")); } catch (_) {}
-    map[process.env.PWD_VAL] = process.env.NAME_VAL;
-    fs.writeFileSync(process.env.FILE_VAL, JSON.stringify(map, null, 2) + "\n");
-  ' 2>/dev/null || true
+  local names_file="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}/project-names.json"
+  node "${DAEMON_DIR}/bin/lib/project-names.js" set "$names_file" "$ORIG_PWD" "$name_val" 2>/dev/null || true
 }
 
 # ── Helper: update session name via daemon API ───────────────────────
@@ -158,16 +168,6 @@ _name_update() {
 # Daemon recovers state from on-disk markers on startup, so a simple
 # file check is sufficient — no need to double-check with daemon API.
 if [ -f "$ACTIVE_FILE" ]; then
-  # Retroactive fix: add missing mirror marker for AirPrompt-created sessions.
-  # Covers both: sessions created by on.sh outside tmux, and mirror sessions
-  # created by the activate hook. Excludes daemon and web proxy sessions.
-  if [ ! -f "${MY_DIR}/mirror" ]; then
-    case "$TMUX_SESSION" in
-      airprompt-daemon|airprompt-web-*) ;;
-      airprompt-*) touch "${MY_DIR}/mirror" ;;
-      *) [ -z "${TMUX:-}" ] && touch "${MY_DIR}/mirror" ;;  # on.sh outside tmux
-    esac
-  fi
   if [ -n "$SESSION_NAME" ]; then
     MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
     if [ -n "$MY_SID" ]; then
@@ -180,7 +180,7 @@ if [ -f "$ACTIVE_FILE" ]; then
 fi
 
 # ── Register with daemon ────────────────────────────────────────────
-REG_PAYLOAD="{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\""
+REG_PAYLOAD="{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\",\"providerId\":\"${PROVIDER}\""
 if [ -n "$SESSION_NAME" ]; then
   # Escape backslashes and double-quotes to prevent JSON injection
   ESCAPED_NAME=$(printf '%s' "$SESSION_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
@@ -197,6 +197,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
   echo "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
+  echo "$PROVIDER" > "${MY_DIR}/provider"
   touch "$ACTIVE_FILE"
   [ "${CREATED_SESSION:-}" = "true" ] && touch "${MY_DIR}/mirror"
   if [ -n "$SESSION_NAME" ]; then
@@ -212,6 +213,7 @@ elif echo "$RESP" | grep -q '"Session already registered"'; then
   echo "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" > "${MY_DIR}/url"
   echo "$SESSION_ID" > "${MY_DIR}/session"
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
+  echo "$PROVIDER" > "${MY_DIR}/provider"
   touch "$ACTIVE_FILE"
   [ "${CREATED_SESSION:-}" = "true" ] && touch "${MY_DIR}/mirror"
   if [ -n "$SESSION_NAME" ]; then
@@ -224,11 +226,11 @@ else
 fi
 
 # ── Cleanup: sweep dead session dirs ─────────────────────────────────
-if [ -d "$SESSIONS_DIR" ]; then
+if _safe_rm_rf "$SESSIONS_DIR"; then
   for d in "$SESSIONS_DIR"/*/; do
     [ -d "$d" ] || continue
     DN=$(basename "$d")
-    [ "$DN" = "$SAFE_TMUX" ] && continue
+    [ "$DN" = "${PROVIDER}-${SAFE_TMUX}" ] && continue
     # Read real tmux name from dir — dir name is sanitized,
     # real name may differ (e.g. "My Session!" vs "MySession").
     REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r')

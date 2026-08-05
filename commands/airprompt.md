@@ -1,5 +1,5 @@
 ---
-description: AirPrompt — remote mobile access and voice dictation for Claude sessions
+description: AirPrompt — remote mobile access and voice dictation for IDE sessions
 argument-hint: "[on|on <name>|on --name <name>|off|status|clean|restart|name <name>|name \"\"|autostart on|off|help]"
 ---
 
@@ -13,7 +13,7 @@ For `help`, `status`, and no-args (which runs both): **DUMP the ENTIRE raw outpu
 
 `/airprompt` with no arguments runs `airprompt` (dispatcher) which outputs `status` + `help` in sequence. Always dump full output — see rule above.
 
-AirPrompt — remote mobile access and voice dictation for Claude sessions.
+AirPrompt — remote mobile access and voice dictation for IDE sessions.
 
 Usage: /airprompt <command>
 ALWAYS use entrypoint: `airprompt <command>` (located at `~/bin/airprompt`) — NEVER call `bin/airprompt-*.sh` directly.
@@ -27,7 +27,7 @@ Commands:
   name [<text>]       Set display name for current session (empty or "" clears it)
   clean               Full teardown: kill daemon, remove all sessions and markers
   restart             Restart daemon — active sessions survive via disk recovery
-  autostart on|off    Enable/disable auto-start on Claude session start (SessionStart hook)
+  autostart on|off    Enable/disable auto-start on IDE session start (SessionStart hook)
   help                Print usage
 
 airprompt $ARGUMENTS

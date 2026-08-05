@@ -16,9 +16,9 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
-PROJECT_NAMES_FILE="${CONFIG_DIR}/.airprompt/project-names.json"
+SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+PROVIDER="${AIRPROMPT_PROVIDER:?}"
+PROJECT_NAMES_FILE="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}/project-names.json"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
 source "$(dirname "$0")/lib/protocol.sh"
@@ -46,8 +46,8 @@ MY_DIR=""
 SESSION_ID=""
 # Sanitize to match dir name created by airprompt-on / activate (same: tr -cd 'a-zA-Z0-9_.-')
 SAFE_NAME=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
-if [ -n "$SAFE_NAME" ] && [ -d "${SESSIONS_DIR}/${SAFE_NAME}" ]; then
-  MY_DIR="${SESSIONS_DIR}/${SAFE_NAME}"
+if [ -n "$SAFE_NAME" ] && [ -d "${SESSIONS_DIR}/${PROVIDER}-${SAFE_NAME}" ]; then
+  MY_DIR="${SESSIONS_DIR}/${PROVIDER}-${SAFE_NAME}"
   SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
 fi
 
@@ -70,13 +70,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
       printf '%s\n' "$NEW_NAME" > "${MY_DIR}/name"
     fi
     # ── Persist cwd→name mapping for autostart reuse ───────────────
-    PWD_VAL="$PWD" NAME_VAL="$NEW_NAME" FILE_VAL="$PROJECT_NAMES_FILE" node -e '
-      var fs = require("fs");
-      var map = {};
-      try { map = JSON.parse(fs.readFileSync(process.env.FILE_VAL, "utf8")); } catch (_) {}
-      map[process.env.PWD_VAL] = process.env.NAME_VAL;
-      fs.writeFileSync(process.env.FILE_VAL, JSON.stringify(map, null, 2) + "\n");
-    ' 2>/dev/null || true
+    node "$(dirname "$0")/lib/project-names.js" set "$PROJECT_NAMES_FILE" "$PWD" "$NEW_NAME" 2>/dev/null || true
     echo "AirPrompt: session named '$NEW_NAME'"
   else
     if [ -n "$MY_DIR" ]; then
@@ -84,13 +78,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
     fi
     # ── Clear cwd→name mapping on explicit clear ──────────────────
     if [ -f "$PROJECT_NAMES_FILE" ]; then
-      PWD_VAL="$PWD" FILE_VAL="$PROJECT_NAMES_FILE" node -e '
-        var fs = require("fs");
-        var map;
-        try { map = JSON.parse(fs.readFileSync(process.env.FILE_VAL, "utf8")); } catch (_) { process.exit(0); }
-        delete map[process.env.PWD_VAL];
-        fs.writeFileSync(process.env.FILE_VAL, JSON.stringify(map, null, 2) + "\n");
-      ' 2>/dev/null || true
+      node "$(dirname "$0")/lib/project-names.js" clear "$PROJECT_NAMES_FILE" "$PWD" 2>/dev/null || true
     fi
     echo "AirPrompt: session name cleared"
   fi

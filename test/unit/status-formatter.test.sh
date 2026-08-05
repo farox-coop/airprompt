@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Resolve formatter location
 FORMATTER=""
-for d in "${CLAUDE_PLUGIN_ROOT:-}" "$HOME/.airprompt" "$HOME/projects/airprompt"; do
+for d in "${AIRPROMPT_INSTALL_DIR:-}" "$HOME/.airprompt" "$HOME/projects/airprompt"; do
   if [ -f "$d/src/status-formatter.js" ]; then FORMATTER="$d/src/status-formatter.js"; break; fi
 done
 if [ -z "$FORMATTER" ]; then

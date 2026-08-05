@@ -13,8 +13,8 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SESSIONS_DIR="${CONFIG_DIR}/.airprompt/sessions"
+SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+PROVIDER="${AIRPROMPT_PROVIDER:?}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
 source "$(dirname "$0")/lib/protocol.sh"
@@ -36,8 +36,8 @@ fi
 MY_DIR=""
 if [ -n "$CURRENT_TMUX" ]; then
   SAFE_TMUX=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
-  if [ -d "${SESSIONS_DIR}/${SAFE_TMUX}" ]; then
-    MY_DIR="${SESSIONS_DIR}/${SAFE_TMUX}"
+  if [ -d "${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}" ]; then
+    MY_DIR="${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}"
     if [ -z "$SESSION_ID" ]; then
       SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
     fi
@@ -79,11 +79,11 @@ fi
 
 # ── Remove per-session directory ─────────────────────────────────────
 if [ -n "$MY_DIR" ] && [ -d "$MY_DIR" ]; then
-  rm -rf "$MY_DIR"
+  _safe_rm_rf "$MY_DIR" && { rm -rf "$MY_DIR"; }
 fi
 
 # ── Sweep dead session dirs ──────────────────────────────────────────
-if [ -d "$SESSIONS_DIR" ]; then
+if _safe_rm_rf "$SESSIONS_DIR"; then
   for d in "$SESSIONS_DIR"/*/; do
     [ -d "$d" ] || continue
     DN=$(basename "$d")

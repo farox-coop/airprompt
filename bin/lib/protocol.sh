@@ -7,7 +7,7 @@
 #   detect_protocol
 #   curl $AP_CURL_OPTS "${AP_PROTO}://localhost:${AP_PORT}/..."
 #
-# Priority: daemon.json SSOT → cert fallback → http (plaintext)
+# State dir: ~/.airprompt/state/ (daemon.json, certs)
 
 # Default port — callers may override before sourcing or after.
 AP_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
@@ -15,16 +15,101 @@ AP_PROTO="http"
 AP_CURL_OPTS=""
 
 detect_protocol() {
-  local config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-  local airprompt_conf="${config_dir}/.airprompt/daemon.json"
+  local state_dir="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
+  local daemon_json="${state_dir}/daemon.json"
+  local cert_file="${state_dir}/airprompt-cert.pem"
+  local key_file="${state_dir}/airprompt-key.pem"
 
-  if [ -f "$airprompt_conf" ] && command -v jq >/dev/null 2>&1; then
-    AP_PROTO=$(jq -r '.protocol // "http"' "$airprompt_conf" 2>/dev/null || echo "http")
-    AP_PORT=$(jq -r '.port // 3210' "$airprompt_conf" 2>/dev/null || echo "$AP_PORT")
-  elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && \
-       [ -f "${config_dir}/.airprompt/airprompt-cert.pem" ] && \
-       [ -f "${config_dir}/.airprompt/airprompt-key.pem" ]; then
+  # daemon.json is SSOT for running daemon's protocol. Cert files are fallback.
+  if [ -f "$daemon_json" ] && command -v jq >/dev/null 2>&1; then
+    AP_PROTO=$(jq -r '.protocol // "http"' "$daemon_json" 2>/dev/null || echo "http")
+    AP_PORT=$(jq -r '.port // 3210' "$daemon_json" 2>/dev/null || echo "$AP_PORT")
+  elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "$cert_file" ] && [ -f "$key_file" ]; then
     AP_PROTO="https"
   fi
-  [ "$AP_PROTO" = "https" ] && AP_CURL_OPTS="-k"
+  [ "$AP_PROTO" = "https" ] && AP_CURL_OPTS="-k" || true
+}
+
+# ── Daemon environment forwarding ─────────────────────────────────────
+# Tmux does NOT inherit client env by default. Use this to build the
+# env prefix string passed to `tmux new-session` / `tmux respawn-pane`.
+# Caller must have DEBUG set.
+daemon_env() {
+  local env_str="AIRPROMPT_DEBUG=${AIRPROMPT_DEBUG:-0}"
+  [ -n "${AIRPROMPT_STATE_DIR:-}" ]    && env_str="$env_str AIRPROMPT_STATE_DIR=$AIRPROMPT_STATE_DIR"
+  [ -n "${AIRPROMPT_PORT:-}" ]         && env_str="$env_str AIRPROMPT_PORT=$AIRPROMPT_PORT"
+  [ -n "${AIRPROMPT_PID_FILE:-}" ]     && env_str="$env_str AIRPROMPT_PID_FILE=$AIRPROMPT_PID_FILE"
+  [ -n "${AIRPROMPT_SESSIONS_DIR:-}" ] && env_str="$env_str AIRPROMPT_SESSIONS_DIR=$AIRPROMPT_SESSIONS_DIR"
+  [ -n "${AIRPROMPT_NO_TLS:-}" ]       && env_str="$env_str AIRPROMPT_NO_TLS=$AIRPROMPT_NO_TLS"
+  [ -n "${PORT:-}" ]                   && env_str="$env_str PORT=$PORT"
+  printf '%s' "$env_str"
+}
+
+# ── Ensure ~/bin/ binaries exist ────────────────────────────────────────
+# Called by on.sh and autostart.sh after clean to restore symlinks + wrappers.
+# Idempotent — only creates if missing.
+_ensure_bin_symlinks() {
+  local home_bin="${HOME}/bin"
+  local repo_bin
+  repo_bin="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." 2>/dev/null && pwd)" || repo_bin="${AIRPROMPT_INSTALL_DIR:-$HOME/.airprompt}"
+  local bin_dir="${repo_bin}/bin"
+  local launch="${bin_dir}/airprompt-launch"
+  local dispatcher="${bin_dir}/airprompt"
+
+  mkdir -p "$home_bin"
+
+  # airprompt dispatcher symlink
+  if [ ! -e "$home_bin/airprompt" ]; then
+    ln -s "$dispatcher" "$home_bin/airprompt" 2>/dev/null || true
+    echo "  restored $home_bin/airprompt → $dispatcher"
+  fi
+
+  # airprompt-launch symlink
+  if [ ! -e "$home_bin/airprompt-launch" ]; then
+    ln -s "$launch" "$home_bin/airprompt-launch" 2>/dev/null || true
+    echo "  restored $home_bin/airprompt-launch → $launch"
+  fi
+
+  # Provider wrappers
+  for prov in claude codex cursor windsurf; do
+    local wrapper="$home_bin/airprompt-$prov"
+    if [ ! -e "$wrapper" ]; then
+      cat > "$wrapper" << PROVIDEREOF
+#!/bin/bash
+exec airprompt-launch --provider $prov "\$@"
+PROVIDEREOF
+      chmod +x "$wrapper"
+      echo "  restored $wrapper"
+    fi
+  done
+}
+
+# ── Safe rm -rf ─────────────────────────────────────────────────────────
+# Canonicalize path then verify it lives under $HOME/.airprompt/ before
+# allowing rm -rf. Prevents disaster on misconfigured env vars and blocks
+# the trivial `*airprompt*` substring bypass via `..` traversal.
+#
+# Usage: _safe_rm_rf "/path/to/dir" && echo "ok"
+# Returns 0 (safe, caller should rm -rf) or 1 (blocked, already printed).
+_safe_rm_rf() {
+  local path="$1"
+  local canonical
+
+  # Resolve .. first, then canonicalize. `readlink -f` works on nonexistent
+  # paths on GNU; on macOS readlink -f fails on nonexistent, so resolve
+  # parent first then append basename.
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    return 1  # nothing to delete — safe to skip
+  fi
+
+  canonical="$(cd "$(dirname "$path")" 2>/dev/null && pwd -P 2>/dev/null)" || {
+    echo "  SAFETY: cannot resolve parent of ${path} — refusing rm -rf" >&2
+    return 1
+  }
+  canonical="${canonical%/}/$(basename "$path")"
+
+  case "$canonical" in
+    "$HOME/.airprompt"|"$HOME/.airprompt/"*) return 0 ;;
+    *) echo "  SAFETY: refusing to rm -rf ${path} (canonical: ${canonical})" >&2; return 1 ;;
+  esac
 }

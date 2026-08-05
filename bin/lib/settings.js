@@ -203,8 +203,8 @@ function removeAirPromptHooks(settings) {
   return removed;
 }
 
-// ── rewriteLegacyManagedHookCommands ──────────────────────────────────────
-function rewriteLegacyManagedHookCommands(settings, absoluteNode) {
+// ── rewriteManagedHookCommands ────────────────────────────────────────────
+function rewriteManagedHookCommands(settings, absoluteNode) {
   if (!settings || !settings.hooks || !absoluteNode) return 0;
   let rewritten = 0;
   const reBare = /^node\s+("([^"]+)"|'([^']+)'|(\S+))\s*$/;
@@ -229,7 +229,8 @@ function rewriteLegacyManagedHookCommands(settings, absoluteNode) {
 // ── pruneOrphanedManagedHooks ─────────────────────────────────────────────
 function pruneOrphanedManagedHooks(settings, configDir) {
   if (!settings || typeof settings !== 'object') return 0;
-  const baseDir = configDir || claudeConfigDir();
+  if (!configDir || typeof configDir !== 'string') return 0;
+  const baseDir = configDir;
   let removed = 0;
 
   const targetMissing = (command) => {
@@ -270,12 +271,6 @@ function pruneOrphanedManagedHooks(settings, configDir) {
   return removed;
 }
 
-// ── claudeConfigDir ───────────────────────────────────────────────────────
-function claudeConfigDir() {
-  if (process.env.CLAUDE_CONFIG_DIR) return process.env.CLAUDE_CONFIG_DIR;
-  return path.join(os.homedir(), '.claude');
-}
-
 module.exports = {
   stripJsonComments,
   readSettings,
@@ -284,9 +279,8 @@ module.exports = {
   hasAirPromptHook,
   addCommandHook,
   removeAirPromptHooks,
-  rewriteLegacyManagedHookCommands,
+  rewriteManagedHookCommands,
   pruneOrphanedManagedHooks,
-  claudeConfigDir,
   tokenizeCommand,
   MANAGED_HOOK_BASENAMES,
 };

@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 const qrcode = require('qrcode-terminal');
-const { tmuxExists, sessionToJSON } = require('./src/utils');
+const { tmuxExists, sessionToJSON, getSessionsDir } = require('./src/utils');
 
 const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
@@ -22,12 +22,19 @@ function log(level, msg, extra) {
   process.stderr.write(`[airprompt:${level}] ${ts} ${msg}${extraStr}\n`);
 }
 
-const CERT_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-const AIRPROMPT_DIR = path.join(CERT_DIR, '.airprompt');
-const CERT_FILE = path.join(AIRPROMPT_DIR, 'airprompt-cert.pem');
-const KEY_FILE = path.join(AIRPROMPT_DIR, 'airprompt-key.pem');
-const TLS_ENABLED = process.env.AIRPROMPT_NO_TLS !== '1' && fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
-const DAEMON_JSON = path.join(AIRPROMPT_DIR, 'daemon.json');
+// State dir: daemon.json, certs, project-names.json live here.
+// Separate from install dir (~/.airprompt/) so reinstall won't destroy user data.
+const STATE_DIR = process.env.AIRPROMPT_STATE_DIR || path.join(os.homedir(), '.airprompt', 'state');
+const CERT_FILE = path.join(STATE_DIR, 'airprompt-cert.pem');
+const KEY_FILE = path.join(STATE_DIR, 'airprompt-key.pem');
+const DAEMON_JSON = path.join(STATE_DIR, 'daemon.json');
+
+function tlsAvailable() {
+  if (process.env.AIRPROMPT_NO_TLS === '1') return false;
+  return fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE);
+}
+
+const TLS_ENABLED = tlsAvailable();
 
 const sessions = new Map();
 
@@ -53,7 +60,7 @@ function killTmuxSession(sessionName) {
 }
 
 function broadcastSessionList(wss) {
-  const list = Array.from(sessions.values()).map(sessionToJSON);
+  const list = Array.from(sessions.values()).map(s => sessionToJSON(s));
   const msg = JSON.stringify({ type: 'session_list', sessions: list });
   wss.clients.forEach((client) => {
     if (client.readyState === 1) {
@@ -74,7 +81,7 @@ function writePid() {
 function removePid() { try { fs.unlinkSync(PID_FILE); } catch (e) { /* ok */ } }
 
 function writeDaemonJson(protocol, port, lanIp) {
-  try { fs.mkdirSync(AIRPROMPT_DIR, { recursive: true }); } catch (_) {}
+  try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch (_) {}
   const json = JSON.stringify({ protocol, port, lanIp, url: `${protocol}://${lanIp}:${port}`, pid: process.pid });
   try { fs.writeFileSync(DAEMON_JSON, json); } catch (_) {}
 }
@@ -84,50 +91,51 @@ function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { 
 
 // ── Startup recovery: scan per-session dirs and re-register alive sessions ──
 // Daemon restart loses in-memory state. On-disk markers survive.
-// Rebuild session registry from ~/.claude/.airprompt/sessions/{tmux}/
+// Rebuild session registry from ~/.airprompt/sessions/{providerId}-{tmux}/
 function recoverSessionsFromDisk() {
   if (process.env.AIRPROMPT_SKIP_RECOVERY === '1') return;
-  const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-  const sessionsDir = path.join(configDir, '.airprompt', 'sessions');
-  if (!fs.existsSync(sessionsDir)) return;
+  const sessionsRoot = getSessionsDir();
+  if (!fs.existsSync(sessionsRoot)) return;
 
   let entries;
-  try { entries = fs.readdirSync(sessionsDir, { withFileTypes: true }); } catch (_) { return; }
+  try { entries = fs.readdirSync(sessionsRoot, { withFileTypes: true }); } catch (_) { return; }
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const dir = path.join(sessionsDir, entry.name);
+    const dir = path.join(sessionsRoot, entry.name);
 
-    // Read REAL tmux session name from marker file.
-    // Directory name is sanitized (a-zA-Z0-9_.-), but the actual
-    // tmux session may have spaces or special characters.
-    let realTmux = entry.name;
+    // Read REAL tmux session name from marker file. Dir name is {providerId}-{safeName}
+    // so it can't be used as a fallback.
+    let realTmux = '';
     try { realTmux = fs.readFileSync(path.join(dir, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
-
-    // Check if tmux session is still alive
-    if (!tmuxExists(realTmux)) {
-      // Dead session — clean up on-disk markers
+    if (!realTmux) {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
       continue;
     }
 
-    // Read metadata from disk
+    if (!tmuxExists(realTmux)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+      continue;
+    }
+
     let sessionId, name;
     try { sessionId = fs.readFileSync(path.join(dir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) { sessionId = realTmux; }
-    // Validate format — must match registration endpoint regex
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) sessionId = realTmux;
     try { name = fs.readFileSync(path.join(dir, 'name'), 'utf8').trim().slice(0, 64) || null; } catch (_) { name = null; }
 
-    // Derive cwd from tmux session
     let cwd = process.env.HOME || '/';
     try {
       const r = spawnSync('tmux', ['display-message', '-t', realTmux, '-p', '#{pane_current_path}'], { timeout: 2000, encoding: 'utf8' });
       if (r.status === 0 && r.stdout.trim()) cwd = r.stdout.trim();
     } catch (_) {}
 
+    // Provider: read from marker file (written by hook/on.sh at registration)
+    let providerId = '';
+    try { providerId = fs.readFileSync(path.join(dir, 'provider'), 'utf8').trim().slice(0, 32); } catch (_) {}
+
     if (!sessions.has(sessionId)) {
-      sessions.set(sessionId, { sessionId, cwd, name, tmuxSession: realTmux, createdAt: new Date().toISOString(), lastActivity: Date.now() });
-      log('info', 'session recovered from disk', { sessionId, tmuxSession: realTmux, cwd, name });
+      sessions.set(sessionId, { sessionId, cwd, name, tmuxSession: realTmux, providerId, createdAt: new Date().toISOString(), lastActivity: Date.now() });
+      log('info', 'session recovered from disk', { sessionId, tmuxSession: realTmux, cwd, name, providerId });
     }
   }
 
@@ -140,17 +148,20 @@ function createApp() {
   app.use(express.static(path.join(__dirname, 'public')));
 
   app.get('/api/sessions', (_req, res) => {
-    res.json(Array.from(sessions.values()).map(sessionToJSON));
+    res.json(Array.from(sessions.values()).map(s => sessionToJSON(s)));
   });
 
   app.post('/api/sessions/register', (req, res) => {
-    const { sessionId, cwd, tmuxSession, name } = req.body || {};
+    const { sessionId, cwd, tmuxSession, name, providerId } = req.body || {};
     if (!sessionId || !cwd) return res.status(400).json({ error: 'Missing sessionId or cwd' });
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) return res.status(400).json({ error: 'Invalid sessionId format' });
     if (typeof cwd !== 'string' || cwd.length > 512) return res.status(400).json({ error: 'cwd too long' });
     if (name !== undefined && (typeof name !== 'string' || name.length > 64 || !/^[a-zA-Z0-9 _-]{1,64}$/.test(name)))
       return res.status(400).json({ error: 'Invalid name: max 64 chars, alphanumeric + spaces, dashes, underscores' });
     if (sessions.has(sessionId)) return res.status(409).json({ error: 'Session already registered' });
+
+    if (!providerId || typeof providerId !== 'string' || providerId.length > 32 || !/^[a-z][a-z0-9-]*$/.test(providerId))
+      return res.status(400).json({ error: 'Missing or invalid providerId' });
 
     let actualTmuxSession;
     if (tmuxSession && /^[a-zA-Z0-9_-]{1,64}$/.test(tmuxSession) && tmuxExists(tmuxSession)) {
@@ -163,24 +174,36 @@ function createApp() {
         }
       }
     }
-    // Dedupe by tmux session: two hooks may fire simultaneously with
-    // different sessionIds but the same tmux session (plugin + settings.json).
+
+    // Dedupe by tmux session + provider: two hooks may fire simultaneously with
+    // different sessionIds but the same tmux+provider (plugin + settings.json).
+    // Different providers on the same tmux are allowed (e.g. claude + codex
+    // sharing a tmux session).
     for (const [existingId, existing] of sessions) {
-      if (existing.tmuxSession === actualTmuxSession) {
-        // Update existing entry in-place — preserve original createdAt
+      // Dedup: if both have providerId, match on tmux+provider; if either empty, match on tmux only
+      const sameTmux = existing.tmuxSession === actualTmuxSession;
+      const sameProvider = existing.providerId && providerId
+        ? existing.providerId === providerId
+        : sameTmux; // either empty → dedup by tmux alone
+      if (sameTmux && sameProvider) {
         existing.cwd = cwd;
         existing.sessionId = sessionId;
         if (name !== undefined) existing.name = name || null;
+        existing.providerId = providerId;
         existing.lastActivity = Date.now();
         sessions.delete(existingId);
         sessions.set(sessionId, existing);
-        log('info', 'session re-registered (deduped by tmux)', { oldId: existingId, newId: sessionId, tmuxSession: actualTmuxSession });
+        log('info', 'session re-registered (deduped by tmux+provider)', { oldId: existingId, newId: sessionId, tmuxSession: actualTmuxSession, providerId: providerId });
         broadcastSessionList(wss);
         return res.json({ ok: true, sessionId });
       }
     }
-    sessions.set(sessionId, { sessionId, cwd, name: name || null, tmuxSession: actualTmuxSession, createdAt: new Date().toISOString(), lastActivity: Date.now() });
-    log('info', 'session registered', { sessionId, tmuxSession: actualTmuxSession, cwd, name: name || null });
+
+    sessions.set(sessionId, {
+      sessionId, cwd, name: name || null, tmuxSession: actualTmuxSession,
+      providerId: providerId, createdAt: new Date().toISOString(), lastActivity: Date.now(),
+    });
+    log('info', 'session registered', { sessionId, tmuxSession: actualTmuxSession, cwd, name: name || null, providerId: providerId });
     broadcastSessionList(wss);
     res.json({ ok: true, sessionId });
   });
@@ -207,7 +230,7 @@ function createApp() {
       }
       if (!shared) killTmuxSession(entry.tmuxSession);
     }
-    // Non-airprompt tmux sessions are real Claude sessions — never kill them
+    // Non-airprompt tmux sessions belong to real IDE instances — never kill them
     broadcastSessionList(wss);
     res.json({ ok: true });
   });
@@ -267,9 +290,9 @@ function createApp() {
           died = true;
           // wasGraceful stays false — this was a force kill
         }
-        // Non-airprompt sessions are real Claude sessions — never kill them.
+        // Non-airprompt sessions belong to real IDE instances — never kill them.
         // Leave the entry intact; the stale interval will clean up when
-        // Claude eventually exits.
+        // the IDE eventually exits.
       }
 
       if (died) {
@@ -320,7 +343,7 @@ function createApp() {
 
     ws.send(JSON.stringify({
       type: 'session_list',
-      sessions: Array.from(sessions.values()).map(sessionToJSON),
+      sessions: Array.from(sessions.values()).map(s => sessionToJSON(s)),
     }));
 
     function spawnPty(sessionId) {
@@ -499,7 +522,16 @@ function createApp() {
 
       // Orphan detection: mirror sessions (airprompt-*) that have no attached
       // clients and no recent activity are leaked shells — kill them.
+      // Only sessions with a 'mirror' marker file are mirrors. Sessions created
+      // by airprompt-launch use airprompt-* prefix but are NOT mirrors.
       if (entry.tmuxSession.startsWith('airprompt-')) {
+        // Check if this is a mirror session (created by activate.js for IDE outside tmux)
+        const sessionsDir = getSessionsDir();
+        const safeName = entry.tmuxSession.replace(/[^a-zA-Z0-9_.-]/g, '') || entry.tmuxSession.replace(/[^a-zA-Z0-9]/g, '') || 'unknown';
+        const mirrorFile = path.join(sessionsDir, `${entry.providerId || 'unknown'}-${safeName}`, 'mirror');
+        let isMirror = false;
+        try { isMirror = fs.existsSync(mirrorFile); } catch (_) {}
+        if (!isMirror) continue;  // not a mirror — skip (e.g. airprompt-launch session)
         const now = Date.now();
         const idle = now - (entry.lastActivity || 0);
         if (idle < ORPHAN_GRACE_MS) continue;

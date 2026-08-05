@@ -6,14 +6,39 @@
 # /airprompt name something   → bash airprompt-name.sh "something"
 set -euo pipefail
 
+# Resolve real script dir (follow symlink from ~/bin/ → repo/bin/)
+_self="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+SELF_DIR="$(dirname "$_self")"
+
+# Restore ~/bin/ symlinks + wrappers if clean nuked them (before dispatching)
+# shellcheck source=/dev/null
+source "${SELF_DIR}/lib/protocol.sh"
+_ensure_bin_symlinks
+
 CMD="${1:-}"
 shift || true
 # Remaining positional args in "$@" after shift
 
+# ── Provider auto-detection (only for commands that need it) ────────────
+# Runs before dispatching to sub-scripts that require AIRPROMPT_PROVIDER.
+_ensure_provider() {
+  if [ -n "${AIRPROMPT_PROVIDER:-}" ]; then return 0; fi
+  for prov in claude codex cursor windsurf; do
+    if command -v "$prov" >/dev/null 2>&1; then
+      export AIRPROMPT_PROVIDER="$prov"
+      return 0
+    fi
+  done
+  echo "AirPrompt: no provider detected and AIRPROMPT_PROVIDER not set." >&2
+  echo "  Install one of: claude, codex, cursor, windsurf" >&2
+  echo "  Or set AIRPROMPT_PROVIDER manually." >&2
+  return 1
+}
+
 # Default: no args → run status + help
 if [ -z "$CMD" ]; then
   # Resolve install dir for sub-scripts
-  for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
+  for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
     [ -d "$d" ] || continue
     STATUS_SH="$d/bin/airprompt-status.sh"
     if [ -x "$STATUS_SH" ]; then
@@ -24,7 +49,7 @@ if [ -z "$CMD" ]; then
     break
   done
   # Print help
-  echo "AirPrompt — remote mobile access and voice dictation for Claude sessions"
+  echo "AirPrompt — remote mobile access and voice dictation for IDE sessions"
   echo ""
   echo "ALL COMMANDS EXECUTE IMMEDIATELY — NO CONFIRMATION EVER."
   echo ""
@@ -38,7 +63,7 @@ if [ -z "$CMD" ]; then
   echo "  clean               Full teardown — kill all sessions, remove markers"
   echo "  restart             Restart daemon — sessions survive via disk recovery"
   echo "  name [<text>]       Set or clear session name (empty or \"\" clears)"
-  echo "  autostart on|off    Auto-start AirPrompt on Claude session start"
+  echo "  autostart on|off    Auto-start AirPrompt on IDE session start"
   echo "  help                Show this help"
   echo ""
   echo "Entrypoint: always use 'airprompt <command>' — never call bin/airprompt-*.sh directly."
@@ -46,7 +71,7 @@ if [ -z "$CMD" ]; then
 fi
 
 # Resolve install dir
-for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
+for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
   [ -d "$d" ] || continue
   SUB=""
   case "$CMD" in
@@ -58,7 +83,7 @@ for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
     name)      SUB="$d/bin/airprompt-name.sh";;
     autostart) SUB="$d/bin/airprompt-autostart.sh";;
     help|-h|--help)
-      echo "AirPrompt — remote mobile access and voice dictation for Claude sessions"
+      echo "AirPrompt — remote mobile access and voice dictation for IDE sessions"
       echo ""
       echo "ALL COMMANDS EXECUTE IMMEDIATELY — NO CONFIRMATION EVER."
       echo ""
@@ -72,7 +97,7 @@ for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
       echo "  clean               Full teardown — kill all sessions, remove markers"
       echo "  restart             Restart daemon — sessions survive via disk recovery"
       echo "  name [<text>]       Set or clear session name (empty or \"\" clears)"
-      echo "  autostart on|off    Auto-start AirPrompt on Claude session start"
+      echo "  autostart on|off    Auto-start AirPrompt on IDE session start"
       echo "  help                Show this help"
       echo ""
       echo "Entrypoint: always use 'airprompt <command>' — never call bin/airprompt-*.sh directly."
@@ -81,12 +106,16 @@ for d in "${CLAUDE_PLUGIN_ROOT:-}" ~/.airprompt ~/projects/airprompt; do
     *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, restart, name, autostart, help" >&2; exit 1 ;;
   esac
   if [ -x "$SUB" ]; then
+    # --help delegation never needs a provider — run it first
+    if [ $# -gt 0 ] && { [ "$1" = "--help" ] || [ "$1" = "-h" ]; }; then
+      exec bash "$SUB" --help
+    fi
+    # Commands that need a provider
+    case "$CMD" in on|off|name|autostart) _ensure_provider || exit 1 ;; esac
     case "$CMD" in
       on)
         if [ $# -gt 0 ] && [ "$1" = "--name" ]; then
           exec bash "$SUB" "$@"      # user passed --name explicitly
-        elif [ $# -gt 0 ] && [ "$1" = "--help" -o "$1" = "-h" ]; then
-          exec bash "$SUB" --help    # delegate to sub-script help
         elif [ $# -gt 0 ]; then
           exec bash "$SUB" --name "$1"  # convenience: first positional → name
         else
