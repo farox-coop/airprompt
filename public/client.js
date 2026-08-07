@@ -1244,32 +1244,81 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
 
   // Prevent xterm.js textarea from stealing focus — we manage input
   // ourselves. Hide it visually (still in DOM for xterm internals).
+  // PERMANENT monkey-patch: xterm's textarea.focus() is a noop.
+  // Our #mobile-input handles ALL keyboard events — xterm's textarea
+  // is readonly + invisible + pointer-events:none. xterm only calls
+  // .focus() to steal focus on mousedown, which kills the keyboard.
+  // With the noop, xterm still processes clicks (cursor positioning
+  // via internal mousedown handler) but can never steal focus.
   var _xtermTA = document.querySelector('.xterm-helper-textarea');
   if (_xtermTA) {
     _xtermTA.setAttribute('readonly', '');
     _xtermTA.style.opacity = '0';
     _xtermTA.style.pointerEvents = 'none';
+    _xtermTA.focus = function () {};
   }
 
-  // Document-level focus guard: any time focus lands on xterm's hidden
-  // textarea, redirect to our mobile input. This catches ALL cases —
-  // xterm.js internal focus(), rapid taps, race conditions, etc.
-  // No timing-based workaround needed.
-  document.addEventListener('focusin', function (e) {
-    var tag = e.target.tagName;
-    if (tag === 'TEXTAREA' && e.target.closest('.xterm')) {
-      e.preventDefault();
-      e.stopPropagation();
+  // ── Tap-to-focus: only open keyboard when tapping the prompt area ──
+  //
+  // Uses xterm.js APIs for prompt-zone detection:
+  //
+  //   1. _core._mouseService.getMouseReportCoords(ev, el) — private but
+  //      stable (used by VS Code; xterm collaborator jerch, disc #4380).
+  //
+  //   2. term.buffer.active.getLine(y).translateToString() — public API
+  //      (since v3.14). Scan upward from cursorY for the ❯ marker.
+  //
+  // 'click' event fires after the full mousedown→mouseup→click sequence,
+  // when event dispatch is complete. xterm has already updated its
+  // internal cursor position by then. focus() from 'click' works cleanly
+  // because no event dispatch is in progress — unlike pointerdown where
+  // the browser is still processing the touch.
+  //
+  // ❯ not found in buffer → use cursorY ± 4 rows as zone.
+  document.getElementById('terminal-container').addEventListener('click', function (ev) {
+    // ── Step 1: get the viewport row of the tap ──────────────────
+    var coords = term._core._mouseService.getMouseReportCoords(ev, term.element);
+    if (!coords || typeof coords.row !== 'number') return;
+    var tapRow = coords.row;
+
+    // ── Step 2: find the prompt start line (❯ marker) ───────────
+    var buf = term.buffer.active;
+    var cursorBufY = buf.cursorY;
+    var viewportY = buf.viewportY;
+    var promptStartBufY = cursorBufY;
+    var found = false;
+
+    for (var y = cursorBufY; y >= Math.max(0, cursorBufY - 30); y--) {
+      var line = buf.getLine(y);
+      if (line) {
+        var text = line.translateToString(true);
+        if (text.indexOf('❯') !== -1) {
+          promptStartBufY = y;
+          found = true;
+          break;
+        }
+      }
+    }
+
+    if (!found) {
+      promptStartBufY = Math.max(0, cursorBufY - 4);
+    }
+
+    // ── Step 3: focus if tap is within the prompt zone ──────────
+    var promptStartRow = promptStartBufY - viewportY;
+    var cursorRow = cursorBufY - viewportY;
+
+    if (tapRow >= promptStartRow && tapRow <= cursorRow) {
       inputEl.focus();
+    } else {
+      // Outside prompt zone — blur our input so keyboard closes.
+      // _xtermTA.focus is a noop, so xterm can't steal focus; we must
+      // explicitly release it. Without this, inputEl stays focused
+      // after the first prompt tap and keyboard never closes on output taps.
+      inputEl.blur();
     }
   });
 
-  // Focus input bar when tapping terminal area
-  document.getElementById('terminal-container').addEventListener('click', function () {
-    var kb = window._airpromptKeybar;
-    if (kb && kb.suppressDisarm) kb.suppressDisarm(500);
-    inputEl.focus();
-  });
 
   // ── Helpers: code-point-aware string ops (emoji-safe) ─────────────
 
@@ -1439,13 +1488,5 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
   });
 
   // Initial focus so keyboard opens on page load.
-  // xterm.js refocuses its textarea after open/fit — race it with retries.
-  var _focusRetries = 5;
-  function _initialFocus() {
-    inputEl.focus();
-    if (document.activeElement !== inputEl && --_focusRetries > 0) {
-      setTimeout(_initialFocus, 100);
-    }
-  }
-  setTimeout(_initialFocus, 300);
+  // No auto-focus on mobile — user must tap input directly to open keyboard.
 })();
