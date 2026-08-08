@@ -38,6 +38,8 @@ function getNotifyContainer() {
 
 function showNotification(n) {
   if (!n) return;
+  // Suppress toast when notification is for the session currently being viewed
+  if (typeof activeSessionId !== 'undefined' && activeSessionId && String(n.session_id) === String(activeSessionId)) return;
   var esc = typeof escHtml === 'function' ? function (s) { return escHtml(String(s)); } : function (s) { return String(s); };
   var emoji = NOTIFY_EMOJIS[n.notification_type] || '📨';
   var summary = NOTIFY_SUMMARIES[n.notification_type] || ('Notification: ' + (n.notification_type || 'unknown'));
@@ -46,7 +48,7 @@ function showNotification(n) {
   // Priority: notify.sh enriched label → session name → cwd basename → session_id prefix
   var sid = String(n.session_id || '');
   var label = n.session_label || '';
-  if (!label && sid && typeof sessions !== 'undefined') {
+  if (!label && sid && typeof sessions !== 'undefined' && sessions) {
     var match = sessions.find(function (s) { return s.id === sid; });
     if (match) {
       label = match.name || (match.cwd ? String(match.cwd).split('/').pop() : '');
