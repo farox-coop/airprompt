@@ -15,7 +15,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 
-DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
+DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 STATE_DIR="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"

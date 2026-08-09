@@ -13,7 +13,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 
-DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
+DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────

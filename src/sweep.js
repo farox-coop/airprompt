@@ -4,7 +4,7 @@
 const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { tmuxExists, getSessionsDir: _getSessionsDir } = require('./utils');
+const { getSessionsDir: _getSessionsDir } = require('./utils');
 
 /**
  * One pass over `sessions` Map:
@@ -31,8 +31,15 @@ function runStaleSweep(sessions, deps) {
   let removed = 0;
 
   for (const [id, entry] of sessions) {
-    // Dead tmux — remove immediately
-    if (!tmuxExists(entry.tmuxSession)) {
+    // Dead tmux — remove only on explicit "no session" (exit code 1).
+    // Other non-zero codes (tmux error, timeout, missing binary) must NOT
+    // trigger data loss — same guard as server.js recoverSessionsFromDisk.
+    let tmuxDead = false;
+    try {
+      const r = spawnSync('tmux', ['has-session', '-t', entry.tmuxSession], { timeout: 2000 });
+      if (r.status === 1) tmuxDead = true;
+    } catch (_) {}
+    if (tmuxDead) {
       sessions.delete(id);
       removed++;
       log('warn', 'stale session removed', { id, tmuxSession: entry.tmuxSession });

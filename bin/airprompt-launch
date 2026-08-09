@@ -121,7 +121,8 @@ SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
 declare -a FORWARD_ENV=()
 while IFS='=' read -r name value; do
   case "$name" in
-    AIRPROMPT_*) ;;
+    AIRPROMPT_DEBUG|AIRPROMPT_PID_FILE|AIRPROMPT_TMUX_SESSION|AIRPROMPT_CAPTURE) ;;  # strip internal-only vars
+    AIRPROMPT_*) FORWARD_ENV+=("$name=$value") ;;  # forward config vars for deactivate hooks
     BASH_FUNC_* | BASH_ALIASES | BASH_ARGV | BASH_SOURCE | BASH_LINENO | _) ;;  # skip shell internals
     *) FORWARD_ENV+=("$name=$value") ;;
   esac

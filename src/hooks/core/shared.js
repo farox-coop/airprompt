@@ -92,7 +92,7 @@ function resolvePort() {
       if (info.port) return info.port;
     }
   } catch (_) {}
-  return parseInt(process.env.AIRPROMPT_PORT || process.env.PORT || '3210', 10);
+  return parseInt(process.env.AIRPROMPT_PORT || '3210', 10);
 }
 
 module.exports = { request, post, get, put, detectTls, resolvePort, stateDir };

@@ -36,7 +36,7 @@ for cmd in tmux reptyr curl node; do
 done
 
 # ── Config ─────────────────────────────────────────────────────────
-DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
+DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
 # Auto-detect provider if not set (attach.sh can be invoked directly)

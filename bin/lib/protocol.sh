@@ -10,7 +10,7 @@
 # State dir: ~/.airprompt/state/ (daemon.json, certs)
 
 # Default port — callers may override before sourcing or after.
-AP_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
+AP_PORT="${AIRPROMPT_PORT:-3210}"
 AP_PROTO="http"
 AP_CURL_OPTS=""
 
@@ -24,12 +24,12 @@ detect_protocol() {
   # NO_TLS overrides everything — skip daemon.json when set.
   if [ "${AIRPROMPT_NO_TLS:-}" = "1" ]; then
     AP_PROTO="http"
-    AP_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
-  elif [ -f "$daemon_json" ] && command -v jq >/dev/null 2>&1; then
+    AP_PORT="${AIRPROMPT_PORT:-3210}"
+  elif [ -f "$daemon_json" ]; then
     AP_PROTO=$(jq -r '.protocol // "http"' "$daemon_json" 2>/dev/null || echo "http")
     local jq_port
     jq_port=$(jq -r '.port // ""' "$daemon_json" 2>/dev/null || echo "")
-    AP_PORT="${jq_port:-${PORT:-${AIRPROMPT_PORT:-3210}}}"
+    AP_PORT="${jq_port:-${AIRPROMPT_PORT:-3210}}"
   elif [ -f "$cert_file" ] && [ -f "$key_file" ]; then
     AP_PROTO="https"
   fi
@@ -51,7 +51,7 @@ daemon_env() {
   [ -n "${AIRPROMPT_PID_FILE:-}" ]     && parts+=("AIRPROMPT_PID_FILE='$AIRPROMPT_PID_FILE'")
   [ -n "${AIRPROMPT_SESSIONS_DIR:-}" ] && parts+=("AIRPROMPT_SESSIONS_DIR='$AIRPROMPT_SESSIONS_DIR'")
   [ -n "${AIRPROMPT_NO_TLS:-}" ]       && parts+=("AIRPROMPT_NO_TLS='$AIRPROMPT_NO_TLS'")
-  [ -n "${PORT:-}" ]                   && parts+=("PORT='$PORT'")
+  # PORT removed — AIRPROMPT_PORT is the single source of truth
   printf '%s' "${parts[*]}"
 }
 

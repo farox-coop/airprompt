@@ -11,7 +11,7 @@ const qrcode = require('qrcode-terminal');
 const { tmuxExists, sessionToJSON, getSessionsDir } = require('./src/utils');
 const { runStaleSweep } = require('./src/sweep');
 
-const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
+const PORT = process.env.AIRPROMPT_PORT || 3210;
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
 const STALE_CHECK_MS = 60_000;
 const DEBUG = process.env.AIRPROMPT_DEBUG === '1';

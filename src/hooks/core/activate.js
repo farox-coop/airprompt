@@ -61,8 +61,23 @@ function startDaemon(installDir, port, pidFile) {
     process.stderr.write(`airprompt: daemon spawn failed: ${err.message}\n`);
   });
   child.unref();
+  // Wait for HTTP readiness, not just PID — server writes PID before
+  // recovery+listen, so register can ECONNREFUSED during slow recovery.
   for (let i = 0; i < 30; i++) {
-    if (daemonRunning(pidFile)) return true;
+    if (daemonRunning(pidFile)) {
+      try {
+        const http = require('http');
+        const resp = await new Promise((resolve) => {
+          const req = http.get(`http://localhost:${port}/api/sessions`, (res) => {
+            let data = ''; res.on('data', (c) => data += c);
+            res.on('end', () => resolve(data));
+          });
+          req.on('error', () => resolve(null));
+          req.setTimeout(500, () => { req.destroy(); resolve(null); });
+        });
+        if (resp !== null) return true;
+      } catch (_) {}
+    }
     const ms = (i < 10) ? 0.1 : 0.3;
     try { spawnSync('sleep', [String(ms)], { timeout: 1000 }); } catch (_) {}
   }
@@ -240,20 +255,31 @@ async function activateSession(ctx) {
         // Tmux session definitely dead — clean up stale marker and proceed to re-register
         try { fs.unlinkSync(activeFile); } catch (_) {}
       } else if (r.status === 0) {
-        process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
-
-        // Still auto-apply project name
+        // Read session ID first — needed for daemon check and auto-name
         let sid = '';
         try { sid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
-        if (sid) await autoApplyName(sid, ctx.cwd, myDir, port, tls);
 
-        sweepDeadSessions(sessionsDir, port, tls);
-
-        return {
-          status: 'ok',
-          message: 'session already registered',
-          url: null,
-          sessionId: sid || null,
+        // Verify daemon actually holds this session — idempotency fast-path
+        // can be stale if daemon was restarted without cleaning markers.
+        let daemonHasSession = false;
+        try {
+          const resp = await get('/api/sessions', port, tls);
+          if (Array.isArray(resp)) {
+            daemonHasSession = resp.some(s => s.sessionId === sid || s.tmuxSession === currentTmux);
+          }
+        } catch (_) { daemonHasSession = true; /* unreachable — assume yes */ }
+        if (!daemonHasSession) {
+          // Daemon lost it — clean the stale marker and re-register
+          try { fs.unlinkSync(activeFile); } catch (_) {}
+        } else {
+          process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
+          if (sid) await autoApplyName(sid, ctx.cwd, myDir, port, tls);
+          sweepDeadSessions(sessionsDir, port, tls);
+          return {
+            status: 'ok',
+            message: 'session already registered',
+            url: null,
+            sessionId: sid || null,
         };
       }
     }

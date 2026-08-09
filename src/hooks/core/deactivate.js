@@ -86,6 +86,8 @@ function stopDaemon(pidFile) {
   try {
     const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
     process.kill(pid, 'SIGTERM');
+    // Unlink AFTER kill — prevents racing activate from spawning duplicate
+    // daemon while this one is still shutting down.
     try { fs.unlinkSync(pidFile); } catch (_) {}
   } catch (_) {}
 }
@@ -166,7 +168,13 @@ async function deactivateSession(ctx) {
     if (resp && resp.ok) {
       serverOk = true;
     } else {
-      return { status: 'ok', message: 'server refused unregister (tmux alive), skipping local cleanup', url: null, sessionId: null };
+      // Server refused — may be 409 stale-state (mirror killed but daemon
+      // disagrees). Retry with force:true if we already killed the mirror.
+      const mirrorFile = myDir ? path.join(myDir, 'mirror') : '';
+      if (mirrorFile && fs.existsSync(mirrorFile)) {
+        try { await post('/api/sessions/unregister', { sessionId, force: true }, port, tls); serverOk = true; } catch (_) {}
+      }
+      // Always fall through to local cleanup — the per-session dir is stale
     }
   } catch (_) {
     // Daemon unreachable — clean up locally

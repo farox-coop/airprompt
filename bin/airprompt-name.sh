@@ -18,7 +18,7 @@ fi
 # ── Save original PWD before any cd ─────────────────────────────────
 ORIG_PWD="$PWD"
 
-DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
+DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
 PROVIDER="${AIRPROMPT_PROVIDER:?}"
 PROJECT_NAMES_FILE="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}/project-names.json"

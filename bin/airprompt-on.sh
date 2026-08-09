@@ -21,7 +21,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
+DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
@@ -86,7 +86,12 @@ fi
 # ── Ensure daemon is running ─────────────────────────────────────────
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE")
-  if ! kill -0 "$PID" 2>/dev/null; then
+  if kill -0 "$PID" 2>/dev/null; then
+    # PID reuse guard — verify cmdline matches
+    if [ -r "/proc/$PID/cmdline" ]; then
+      tr '\0' ' ' < "/proc/$PID/cmdline" | grep -q 'server\.js' || rm -f "$PID_FILE"
+    fi
+  else
     rm -f "$PID_FILE"
   fi
 fi
@@ -168,15 +173,27 @@ _name_update() {
 # Daemon recovers state from on-disk markers on startup, so a simple
 # file check is sufficient — no need to double-check with daemon API.
 if [ -f "$ACTIVE_FILE" ]; then
-  if [ -n "$SESSION_NAME" ]; then
-    MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
-    if [ -n "$MY_SID" ]; then
-      _name_update "$MY_SID" "$SESSION_NAME" "$MY_DIR"
-    fi
+  # Verify tmux session still exists — stale active marker + dead tmux
+  # would falsely report "already active" forever, blocking re-registration.
+  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    HAS_RC=0
+  else
+    HAS_RC=$?
   fi
-  echo "AirPrompt already active for this session."
-  echo "Mobile URL: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
-  exit 0
+  if [ "${HAS_RC:-0}" -eq 1 ]; then
+    # Tmux dead — clean up stale markers and proceed to register
+    rm -f "$ACTIVE_FILE"
+  else
+    if [ -n "$SESSION_NAME" ]; then
+      MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
+      if [ -n "$MY_SID" ]; then
+        _name_update "$MY_SID" "$SESSION_NAME" "$MY_DIR"
+      fi
+    fi
+    echo "AirPrompt already active for this session."
+    echo "Mobile URL: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
+    exit 0
+  fi
 fi
 
 # ── Register with daemon ────────────────────────────────────────────
@@ -186,6 +203,8 @@ ESC_CWD=$(_json_escape "$ORIG_PWD")
 ESC_SESSION=$(_json_escape "$TMUX_SESSION")
 REG_PAYLOAD="{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ESC_CWD}\",\"tmuxSession\":\"${ESC_SESSION}\",\"providerId\":\"${PROVIDER}\""
 if [ -n "$SESSION_NAME" ]; then
+  SESSION_NAME=$(echo "$SESSION_NAME" | tr -cd 'a-zA-Z0-9 _-' | head -c 64)
+  [ -n "$SESSION_NAME" ] || SESSION_NAME=""
   ESCAPED_NAME=$(_json_escape "$SESSION_NAME")
   REG_PAYLOAD="${REG_PAYLOAD},\"name\":\"${ESCAPED_NAME}\""
 fi
@@ -250,7 +269,7 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
       curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
-        -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
+        -d "{\"sessionId\":\"${SID}\",\"force\":true}" > /dev/null 2>&1 || true
       rm -rf "$d"
     fi
   done

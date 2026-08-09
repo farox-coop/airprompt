@@ -120,7 +120,8 @@ function stateDir() {
  * @returns {string} ~/.airprompt/sessions/{providerId}-{sanitizedSessionName}/
  */
 function sessionDir(providerId, sessionName) {
-  const safe = String(sessionName || '').replace(/[^a-zA-Z0-9_.-]/g, '');
+  const raw = String(sessionName || '');
+  const safe = raw.replace(/[^a-zA-Z0-9_.-]/g, '') || (raw ? 'unknown' : '');
   return path.join(sessionsRootDir(), `${providerId}-${safe}`);
 }
 
