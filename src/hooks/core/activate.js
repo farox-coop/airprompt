@@ -330,6 +330,10 @@ async function activateSession(ctx) {
         let markerOk = true;
         try {
           fs.mkdirSync(myDir, { recursive: true });
+          // When daemon returns 409, our sessionId matches what it already has.
+          // Write ALL marker files — including session — so subsequent lookups
+          // (airprompt name, statusline badge) find complete state on disk.
+          fs.writeFileSync(path.join(myDir, 'session'), sessionId + '\n');
           // Only write files that are missing (airprompt-launch writes tmux+provider)
           if (!fs.existsSync(path.join(myDir, 'tmux'))) fs.writeFileSync(path.join(myDir, 'tmux'), tmuxSession + '\n');
           if (!fs.existsSync(path.join(myDir, 'provider'))) fs.writeFileSync(path.join(myDir, 'provider'), providerId + '\n');
@@ -351,20 +355,15 @@ async function activateSession(ctx) {
           };
         }
 
-        // Read existing session ID from disk (may be missing — fallback handled by name.sh/status)
-        let existingSid = '';
-        try { existingSid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
-        if (existingSid) {
-          await autoApplyName(existingSid, cwd, myDir, port, tls);
-        }
-
+        // Use the sessionId we just wrote (same one daemon rejected as duplicate)
+        await autoApplyName(sessionId, cwd, myDir, port, tls);
         sweepDeadSessions(sessionsDir, port, tls);
 
         return {
           status: 'ok',
           message: 'session already registered (recovered)',
-          url: null,
-          sessionId: existingSid || null,
+          url,
+          sessionId,
         };
       }
 
