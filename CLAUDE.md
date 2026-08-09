@@ -33,6 +33,8 @@ airprompt help             # show usage
 Examples from this project:
 - Notification toasts → `public/notify.js` (not crammed into `client.js`)
 - Keyboard bar → `public/keybar.js` (already separated)
+- Voice dictation → `public/dictation.js` (extracted from `client.js`)
+- Stale session sweep → `src/sweep.js` (extracted from `server.js`)
 - Session management could be `public/sessions.js`
 
 Smaller focused files > one giant file.

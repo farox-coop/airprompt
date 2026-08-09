@@ -66,7 +66,7 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | `off` | Unregister current session + hide statusline badge |
 | `status` | Show daemon status and all active sessions |
 | `name [<text>]` | Set display name for current session (empty or "" clears it) |
-| `clean` | Full teardown — kill daemon, remove all tmux sessions, markers, ~/bin/ symlinks, wrappers, and ~/.airprompt/ install dir |
+| `clean` | Full teardown — kill daemon, remove all sessions/config. Preserves install files (~/.airprompt/server.js) so autostart hook target survives |
 | `restart` | Restart daemon — sessions survive via disk recovery |
 | `autostart on|off` | Auto-start AirPrompt on IDE session start |
 | `help` | Print usage |
@@ -92,7 +92,7 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | `test-integration` | Run shell integration tests |
 | `install-plugin` | Install AirPrompt as an IDE plugin |
 | `uninstall-plugin` | Remove plugin registration |
-| `clean` | Remove PID, daemon.json, sessions, logs, node_modules |
+| `clean` | Remove PID, daemon.json, state, sessions, logs, node_modules |
 
 ## TLS & Voice Dictation
 
