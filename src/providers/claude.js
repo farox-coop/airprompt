@@ -612,6 +612,8 @@ const ClaudeProvider = {
       if (!opts.dryRun) {
         try {
           for (const entry of fs.readdirSync(sessionsDir)) {
+            // Only remove claude- prefixed session dirs — other providers live here too
+            if (!entry.startsWith('claude-')) continue;
             const p = path.join(sessionsDir, entry);
             if (fs.statSync(p).isDirectory()) {
               fs.rmSync(p, { recursive: true, force: true });

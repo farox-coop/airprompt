@@ -319,11 +319,21 @@ async function activateSession(ctx) {
       const already = resp && resp.error === 'Session already registered';
       if (already) {
         // If we created a mirror tmux for this registration attempt,
-        // kill it — the daemon already has the session under a different tmux.
+        // kill it and skip marker writes — the real session (under the
+        // live tmux from the original registration) already has them.
         if (isMirror) {
           try { spawnSync('tmux', ['kill-session', '-t', tmuxSession], { timeout: 2000 }); } catch (_) {}
+          sweepDeadSessions(sessionsDir, port, tls);
+          return {
+            status: 'ok',
+            message: 'session already registered (recovered)',
+            url: null,
+            sessionId,
+          };
         }
 
+        // Non-mirror: write marker files under the real tmux dir so
+        // subsequent lookups (airprompt name, statusline badge) work.
         const myDir = sessionDir(providerId, tmuxSession);
         const lanIp = getLanIp();
         const url = `${tls ? 'https' : 'http'}://${lanIp}:${port}`;

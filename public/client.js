@@ -790,17 +790,17 @@ function setLang(code) {
   updateFlag();
   buildLangList();
   updateAllLabels();
-  if (wasListening) {
-    setTimeout(() => {
-      // Only restart if no newer lang switch happened
-      if (gen !== _langSwitchGen) return;
-      isListening = true;
-      _safeRecognitionStart();
-      dictateBtn.classList.add('recording');
-      dictateIcon.textContent = '🔴';
-      dictateLabel.textContent = tr('recording');
-    }, 200);
-  }
+  // Always schedule restart — gen check below ensures only the last
+  // call's restart fires, even across rapid switches where intermediate
+  // calls see isListening already false.
+  setTimeout(() => {
+    if (gen !== _langSwitchGen) return;
+    isListening = true;
+    _safeRecognitionStart();
+    dictateBtn.classList.add('recording');
+    dictateIcon.textContent = '🔴';
+    dictateLabel.textContent = tr('recording');
+  }, 200);
 }
 
 function showLangDropdown() {
@@ -922,13 +922,13 @@ if (SpeechRecognition) {
     }
   };
 
+  const onendExpectedGen = _onendGen;
   recognition.onend = () => {
     dictateOverlay.classList.remove('speaking');
-    // Only restart if the recognition session created this onend is still
-    // the active one. Prevents stale onend from pauseDictation() restarting
-    // after resumeDictation() already started a fresh session.
-    const myGen = _onendGen;
-    if (isListening && myGen === _onendGen && !_stopPending) _safeRecognitionStart();
+    // Only restart if the recognition session that created this onend is
+    // still the active one. Prevents stale onend from pauseDictation()
+    // restarting after resumeDictation() already started a fresh session.
+    if (isListening && onendExpectedGen === _onendGen && !_stopPending) _safeRecognitionStart();
   };
 
   updateFlag();
@@ -1416,6 +1416,17 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
     // Processing them corrupts _prev state and sends stray control chars.
     if (e.isComposing) return;
 
+    // Cancel pending Enter debounce for non-Enter special keys
+    // (Backspace, arrows, etc.) — user changed their mind mid-edit.
+    if (_enterTimer && e.key !== 'Enter') {
+      clearTimeout(_enterTimer);
+      _enterTimer = null;
+      if (_prev.endsWith('\n')) {
+        _prev = _prev.slice(0, -1);
+        inputEl.value = _prev;
+      }
+    }
+
     var seq = SPECIAL_KEYS[e.key];
     if (seq) {
       e.preventDefault();
@@ -1463,17 +1474,8 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
       return;
     }
 
-    // Any non-Enter key cancels the pending \n debounce — the user
-    // changed their mind and is now editing.
-    if (_enterTimer && e.key !== 'Enter') {
-      clearTimeout(_enterTimer);
-      _enterTimer = null;
-      // Undo the \n we added to _prev/value when the first Enter was tapped.
-      if (_prev.endsWith('\n')) {
-        _prev = _prev.slice(0, -1);
-        inputEl.value = _prev;
-      }
-    }
+    // Pending Enter debounce already cancelled above — this block only
+    // runs for non-Enter, non-SPECIAL_KEYS input, so no additional action.
 
     // Handle Ctrl+letter combos from hardware keyboards on mobile.
     // Ctrl alone (not AltGr / Cmd) — mask with 0x1f before sending.

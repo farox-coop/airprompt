@@ -278,12 +278,23 @@ function pruneOrphanedManagedHooks(settings, configDir) {
   if (settings.hooks && typeof settings.hooks === 'object') {
     for (const ev of Object.keys(settings.hooks)) {
       if (!Array.isArray(settings.hooks[ev])) { delete settings.hooks[ev]; continue; }
-      const before = settings.hooks[ev].length;
+      // Per-hook filtering: only remove individual orphaned hooks
+      // within each entry — preserve co-located non-managed hooks.
+      for (let ei = 0; ei < settings.hooks[ev].length; ei++) {
+        const entry = settings.hooks[ev][ei];
+        if (!entry || typeof entry !== 'object' || !Array.isArray(entry.hooks)) continue;
+        const origLen = entry.hooks.length;
+        entry.hooks = entry.hooks.filter(h => {
+          if (!h || typeof h.command !== 'string') return true; // agent hooks
+          return !targetMissing(h.command);
+        });
+        removed += origLen - entry.hooks.length;
+      }
+      // Remove entries that became empty after filtering
       settings.hooks[ev] = settings.hooks[ev].filter(entry => {
-        if (!entry || typeof entry !== 'object' || !Array.isArray(entry.hooks)) return true;
-        return !entry.hooks.some(h => h && typeof h.command === 'string' && targetMissing(h.command));
+        if (!entry || !Array.isArray(entry.hooks)) return true;
+        return entry.hooks.length > 0;
       });
-      removed += before - settings.hooks[ev].length;
       if (settings.hooks[ev].length === 0) delete settings.hooks[ev];
     }
     if (Object.keys(settings.hooks).length === 0) delete settings.hooks;

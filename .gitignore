@@ -17,3 +17,6 @@ thumbs.db
 # Environment variables
 .env
 .env.local
+
+# Review findings (read-only reports, not code)
+.claude/review-findings/
