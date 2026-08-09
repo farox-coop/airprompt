@@ -77,7 +77,7 @@ fi
 
 # Fallback: create daemon session if it doesn't exist (e.g. killed above)
 if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
-  tmux new-session -d -s airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log"
+  tmux new-session -d -s airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log" || true
 fi
 
 # ── 3. Wait for daemon to be ready ────────────────────────────────────

@@ -39,7 +39,7 @@ if [ -n "$CURRENT_TMUX" ]; then
   if [ -d "${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}" ]; then
     MY_DIR="${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}"
     if [ -z "$SESSION_ID" ]; then
-      SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
+      SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
     fi
   fi
 fi
@@ -54,11 +54,14 @@ fi
 # ── Kill airprompt tmux session before unregister ──────────────────
 TMUX_TO_KILL=""
 if [ -n "$MY_DIR" ] && [ -f "${MY_DIR}/tmux" ]; then
-  TMUX_TO_KILL=$(head -c 128 "${MY_DIR}/tmux" 2>/dev/null | tr -d '\n\r')
+  TMUX_TO_KILL=$(head -c 128 "${MY_DIR}/tmux" 2>/dev/null | tr -d '\n\r' || true)
 fi
 if [ -n "$TMUX_TO_KILL" ] && echo "$TMUX_TO_KILL" | grep -q '^airprompt-'; then
-  tmux kill-session -t "$TMUX_TO_KILL" 2>/dev/null || true
-  sleep 0.2
+  # Only kill if mirror marker exists — real sessions named airprompt-* must survive
+  if [ -f "${MY_DIR}/mirror" ]; then
+    tmux kill-session -t "$TMUX_TO_KILL" 2>/dev/null || true
+    sleep 0.2
+  fi
 fi
 
 # ── Unregister from daemon (force: true — user explicitly asked) ────
@@ -89,7 +92,7 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
     DN=$(basename "$d")
     # Read real tmux name from dir — dir name is sanitized,
     # real name may differ (e.g. "My Session!" vs "MySession").
-    REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r')
+    REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r' || true)
     [ -z "$REAL_TMUX" ] && REAL_TMUX="$DN"
     tmux has-session -t "$REAL_TMUX" 2>/dev/null && HAS_RC=0 || HAS_RC=$?
     if [ $HAS_RC -eq 0 ]; then
@@ -97,7 +100,7 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
     elif [ $HAS_RC -eq 1 ]; then
       # Only delete if tmux explicitly says "no session" (exit code 1).
       echo "Cleaning up dead session dir: $DN" >&2
-      SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r')
+      SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r' || true)
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
       curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
@@ -134,7 +137,14 @@ if [ "$REMAINING_COUNT" = "0" ]; then
   if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
     if kill -0 "$PID" 2>/dev/null; then
-      kill "$PID" 2>/dev/null || true
+      # Verify PID is actually airprompt before killing (same guard as clean.sh)
+      IS_AIRPROMPT=false
+      if [ -r "/proc/$PID/cmdline" ]; then
+        tr '\0' ' ' < "/proc/$PID/cmdline" | grep -q 'server\.js' && IS_AIRPROMPT=true
+      fi
+      if $IS_AIRPROMPT; then
+        kill "$PID" 2>/dev/null || true
+      fi
     fi
     rm -f "$PID_FILE"
   fi

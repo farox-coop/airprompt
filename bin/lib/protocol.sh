@@ -21,10 +21,16 @@ detect_protocol() {
   local key_file="${state_dir}/airprompt-key.pem"
 
   # daemon.json is SSOT for running daemon's protocol. Cert files are fallback.
-  if [ -f "$daemon_json" ] && command -v jq >/dev/null 2>&1; then
+  # NO_TLS overrides everything — skip daemon.json when set.
+  if [ "${AIRPROMPT_NO_TLS:-}" = "1" ]; then
+    AP_PROTO="http"
+    AP_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
+  elif [ -f "$daemon_json" ] && command -v jq >/dev/null 2>&1; then
     AP_PROTO=$(jq -r '.protocol // "http"' "$daemon_json" 2>/dev/null || echo "http")
-    AP_PORT=$(jq -r '.port // 3210' "$daemon_json" 2>/dev/null || echo "$AP_PORT")
-  elif [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && [ -f "$cert_file" ] && [ -f "$key_file" ]; then
+    local jq_port
+    jq_port=$(jq -r '.port // ""' "$daemon_json" 2>/dev/null || echo "")
+    AP_PORT="${jq_port:-${PORT:-${AIRPROMPT_PORT:-3210}}}"
+  elif [ -f "$cert_file" ] && [ -f "$key_file" ]; then
     AP_PROTO="https"
   fi
   [ "$AP_PROTO" = "https" ] && AP_CURL_OPTS="-k" || true
@@ -35,14 +41,18 @@ detect_protocol() {
 # env prefix string passed to `tmux new-session` / `tmux respawn-pane`.
 # Caller must have DEBUG set.
 daemon_env() {
-  local env_str="AIRPROMPT_DEBUG=${AIRPROMPT_DEBUG:-0}"
-  [ -n "${AIRPROMPT_STATE_DIR:-}" ]    && env_str="$env_str AIRPROMPT_STATE_DIR=$AIRPROMPT_STATE_DIR"
-  [ -n "${AIRPROMPT_PORT:-}" ]         && env_str="$env_str AIRPROMPT_PORT=$AIRPROMPT_PORT"
-  [ -n "${AIRPROMPT_PID_FILE:-}" ]     && env_str="$env_str AIRPROMPT_PID_FILE=$AIRPROMPT_PID_FILE"
-  [ -n "${AIRPROMPT_SESSIONS_DIR:-}" ] && env_str="$env_str AIRPROMPT_SESSIONS_DIR=$AIRPROMPT_SESSIONS_DIR"
-  [ -n "${AIRPROMPT_NO_TLS:-}" ]       && env_str="$env_str AIRPROMPT_NO_TLS=$AIRPROMPT_NO_TLS"
-  [ -n "${PORT:-}" ]                   && env_str="$env_str PORT=$PORT"
-  printf '%s' "$env_str"
+  # Build env assignments with values single-quoted so spaces in paths
+  # survive the unquoted word-splitting in `tmux new-session` commands.
+  # Output format: KEY='val' KEY2='val2' ...
+  local parts=()
+  parts+=("AIRPROMPT_DEBUG='${AIRPROMPT_DEBUG:-0}'")
+  [ -n "${AIRPROMPT_STATE_DIR:-}" ]    && parts+=("AIRPROMPT_STATE_DIR='$AIRPROMPT_STATE_DIR'")
+  [ -n "${AIRPROMPT_PORT:-}" ]         && parts+=("AIRPROMPT_PORT='$AIRPROMPT_PORT'")
+  [ -n "${AIRPROMPT_PID_FILE:-}" ]     && parts+=("AIRPROMPT_PID_FILE='$AIRPROMPT_PID_FILE'")
+  [ -n "${AIRPROMPT_SESSIONS_DIR:-}" ] && parts+=("AIRPROMPT_SESSIONS_DIR='$AIRPROMPT_SESSIONS_DIR'")
+  [ -n "${AIRPROMPT_NO_TLS:-}" ]       && parts+=("AIRPROMPT_NO_TLS='$AIRPROMPT_NO_TLS'")
+  [ -n "${PORT:-}" ]                   && parts+=("PORT='$PORT'")
+  printf '%s' "${parts[*]}"
 }
 
 # ── Ensure ~/bin/ binaries exist ────────────────────────────────────────

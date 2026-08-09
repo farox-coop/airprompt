@@ -122,6 +122,7 @@ declare -a FORWARD_ENV=()
 while IFS='=' read -r name value; do
   case "$name" in
     AIRPROMPT_*) ;;
+    BASH_FUNC_* | BASH_ALIASES | BASH_ARGV | BASH_SOURCE | BASH_LINENO | _) ;;  # skip shell internals
     *) FORWARD_ENV+=("$name=$value") ;;
   esac
 done < <(env)
@@ -191,12 +192,16 @@ launch_tmux_capture() {
   local session="$1"
   local capture_file="$2"
   shift 2
-  # env sets AIRPROMPT_CAPTURE + all FORWARD_ENV vars before running bash.
-  # The bash wrapper runs "$@" (the IDE), then captures pane output on exit.
-  # Previous code placed `env` as $1 inside bash -c — a positional param,
-  # not the env command. AIRPROMPT_CAPTURE was never set for the bash shell.
+  # Build a safe command string: each arg is %q-escaped by bash,
+  # so spaces/newlines/metachars in env values or IDE args survive.
+  # FORWARD_ENV values are already quoted by the read loop (line 123-125).
+  # We pass the real command via argv to bash -c 'exec "$@"' — no injection.
+  local env_args=()
+  for var in "${FORWARD_ENV[@]}"; do
+    env_args+=("$var")
+  done
   tmux new-session -d -s "$session" \
-    env AIRPROMPT_CAPTURE="$capture_file" "${FORWARD_ENV[@]}" \
+    env AIRPROMPT_CAPTURE="$capture_file" "${env_args[@]}" \
     bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ "$@"
   tmux set-option -t "$session" focus-events on
 }

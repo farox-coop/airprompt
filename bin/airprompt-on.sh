@@ -16,7 +16,7 @@ fi
 SESSION_NAME=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --name) SESSION_NAME="${2:-}"; shift 2 ;;
+    --name) SESSION_NAME="${2:-}"; [ $# -ge 2 ] && shift 2 || shift ;;
     *) shift ;;
   esac
 done
@@ -78,7 +78,7 @@ SESSION_ID="$(echo "$TMUX_SESSION" | tr -cd 'a-zA-Z0-9_-')"
 
 LAN_IP=""
 if command -v hostname &>/dev/null; then
-  LAN_IP=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.' | grep -v '^10\.' | head -1)
+  LAN_IP=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.' | grep -v '^10\.' | head -1 || true)
 fi
 [ -z "$LAN_IP" ] && LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 [ -z "$LAN_IP" ] && LAN_IP="localhost"
@@ -169,7 +169,7 @@ _name_update() {
 # file check is sufficient — no need to double-check with daemon API.
 if [ -f "$ACTIVE_FILE" ]; then
   if [ -n "$SESSION_NAME" ]; then
-    MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
+    MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
     if [ -n "$MY_SID" ]; then
       _name_update "$MY_SID" "$SESSION_NAME" "$MY_DIR"
     fi
@@ -180,10 +180,13 @@ if [ -f "$ACTIVE_FILE" ]; then
 fi
 
 # ── Register with daemon ────────────────────────────────────────────
-REG_PAYLOAD="{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\",\"providerId\":\"${PROVIDER}\""
+# JSON-escape all string fields to prevent injection from special chars in paths
+_json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+ESC_CWD=$(_json_escape "$ORIG_PWD")
+ESC_SESSION=$(_json_escape "$TMUX_SESSION")
+REG_PAYLOAD="{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ESC_CWD}\",\"tmuxSession\":\"${ESC_SESSION}\",\"providerId\":\"${PROVIDER}\""
 if [ -n "$SESSION_NAME" ]; then
-  # Escape backslashes and double-quotes to prevent JSON injection
-  ESCAPED_NAME=$(printf '%s' "$SESSION_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  ESCAPED_NAME=$(_json_escape "$SESSION_NAME")
   REG_PAYLOAD="${REG_PAYLOAD},\"name\":\"${ESCAPED_NAME}\""
 fi
 REG_PAYLOAD="${REG_PAYLOAD}}"
@@ -233,7 +236,7 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
     [ "$DN" = "${PROVIDER}-${SAFE_TMUX}" ] && continue
     # Read real tmux name from dir — dir name is sanitized,
     # real name may differ (e.g. "My Session!" vs "MySession").
-    REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r')
+    REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r' || true)
     [ -z "$REAL_TMUX" ] && REAL_TMUX="$DN"
     tmux has-session -t "$REAL_TMUX" 2>/dev/null && HAS_SESSION_RC=0 || HAS_SESSION_RC=$?
     if [ $HAS_SESSION_RC -eq 0 ]; then
@@ -243,7 +246,7 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
       # Other non-zero codes = tmux error/timeout — don't touch (safe).
       echo "Cleaning up dead session dir: $DN" >&2
       # Read session ID from the session file (not from dir name)
-      SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r')
+      SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r' || true)
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
       curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \

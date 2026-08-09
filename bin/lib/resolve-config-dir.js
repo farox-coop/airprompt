@@ -40,7 +40,14 @@ if (targetId) {
     process.exit(1);
   }
 } else {
-  provider = providers[0];
+  // Use first detected (installed) provider, not allProviders()[0] which is
+  // readdir-order and non-deterministic when multiple provider files exist.
+  const detectedIds = registry.detectInstalledProviders();
+  if (detectedIds.length === 0) {
+    process.stderr.write('AirPrompt: no provider detected\n');
+    process.exit(1);
+  }
+  provider = registry.loadProvider(detectedIds[0]);
 }
 
 if (typeof provider.configDir !== 'function') {

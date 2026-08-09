@@ -32,7 +32,7 @@ var ROWS = [
     { label: '\\',    seq: '\\',       cls: '' },
   ],
   [
-    { label: 'S+T',   seq: '\x1b[Z',   cls: 'combo', raw: true },
+    { label: 'Sft+Tab',seq: '\x1b[Z', cls: 'combo', raw: true },
     { label: 'Undo',  seq: '/rewind\r', cls: 'combo', raw: true },
     { label: 'Stash', seq: '\x13',     cls: 'combo', raw: true },
     { label: 'Search',seq: '\x12',     cls: 'combo', raw: true },

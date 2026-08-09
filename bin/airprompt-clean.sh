@@ -89,10 +89,19 @@ if [ -d "$HOME_BIN" ]; then
   done
 fi
 
-# 5. Remove install directory (~/.airprompt/)
+# 5. Remove state directory (sessions + daemon data). If ~/.airprompt is the
+#    install dir (contains server.js), only remove state/sessions subdirs so
+#    the autostart hook target (src/hooks/airprompt-activate.js) survives.
 AIRPROMPT_INSTALL="${AIRPROMPT_INSTALL_DIR:-$HOME/.airprompt}"
 if [ -d "$AIRPROMPT_INSTALL" ]; then
-  _safe_rm_rf "$AIRPROMPT_INSTALL" && { rm -rf "$AIRPROMPT_INSTALL" && echo "  removed $AIRPROMPT_INSTALL"; }
+  if [ -f "$AIRPROMPT_INSTALL/server.js" ]; then
+    # ~/.airprompt is the install dir — only remove state subdirs
+    echo "  (preserving install files in $AIRPROMPT_INSTALL — removing only state/sessions)"
+    _safe_rm_rf "$AIRPROMPT_INSTALL/state" && { rm -rf "$AIRPROMPT_INSTALL/state" && echo "  removed state dir"; } || true
+    _safe_rm_rf "$AIRPROMPT_INSTALL/sessions" && { rm -rf "$AIRPROMPT_INSTALL/sessions" && echo "  removed sessions dir"; } || true
+  else
+    _safe_rm_rf "$AIRPROMPT_INSTALL" && { rm -rf "$AIRPROMPT_INSTALL" && echo "  removed $AIRPROMPT_INSTALL"; }
+  fi
 fi
 
 # 6. Remove logs

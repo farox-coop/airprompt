@@ -73,7 +73,8 @@ if (cmd === 'on') {
     const entry = s.hooks.SessionStart[ei];
     if (!entry || !Array.isArray(entry.hooks)) continue;
     entry.hooks = entry.hooks.filter(function (h) {
-      if (!h || typeof h.command !== 'string') return false;
+      // Preserve hooks that aren't command-type (agent hooks, etc.)
+      if (!h || typeof h.command !== 'string') return true;
       const tokens = tokenizeCommand(h.command);
       return !tokens.some(function (t) {
         return MANAGED.indexOf(path.basename(t)) !== -1;

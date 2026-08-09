@@ -48,12 +48,16 @@ SESSION_ID=""
 SAFE_NAME=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
 if [ -n "$SAFE_NAME" ] && [ -d "${SESSIONS_DIR}/${PROVIDER}-${SAFE_NAME}" ]; then
   MY_DIR="${SESSIONS_DIR}/${PROVIDER}-${SAFE_NAME}"
-  SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r')
+  SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
 fi
 
 if [ -z "$SESSION_ID" ]; then
-  echo "AirPrompt: no active session. Run /airprompt on first." >&2
-  exit 1
+  # session file missing — fall back to tmux name (same logic as server.js recovery)
+  SESSION_ID=$(head -c 128 "${MY_DIR}/tmux" 2>/dev/null | tr -d '\n\r' || true)
+  if [ -z "$SESSION_ID" ]; then
+    echo "AirPrompt: no active session. Run /airprompt on first." >&2
+    exit 1
+  fi
 fi
 
 # ── Set name via API ──────────────────────────────────────────────────

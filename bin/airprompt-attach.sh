@@ -122,9 +122,14 @@ if ! curl -s $AP_CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then
 fi
 
 # ── Register with daemon ────────────────────────────────────────────
+# JSON-escape fields to prevent injection from special chars in paths
+_json_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+ESC_CWD=$(_json_esc "$ORIG_PWD")
+ESC_TMUX=$(_json_esc "$TMUX_SESSION")
+ESC_PROV=$(_json_esc "$PROVIDER")
 RESP=$(curl -s $AP_CURL_OPTS -X POST "${API_URL}/api/sessions/register" \
   -H "Content-Type: application/json" \
-  -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ORIG_PWD}\",\"tmuxSession\":\"${TMUX_SESSION}\",\"providerId\":\"${PROVIDER}\"}" || echo "")
+  -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ESC_CWD}\",\"tmuxSession\":\"${ESC_TMUX}\",\"providerId\":\"${ESC_PROV}\"}" || echo "")
 
 if echo "$RESP" | grep -q '"ok":true'; then
   LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -137,7 +142,8 @@ if echo "$RESP" | grep -q '"ok":true'; then
   echo "$TMUX_SESSION" > "${MY_DIR}/tmux"
   echo "$PROVIDER" > "${MY_DIR}/provider"
   touch "${MY_DIR}/active"
-  touch "${MY_DIR}/mirror"  # AirPrompt-created session — auto-cleanup when process exits
+  # Do NOT write mirror — attached sessions contain real IDE processes.
+  # Only AirPrompt-created empty shells (on.sh CREATED_SESSION=true) get mirror.
   echo ""
   echo "AirPrompt session registered: $SESSION_ID"
   echo "Mobile URL: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"

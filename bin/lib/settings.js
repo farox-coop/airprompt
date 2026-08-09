@@ -94,8 +94,23 @@ function readSettings(p) {
     return null;
   }
   if (!raw.trim()) return {};
-  try { return JSON.parse(raw); } catch (_) { /* fall through to JSONC */ }
-  try { return JSON.parse(stripJsonComments(raw)); }
+  try {
+    const v = JSON.parse(raw);
+    // Guard: valid JSON that isn't an object (array, string, number) is not a settings file
+    if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+      process.stderr.write('airprompt: settings.json is not an object — treating as empty\n');
+      return {};
+    }
+    return v;
+  } catch (_) { /* fall through to JSONC */ }
+  try {
+    const v = JSON.parse(stripJsonComments(raw));
+    if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+      process.stderr.write('airprompt: settings.json is not an object — treating as empty\n');
+      return {};
+    }
+    return v;
+  }
   catch (e) {
     process.stderr.write(`airprompt: warning — ${p} is not valid JSON or JSONC: ${e.message}\n`);
     return null;
@@ -192,11 +207,23 @@ function removeAirPromptHooks(settings) {
   for (const ev of Object.keys(settings.hooks)) {
     if (!Array.isArray(settings.hooks[ev])) { delete settings.hooks[ev]; continue; }
     const before = settings.hooks[ev].length;
+    // Filter managed hooks from each entry individually — preserve unrelated
+    // hooks sharing the same entry (both agent-type and third-party commands).
+    for (let ei = 0; ei < settings.hooks[ev].length; ei++) {
+      const entry = settings.hooks[ev][ei];
+      if (!entry || !Array.isArray(entry.hooks)) continue;
+      const origLen = entry.hooks.length;
+      entry.hooks = entry.hooks.filter(h => {
+        if (!h || typeof h.command !== 'string') return true; // preserve agent hooks, etc.
+        return !referencesManagedScript(h.command);
+      });
+      removed += origLen - entry.hooks.length;
+    }
+    // Remove entries that became empty after filtering
     settings.hooks[ev] = settings.hooks[ev].filter(entry => {
       if (!entry || !Array.isArray(entry.hooks)) return true;
-      return !entry.hooks.some(h => h && typeof h.command === 'string' && referencesManagedScript(h.command));
+      return entry.hooks.length > 0;
     });
-    removed += before - settings.hooks[ev].length;
     if (settings.hooks[ev].length === 0) delete settings.hooks[ev];
   }
   if (Object.keys(settings.hooks).length === 0) delete settings.hooks;

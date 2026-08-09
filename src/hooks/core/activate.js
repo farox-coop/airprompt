@@ -91,11 +91,25 @@ function detectTmux() {
 function getLanIp() {
   try {
     const ifaces = os.networkInterfaces();
+    // Collect all candidates, then pick the best one
+    const candidates = [];
     for (const name of Object.keys(ifaces)) {
       for (const iface of ifaces[name]) {
-        if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+        if (iface.family === 'IPv4' && !iface.internal) {
+          candidates.push({ name, address: iface.address });
+        }
       }
     }
+    // Prefer non-docker/non-bridge interfaces (filter 172.x and docker0/br-*)
+    for (const c of candidates) {
+      if (!c.address.startsWith('172.') && !c.address.startsWith('10.')
+          && !c.name.startsWith('docker') && !c.name.startsWith('br-')
+          && !c.name.startsWith('veth') && !c.name.startsWith('virbr')) {
+        return c.address;
+      }
+    }
+    // Fallback: any non-internal is better than localhost
+    if (candidates.length > 0) return candidates[0].address;
   } catch (_) {}
   return 'localhost';
 }
@@ -117,6 +131,8 @@ function sweepDeadSessions(sessionsDir, port, tls) {
     try { realTmux = fs.readFileSync(path.join(full, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
     if (!realTmux) continue;
     const r = spawnSync('tmux', ['has-session', '-t', realTmux], { timeout: 2000 });
+    // Only delete on explicit "no session" (exit 1). Other codes (tmux error,
+    // timeout, missing binary) must not trigger data loss.
     if (r.status === 1) {
       try {
         const sid = fs.readFileSync(path.join(full, 'session'), 'utf8').trim().slice(0, 128);
@@ -217,36 +233,44 @@ async function activateSession(ctx) {
     const myDir = sessionDir(providerId, currentTmux);
     const activeFile = path.join(myDir, 'active');
     if (fs.existsSync(activeFile)) {
-      process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
+      // Verify tmux session is still alive — stale active marker with dead
+      // tmux means the session was dropped by daemon but dir not cleaned.
+      const r = spawnSync('tmux', ['has-session', '-t', currentTmux], { timeout: 2000 });
+      if (r.status === 1) {
+        // Tmux session definitely dead — clean up stale marker and proceed to re-register
+        try { fs.unlinkSync(activeFile); } catch (_) {}
+      } else if (r.status === 0) {
+        process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
 
-      // Still auto-apply project name
-      let sid = '';
-      try { sid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
-      if (sid) await autoApplyName(sid, ctx.cwd, myDir, port, tls);
+        // Still auto-apply project name
+        let sid = '';
+        try { sid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
+        if (sid) await autoApplyName(sid, ctx.cwd, myDir, port, tls);
 
-      sweepDeadSessions(sessionsDir, port, tls);
+        sweepDeadSessions(sessionsDir, port, tls);
 
-      return {
-        status: 'ok',
-        message: 'session already registered',
-        url: null,
-        sessionId: sid || null,
-      };
+        return {
+          status: 'ok',
+          message: 'session already registered',
+          url: null,
+          sessionId: sid || null,
+        };
+      }
     }
   }
 
   // 5. Generate session ID
   const cwd = ctx.cwd || process.cwd();
   const cwdSafe = path.basename(cwd).replace(/[^a-zA-Z0-9_-]/g, '');
-  const sessionId = ctx.sessionId || `${Date.now()}-${process.pid}-${cwdSafe}`;
+  const sessionId = ctx.sessionId || `${Date.now()}-${process.pid}-${cwdSafe}`.slice(0, 64);
 
   // 6. Resolve tmux session
   let tmuxSession = currentTmux;
   let isMirror = false;
   if (!tmuxSession) {
     tmuxSession = `airprompt-${sessionId}`;
-    spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], { timeout: 2000 });
-    isMirror = true;
+    const mirrorResult = spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], { timeout: 2000 });
+    isMirror = mirrorResult.status === 0;
   }
 
   // 7. Register with daemon
@@ -289,6 +313,61 @@ async function activateSession(ctx) {
         sessionId,
       };
     } else {
+      // 409 = daemon already has session (disk recovery on restart).
+      // Don't overwrite session ID — daemon owns it. Just fill in
+      // missing marker files so subsequent lookups find the session.
+      const already = resp && resp.error === 'Session already registered';
+      if (already) {
+        // If we created a mirror tmux for this registration attempt,
+        // kill it — the daemon already has the session under a different tmux.
+        if (isMirror) {
+          try { spawnSync('tmux', ['kill-session', '-t', tmuxSession], { timeout: 2000 }); } catch (_) {}
+        }
+
+        const myDir = sessionDir(providerId, tmuxSession);
+        const lanIp = getLanIp();
+        const url = `${tls ? 'https' : 'http'}://${lanIp}:${port}`;
+        let markerOk = true;
+        try {
+          fs.mkdirSync(myDir, { recursive: true });
+          // Only write files that are missing (airprompt-launch writes tmux+provider)
+          if (!fs.existsSync(path.join(myDir, 'tmux'))) fs.writeFileSync(path.join(myDir, 'tmux'), tmuxSession + '\n');
+          if (!fs.existsSync(path.join(myDir, 'provider'))) fs.writeFileSync(path.join(myDir, 'provider'), providerId + '\n');
+          // Write url so statusline badge works after recovery
+          if (!fs.existsSync(path.join(myDir, 'url'))) fs.writeFileSync(path.join(myDir, 'url'), url + '\n');
+          fs.writeFileSync(path.join(myDir, 'active'), '');  // always write — this is what idempotency checks
+          if (isMirror) fs.writeFileSync(path.join(myDir, 'mirror'), '');
+        } catch (e) {
+          process.stderr.write(`airprompt: marker write failed: ${e.message}\n`);
+          markerOk = false;
+        }
+
+        if (!markerOk) {
+          return {
+            status: 'error',
+            message: 'marker write failed — session exists in daemon but disk state incomplete',
+            url: null,
+            sessionId: null,
+          };
+        }
+
+        // Read existing session ID from disk (may be missing — fallback handled by name.sh/status)
+        let existingSid = '';
+        try { existingSid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
+        if (existingSid) {
+          await autoApplyName(existingSid, cwd, myDir, port, tls);
+        }
+
+        sweepDeadSessions(sessionsDir, port, tls);
+
+        return {
+          status: 'ok',
+          message: 'session already registered (recovered)',
+          url: null,
+          sessionId: existingSid || null,
+        };
+      }
+
       return {
         status: 'error',
         message: `registration failed: ${JSON.stringify(resp)}`,

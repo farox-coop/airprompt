@@ -26,7 +26,7 @@ let map = {};
 try {
   if (fs.existsSync(file)) {
     map = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (typeof map !== 'object' || map === null) map = {};
+    if (typeof map !== 'object' || map === null || Array.isArray(map)) map = {};
   }
 } catch (_) {
   map = {};

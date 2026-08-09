@@ -113,14 +113,25 @@ function recoverSessionsFromDisk() {
       continue;
     }
 
-    if (!tmuxExists(realTmux)) {
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+    // Only delete on explicit "no session" (exit code 1).
+    // Other non-zero codes (tmux error, timeout, missing binary) must NOT
+    // trigger data loss — same guard used in on.sh/off.sh sweep loops.
+    const hasSession = spawnSync('tmux', ['has-session', '-t', realTmux], { timeout: 2000 });
+    if (hasSession.status !== 0) {
+      if (hasSession.status === 1) {
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+      }
+      // status 2+ (tmux error) or signal — skip, don't delete
       continue;
     }
 
     let sessionId, name;
-    try { sessionId = fs.readFileSync(path.join(dir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) { sessionId = realTmux; }
-    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) sessionId = realTmux;
+    try { sessionId = fs.readFileSync(path.join(dir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) { sessionId = ''; }
+    // Validate: sessionId must match register's format. If missing or invalid,
+    // fall back to sanitized tmux name (strip dots/spaces, same as on.sh SESSION_ID).
+    if (!sessionId || !/^[a-zA-Z0-9_-]{1,64}$/.test(sessionId)) {
+      sessionId = realTmux.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) || realTmux.slice(0, 64);
+    }
     try { name = fs.readFileSync(path.join(dir, 'name'), 'utf8').trim().slice(0, 64) || null; } catch (_) { name = null; }
 
     let cwd = process.env.HOME || '/';
@@ -164,7 +175,7 @@ function createApp() {
       return res.status(400).json({ error: 'Missing or invalid providerId' });
 
     let actualTmuxSession;
-    if (tmuxSession && /^[a-zA-Z0-9_-]{1,64}$/.test(tmuxSession) && tmuxExists(tmuxSession)) {
+    if (tmuxSession && /^[a-zA-Z0-9_. -]{1,64}$/.test(tmuxSession) && tmuxExists(tmuxSession)) {
       actualTmuxSession = tmuxSession;
     } else {
       actualTmuxSession = `airprompt-${sessionId}`;
@@ -222,13 +233,23 @@ function createApp() {
     }
     sessions.delete(sessionId);
     log('info', 'session unregistered', { sessionId, tmuxSession: entry.tmuxSession });
-    // Clean airprompt- prefixed sessions when orphaned
+    // Clean airprompt- prefixed sessions when orphaned — but ONLY if
+    // a mirror marker exists (created by activate.js for IDE outside tmux).
+    // Real sessions named airprompt-* (on.sh without CREATED_SESSION) must survive.
     if (entry.tmuxSession && entry.tmuxSession.startsWith('airprompt-')) {
       let shared = false;
       for (const [, other] of sessions) {
         if (other.tmuxSession === entry.tmuxSession) { shared = true; break; }
       }
-      if (!shared) killTmuxSession(entry.tmuxSession);
+      if (!shared) {
+        // Check mirror marker before killing
+        const sessionsDir = getSessionsDir();
+        const safeName = entry.tmuxSession.replace(/[^a-zA-Z0-9_.-]/g, '') || entry.tmuxSession.replace(/[^a-zA-Z0-9]/g, '') || 'unknown';
+        const mirrorFile = path.join(sessionsDir, `${entry.providerId || 'unknown'}-${safeName}`, 'mirror');
+        let isMirror = false;
+        try { isMirror = fs.existsSync(mirrorFile); } catch (_) {}
+        if (isMirror) killTmuxSession(entry.tmuxSession);
+      }
     }
     // Non-airprompt tmux sessions belong to real IDE instances — never kill them
     broadcastSessionList(wss);
@@ -310,10 +331,12 @@ function createApp() {
     const { sessionId, name } = req.body || {};
     if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
     if (!sessions.has(sessionId)) return res.status(404).json({ error: 'Session not found' });
+    // name field not present → no-op (don't silently clear)
+    if (name === undefined) return res.json({ ok: true, name: sessions.get(sessionId).name });
     // Reject non-string non-nullish values (numbers, objects, booleans)
     if (name != null && typeof name !== 'string')
       return res.status(400).json({ error: 'name must be a string' });
-    // Empty string clears the name; non-empty must pass validation
+    // Empty string or null clears the name; non-empty must pass validation
     if (typeof name === 'string' && name.length > 0 && !/^[a-zA-Z0-9 _-]{1,64}$/.test(name))
       return res.status(400).json({ error: 'Invalid name: max 64 chars, alphanumeric + spaces, dashes, underscores' });
     const entry = sessions.get(sessionId);
@@ -326,8 +349,26 @@ function createApp() {
 
   const tlsOptions = TLS_ENABLED ? { key: fs.readFileSync(KEY_FILE), cert: fs.readFileSync(CERT_FILE) } : null;
   const httpServer = tlsOptions ? https.createServer(tlsOptions, app) : http.createServer(app);
-  const wss = new WebSocketServer({ server: httpServer, pingInterval: 30000, pingTimeout: 5000 });
+  const wss = new WebSocketServer({ server: httpServer });
   wss.on('error', (err) => console.error('WebSocketServer error:', err.message));
+
+  // Keepalive: ping all clients every 30s, terminate unresponsive after 5s.
+  // ws library auto-replies to protocol-level ping frames with pong.
+  const keepaliveInterval = setInterval(() => {
+    wss.clients.forEach((client) => {
+      if (client._airprompt_alive === false) {
+        client.terminate();
+        return;
+      }
+      client._airprompt_alive = false;
+      client.ping();
+    });
+  }, 30000);
+  wss.on('connection', (client) => {
+    client._airprompt_alive = true;
+    client.on('pong', () => { client._airprompt_alive = true; });
+  });
+  httpServer.on('close', () => clearInterval(keepaliveInterval));
 
   wss.on('connection', (ws) => {
     let ptyProcess = null;
