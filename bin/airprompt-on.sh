@@ -127,12 +127,18 @@ if [ ! -f "$PID_FILE" ]; then
       break
     fi
     if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
-      echo "Error: daemon died. Check /tmp/airprompt.log" >&2
+      echo "Error: daemon died after $i attempts. Check /tmp/airprompt.log" >&2
       cd "$ORIG_PWD"
       exit 1
     fi
     sleep 0.5
   done
+  # Verify daemon actually responded — not just timeout
+  if ! curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
+    echo "Error: daemon not responding after 10s. Check /tmp/airprompt.log" >&2
+    cd "$ORIG_PWD"
+    exit 1
+  fi
   cd "$ORIG_PWD"
 fi
 

@@ -124,7 +124,7 @@ function defaultProvider() {
   if (detected.length === 0) {
     throw new Error('airprompt: no provider detected. Set AIRPROMPT_PROVIDER env var or use --provider.');
   }
-  return detected[0];
+  return detected.sort()[0];  // deterministic order regardless of readdir
 }
 
 /**

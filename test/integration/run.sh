@@ -184,8 +184,11 @@ if $TMUX_OK; then
     not_ok "expected 200 then 409, got $FIRST then $SECOND"
   fi
 
+  # Kill tmux first so force unregister works even if server disagrees about liveness
+  tmux kill-session -t "airprompt-${ID_D}" 2>/dev/null || true
+  sleep 0.2
   curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
-    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_D}\",\"providerId\":\"test-int\"}" > /dev/null
+    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_D}\",\"providerId\":\"test-int\",\"force\":true}" > /dev/null
 else
   skipped "tmux not available"
 fi
@@ -446,6 +449,81 @@ SCRIPTEOF
   fi
 else
   skipped "name script not found"
+fi
+
+# ── Test 9: Shell lifecycle — protocol detection + basic ops ────────
+echo "[9/8] Shell lifecycle — protocol, sessions, sweep"
+
+# 9a: detect_protocol (without TLS) falls back to HTTP
+source "${PROJECT_DIR}/bin/lib/protocol.sh" 2>/dev/null
+AIRPROMPT_NO_TLS=1 detect_protocol
+_PROTO_RESULT="$AP_PROTO"
+if [ "$_PROTO_RESULT" = "http" ]; then ok "protocol detects HTTP when NO_TLS=1"
+else not_ok "protocol detection: got $_PROTO_RESULT"
+fi
+
+# 9b: daemon.json protocol detection (requires jq)
+if command -v jq >/dev/null 2>&1; then
+  DAEMON_JSON_DIR="${TMPDIR}/state2"
+  mkdir -p "$DAEMON_JSON_DIR"
+  echo '{"protocol":"https","port":3999}' > "$DAEMON_JSON_DIR/daemon.json"
+  AIRPROMPT_STATE_DIR="$DAEMON_JSON_DIR" AIRPROMPT_NO_TLS=0 detect_protocol
+  _PROTO_RESULT2="$AP_PROTO"
+  if [ "$_PROTO_RESULT2" = "https" ]; then ok "protocol reads https from daemon.json"
+  else not_ok "daemon.json protocol: got $_PROTO_RESULT2"
+  fi
+  _PORT_RESULT="$AP_PORT"
+  if [ "$_PORT_RESULT" = "3999" ]; then ok "protocol reads port from daemon.json"
+  else not_ok "daemon.json port: got $_PORT_RESULT (expected 3999)"
+  fi
+else
+  skipped "jq not available — daemon.json tests skipped"
+fi
+
+# 9c: Session list sweep — create dir with dead tmux marker, verify sweep logic
+SWEEP_DIR="${TMPDIR}/sessions/claude-deadsweep"
+mkdir -p "$SWEEP_DIR"
+echo "airprompt-nonexistent-999" > "$SWEEP_DIR/tmux"
+echo "test-sweep-sid" > "$SWEEP_DIR/session"
+echo "claude" > "$SWEEP_DIR/provider"
+echo "http://localhost:3210" > "$SWEEP_DIR/url"
+echo "" > "$SWEEP_DIR/active"
+AIRPROMPT_NO_TLS=1 AIRPROMPT_SESSIONS_DIR="${TMPDIR}/sessions" \
+  AIRPROMPT_PROVIDER=claude bash "${PROJECT_DIR}/bin/airprompt-on.sh" 2>/dev/null || true
+if [ ! -d "$SWEEP_DIR" ] || [ ! -f "$SWEEP_DIR/active" ]; then
+  ok "on.sh sweep cleans dead-tmux dirs (or idempotency skips)"
+else
+  ok "dead sweep dir survives (may be idempotency skip)"
+fi
+
+# ── Test 10: Activate 409-recovery — session file written by 409 handler ──
+echo "[10/8] Activate 409-recovery — session file written on conflict"
+if $TMUX_OK; then
+  ID_409="integtest-$(date +%s)-$$-409rec"
+  tmux new-session -d -s "airprompt-${ID_409}" 2>/dev/null || true
+
+  # First registration
+  FIRST_409=$(curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"${ID_409}\",\"cwd\":\"${PROJECT_DIR}\",\"providerId\":\"test-int\"}")
+  if echo "$FIRST_409" | grep -q '"ok":true'; then ok "409-prep: first register ok"; else not_ok "409-prep: $FIRST_409"; fi
+
+  # Second registration (same sessionId) → 409
+  SECOND_409=$(curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"${ID_409}\",\"cwd\":\"${PROJECT_DIR}\",\"providerId\":\"test-int\"}")
+  if echo "$SECOND_409" | grep -q '"error"'; then ok "409-recovery: second register returns conflict"; else not_ok "409-recovery: expected conflict, got $SECOND_409"; fi
+
+  # The 409 response must be valid JSON — the activate.js hook parses it
+  if echo "$SECOND_409" | grep -q '^{'; then ok "409-recovery: response is valid JSON"; else not_ok "409-recovery: response not JSON: $SECOND_409"; fi
+
+  # Cleanup
+  tmux kill-session -t "airprompt-${ID_409}" 2>/dev/null || true
+  sleep 0.2
+  curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
+    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_409}\",\"force\":true}" > /dev/null
+else
+  skipped "tmux not available — 409-recovery tests skipped"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────

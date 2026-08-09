@@ -130,3 +130,12 @@
   min-height: 36px;
   visibility: hidden;
 }
+
+/* ── Responsive breakpoints ───────────────────── */
+@media (max-width: 480px) {
+  .keybar-btn { font-size: 14px; padding: 6px 8px; min-width: 28px; }
+  .keybar-btn.keybar-arrow { font-size: 16px; min-width: 32px; }
+}
+@media (min-width: 768px) {
+  .keybar-btn { font-size: 17px; padding: 8px 14px; }
+}

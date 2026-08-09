@@ -131,7 +131,7 @@ function getLanIp() {
 
 // ── Dead session sweep ────────────────────────────────────────────────────
 
-function sweepDeadSessions(sessionsDir, port, tls) {
+async function sweepDeadSessions(sessionsDir, port, tls) {
   if (!fs.existsSync(sessionsDir)) return;
   // Safety: only sweep dirs under ~/.airprompt/sessions/
   if (!sessionsDir.includes('.airprompt')) return;
@@ -151,7 +151,7 @@ function sweepDeadSessions(sessionsDir, port, tls) {
     if (r.status === 1) {
       try {
         const sid = fs.readFileSync(path.join(full, 'session'), 'utf8').trim().slice(0, 128);
-        if (sid) post('/api/sessions/unregister', { sessionId: sid, force: true }, port, tls).catch(() => {});
+        if (sid) await post('/api/sessions/unregister', { sessionId: sid, force: true }, port, tls);
       } catch (_) {}
       try { fs.rmSync(full, { recursive: true, force: true }); } catch (_) {}
     }
@@ -274,7 +274,7 @@ async function activateSession(ctx) {
         } else {
           process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
           if (sid) await autoApplyName(sid, ctx.cwd, myDir, port, tls);
-          sweepDeadSessions(sessionsDir, port, tls);
+          await sweepDeadSessions(sessionsDir, port, tls);
           return {
             status: 'ok',
             message: 'session already registered',
@@ -349,7 +349,7 @@ async function activateSession(ctx) {
         // live tmux from the original registration) already has them.
         if (isMirror) {
           try { spawnSync('tmux', ['kill-session', '-t', tmuxSession], { timeout: 2000 }); } catch (_) {}
-          sweepDeadSessions(sessionsDir, port, tls);
+          await sweepDeadSessions(sessionsDir, port, tls);
           return {
             status: 'ok',
             message: 'session already registered (recovered)',

@@ -349,3 +349,13 @@ body, html {
   display: block;
 }
 
+/* ── Responsive breakpoints ───────────────────── */
+@media (max-width: 480px) {
+  #session-bar { padding: 0 8px; }
+  #session-list { width: 100vw; left: 0; }
+  #dictate-text { font-size: 15px; padding: 10px 12px; }
+}
+@media (min-width: 768px) {
+  #notify-container { left: auto; width: 360px; }
+  #session-list { max-width: 400px; left: auto; right: 0; }
+}

@@ -338,9 +338,12 @@ function wsMessageHandler(event) {
       hideLoadSpinner();  // Always hide spinner — even with zero sessions
       updateUI();
 
-      // Valid active session with PTY already spawned — nothing to do
+      // Valid active session with PTY already spawned — nothing to do.
+      // Unless server-side PTY died (attachedClients=0) — re-spawn it.
       if (activeSessionId && sessions.some((s) => s.id === activeSessionId) && !_needPtySpawn) {
-        break;
+        var cur = sessions.find(function(s) { return s.id === activeSessionId; });
+        if (cur && cur.attachedClients === 0) _needPtySpawn = true;
+        else break;
       }
 
       // Try restore persisted session, else fall back to first
