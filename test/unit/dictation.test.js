@@ -739,7 +739,8 @@ function simulateAccumulatorEvents(events, accumulator) {
   for (const eventResults of events) {
     const { running } = simulateOnresult(eventResults);
     if (running) {
-      if (accumulator.text && running.startsWith(accumulator.text)) {
+      // Match production: case-insensitive localeCompare (client.js:850)
+      if (accumulator.text && running.length >= accumulator.text.length && running.slice(0, accumulator.text.length).localeCompare(accumulator.text, undefined, { sensitivity: 'base' }) === 0) {
         accumulator.text = running;
       } else if (accumulator.text) {
         const lower = running.charAt(0).toLowerCase() + running.slice(1);
@@ -944,10 +945,9 @@ function simulateToggleState(isListening, isPaused, stopPending) {
   } else if (stopPending) {
     // Guard: ignore taps during in-flight stop
     return { action: 'ignored' };
-  } else if (isPaused) {
-    return { action: 'resume' };
   } else {
-    // START path
+    // START path — production toggleDictation() does not have an isPaused branch;
+    // tapping mic while paused triggers a fresh start (accumulator cleared).
     return { action: 'start', accumulator: '' };
   }
 }
@@ -975,9 +975,10 @@ test('toggleDictation — _stopPending guard and state transitions', async (t) =
     assert.strictEqual(r.accumulator, '');
   });
 
-  await t.test('paused + no guard → resume (not start)', () => {
+  await t.test('paused + no guard → start (production toggleDictation has no isPaused branch)', () => {
     const r = simulateToggleState(false, true, false);
-    assert.strictEqual(r.action, 'resume');
+    assert.strictEqual(r.action, 'start');
+    assert.strictEqual(r.accumulator, '');
   });
 });
 

@@ -622,7 +622,6 @@ let recognition = null;
 let isListening = false;
 let isPaused = false;          // Long-tap while recording → pause
 let _stopPending = false;     // Guard: ignore taps while stop is in-flight
-let _pauseGen = 0;            // Prevents stale onend restart after pause→resume
 let _onendGen = 0;            // Prevents stale onend from pauseDictation() restarting
 let dictationAccumulator = '';   // Persists across recognition restarts (Chrome Android)
 
@@ -993,6 +992,7 @@ function toggleDictation(e) {
   }
 }
 
+// Writes recognized text to PTY without Enter — leaves cursor on same line.
 function acceptDictation() {
   _stopPending = false;
   const text = dictateText.textContent.trim();
@@ -1489,6 +1489,5 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
     }
   });
 
-  // Initial focus so keyboard opens on page load.
-  // No auto-focus on mobile — user must tap input directly to open keyboard.
+  // No auto-focus — user must tap input directly to open keyboard.
 })();

@@ -122,6 +122,8 @@ function simulateSendKey(modState, seq) {
 
 // ── applyModifiers (mirrors keybar.js) — for native keyboard input ──
 
+var _focusGraceUntil = 0;  // suppress disarm until this timestamp (keybar.js:256)
+
 function applyModifiers(modState, data) {
   // Guard: empty/ghost events must not disarm one-shot modifiers.
   if (!data) return { result: data, disarmed: [] };
@@ -130,25 +132,29 @@ function applyModifiers(modState, data) {
   var alt   = modState.alt.armed   || modState.alt.locked;
   var shift = modState.shift.armed || modState.shift.locked;
 
-  // Disarm one-shot modifiers (locked stay active)
+  // Grace period: suppress disarm during focus-handoff window (keybar.js:270-278)
+  var inGrace = Date.now() < _focusGraceUntil;
   var disarmed = [];
-  if (modState.ctrl.armed)  { modState.ctrl.armed = false; disarmed.push('ctrl'); }
-  if (modState.alt.armed && !modState.alt.locked) {
-    modState.alt.armed = false; disarmed.push('alt');
+  if (!inGrace) {
+    if (modState.ctrl.armed)  { modState.ctrl.armed = false; disarmed.push('ctrl'); }
+    if (modState.alt.armed && !modState.alt.locked) {
+      modState.alt.armed = false; disarmed.push('alt');
+    }
+    if (modState.shift.armed) { modState.shift.armed = false; disarmed.push('shift'); }
   }
-  if (modState.shift.armed) { modState.shift.armed = false; disarmed.push('shift'); }
 
   var result = data;
 
-  // Apply Ctrl mask per character
+  // Apply Ctrl mask per code point (emoji-safe — iterates chars, not UTF-16 units)
   if (ctrl) {
     var masked = '';
-    for (var i = 0; i < result.length; i++) {
-      var code = result.charCodeAt(i);
+    var chars = Array.from(result);
+    for (var i = 0; i < chars.length; i++) {
+      var code = chars[i].codePointAt(0);
       if (code >= 0x20 && code < 0x7f) {
         masked += String.fromCharCode(code & 0x1f);
       } else {
-        masked += result[i];
+        masked += chars[i];
       }
     }
     result = masked;
@@ -1110,6 +1116,32 @@ test('applyModifiers — ghost event guard (empty data does not disarm)', async 
     // (tested via simulateTermOnData which checks isCopyPasteCombo first)
     assert.strictEqual(st.ctrl.armed, true);
     assert.strictEqual(st.shift.armed, true);
+  });
+
+  // Grace period: modifiers stay armed during focus-handoff window.
+  // Mirrors keybar.js _focusGraceUntil + suppressDisarm logic (L270-278).
+  await t.test('grace period — modifiers not disarmed within window', function () {
+    var st = createModState();
+    handleSticky(st, 'ctrl', 1000);  // arm Ctrl
+    handleSticky(st, 'shift', 1100); // arm Shift
+    _focusGraceUntil = Date.now() + 500;  // 500ms grace window
+    var r = applyModifiers(st, 'x');
+    // Modifiers still applied (Ctrl+Shift transform)
+    assert.strictEqual(r.disarmed.length, 0, 'no disarming during grace');
+    assert.strictEqual(st.ctrl.armed, true);
+    assert.strictEqual(st.shift.armed, true);
+    _focusGraceUntil = 0;  // reset
+  });
+
+  await t.test('grace period expired — modifiers disarm normally', function () {
+    var st = createModState();
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'shift', 1100);
+    _focusGraceUntil = 0;  // expired
+    var r = applyModifiers(st, 'x');
+    assert.ok(r.disarmed.length >= 2, 'should disarm both ctrl and shift');
+    assert.strictEqual(st.ctrl.armed, false);
+    assert.strictEqual(st.shift.armed, false);
   });
 });
 

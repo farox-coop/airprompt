@@ -118,8 +118,17 @@ _safe_rm_rf() {
   }
   canonical="${canonical%/}/$(basename "$path")"
 
+  local sessions_dir="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
   case "$canonical" in
     "$HOME/.airprompt"|"$HOME/.airprompt/"*) return 0 ;;
+  esac
+  # Custom sessions dir — only allow if path contains "airprompt" AND
+  # is under the configured dir. Prevents catastrophic rm -rf when
+  # AIRPROMPT_SESSIONS_DIR is misconfigured to /, /tmp, or /home.
+  case "$canonical" in
+    "$sessions_dir"|"$sessions_dir/"*) ;;
     *) echo "  SAFETY: refusing to rm -rf ${path} (canonical: ${canonical})" >&2; return 1 ;;
   esac
+  case "$sessions_dir" in *airprompt*) return 0 ;; esac
+  echo "  SAFETY: AIRPROMPT_SESSIONS_DIR missing 'airprompt' in path — refusing rm -rf" >&2; return 1
 }

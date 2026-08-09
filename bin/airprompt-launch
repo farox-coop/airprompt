@@ -287,7 +287,7 @@ fi
 
 # ── Not in tmux — create a tmux session and run IDE inside ────────
 if [ -n "$SESSION_NAME" ]; then
-  SANITIZED=$(echo "$SESSION_NAME" | tr -cd 'a-zA-Z0-9_-')
+  SANITIZED=$(echo "$SESSION_NAME" | tr -cd 'a-zA-Z0-9_.-')
   TMUX_SESSION="airprompt-${SANITIZED}"
 else
   TMUX_SESSION="airprompt-$$-$(date +%s)"

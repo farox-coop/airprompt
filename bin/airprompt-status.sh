@@ -43,8 +43,18 @@ DAEMON_RUNNING=false
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE")
   if kill -0 "$PID" 2>/dev/null; then
-    DAEMON_RUNNING=true
-  else
+    # PID reuse guard — same /proc/cmdline pattern as off.sh/clean.sh but
+    # opposite fallback: if /proc is unreadable (non-Linux), assume RUNNING
+    # (show status). off.sh assumes NOT-airprompt (safer default for kill).
+    if [ -r "/proc/$PID/cmdline" ]; then
+      if tr '\0' ' ' < "/proc/$PID/cmdline" | grep -q 'server\.js'; then
+        DAEMON_RUNNING=true
+      fi
+    else
+      DAEMON_RUNNING=true  # non-Linux — fall back to kill -0 only
+    fi
+  fi
+  if ! $DAEMON_RUNNING; then
     rm -f "$PID_FILE"
   fi
 fi

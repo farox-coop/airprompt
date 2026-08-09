@@ -96,18 +96,19 @@ function readSettings(p) {
   if (!raw.trim()) return {};
   try {
     const v = JSON.parse(raw);
-    // Guard: valid JSON that isn't an object (array, string, number) is not a settings file
+    // Guard: valid JSON that isn't an object (array, string, number) is corrupted.
+    // Return null so callers refuse to overwrite — prevents data loss (cf. autostart.js null check).
     if (typeof v !== 'object' || v === null || Array.isArray(v)) {
-      process.stderr.write('airprompt: settings.json is not an object — treating as empty\n');
-      return {};
+      process.stderr.write('airprompt: settings.json is not an object — corrupted, refusing to modify\n');
+      return null;
     }
     return v;
   } catch (_) { /* fall through to JSONC */ }
   try {
     const v = JSON.parse(stripJsonComments(raw));
     if (typeof v !== 'object' || v === null || Array.isArray(v)) {
-      process.stderr.write('airprompt: settings.json is not an object — treating as empty\n');
-      return {};
+      process.stderr.write('airprompt: settings.json is not an object — corrupted, refusing to modify\n');
+      return null;
     }
     return v;
   }

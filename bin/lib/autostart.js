@@ -9,8 +9,6 @@
 
 'use strict';
 
-const path = require('path');
-
 const cmd = process.argv[2];
 const settingsPath = process.argv[3];
 
@@ -34,6 +32,8 @@ if (cmd === 'on') {
     process.stderr.write('AirPrompt autostart: settings.json is corrupted — cannot modify\n');
     process.exit(1);
   }
+  // NOTE: marker is a stable identifier, not a path. Must match the
+  // MANAGED_HOOK_BASENAMES set in bin/lib/settings.js or off won't clean it.
   const added = addCommandHook(s, 'SessionStart', {
     command: 'node ' + JSON.stringify(activateScript),
     marker: 'airprompt-activate.js',
@@ -54,38 +54,18 @@ if (cmd === 'on') {
     process.exit(1);
   }
 
-  const { readSettings, writeSettings, hasAirPromptHook, tokenizeCommand } = require(settingsLib);
+  const { readSettings, writeSettings, removeAirPromptHooks } = require(settingsLib);
   const s = readSettings(settingsPath);
   if (s === null) {
     process.stderr.write('AirPrompt autostart: settings.json is corrupted — cannot modify\n');
     process.exit(1);
   }
-  if (!hasAirPromptHook(s, 'SessionStart', 'airprompt-activate.js')) {
+  const removed = removeAirPromptHooks(s);
+  if (removed === 0) {
     process.stdout.write('AirPrompt autostart: already OFF\n');
     process.exit(0);
   }
-
-  const MANAGED = ['airprompt-activate.js', 'airprompt-deactivate.js', 'airprompt-statusline.sh'];
-  if (!Array.isArray(s.hooks.SessionStart)) {
-    s.hooks.SessionStart = [];
-  }
-  for (let ei = 0; ei < s.hooks.SessionStart.length; ei++) {
-    const entry = s.hooks.SessionStart[ei];
-    if (!entry || !Array.isArray(entry.hooks)) continue;
-    entry.hooks = entry.hooks.filter(function (h) {
-      // Preserve hooks that aren't command-type (agent hooks, etc.)
-      if (!h || typeof h.command !== 'string') return true;
-      const tokens = tokenizeCommand(h.command);
-      return !tokens.some(function (t) {
-        return MANAGED.indexOf(path.basename(t)) !== -1;
-      });
-    });
-  }
-  s.hooks.SessionStart = s.hooks.SessionStart.filter(function (entry) {
-    return entry && Array.isArray(entry.hooks) && entry.hooks.length > 0;
-  });
-  if (s.hooks.SessionStart.length === 0) delete s.hooks.SessionStart;
-  if (Object.keys(s.hooks).length === 0) delete s.hooks;
+  if (s.hooks && Object.keys(s.hooks).length === 0) delete s.hooks;
   writeSettings(settingsPath, s);
   process.stdout.write('AirPrompt autostart: OFF\n');
 }

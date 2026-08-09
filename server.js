@@ -9,6 +9,7 @@ const fs = require('fs');
 const { spawnSync } = require('child_process');
 const qrcode = require('qrcode-terminal');
 const { tmuxExists, sessionToJSON, getSessionsDir } = require('./src/utils');
+const { runStaleSweep } = require('./src/sweep');
 
 const PORT = process.env.PORT || process.env.AIRPROMPT_PORT || 3210;
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
@@ -352,7 +353,7 @@ function createApp() {
   const wss = new WebSocketServer({ server: httpServer });
   wss.on('error', (err) => console.error('WebSocketServer error:', err.message));
 
-  // Keepalive: ping all clients every 30s, terminate unresponsive after 5s.
+  // Keepalive: ping all clients every 30s, terminate if no pong by next interval.
   // ws library auto-replies to protocol-level ping frames with pong.
   const keepaliveInterval = setInterval(() => {
     wss.clients.forEach((client) => {
@@ -557,46 +558,7 @@ function createApp() {
   const ORPHAN_GRACE_MS = 120_000; // 2 minutes grace before killing orphan mirrors
 
   const staleInterval = setInterval(() => {
-    let changed = false;
-    for (const [id, entry] of sessions) {
-      if (!tmuxExists(entry.tmuxSession)) { sessions.delete(id); changed = true; log('warn', 'stale session removed', { id, tmuxSession: entry.tmuxSession }); continue; }
-
-      // Orphan detection: mirror sessions (airprompt-*) that have no attached
-      // clients and no recent activity are leaked shells — kill them.
-      // Only sessions with a 'mirror' marker file are mirrors. Sessions created
-      // by airprompt-launch use airprompt-* prefix but are NOT mirrors.
-      if (entry.tmuxSession.startsWith('airprompt-')) {
-        // Check if this is a mirror session (created by activate.js for IDE outside tmux)
-        const sessionsDir = getSessionsDir();
-        const safeName = entry.tmuxSession.replace(/[^a-zA-Z0-9_.-]/g, '') || entry.tmuxSession.replace(/[^a-zA-Z0-9]/g, '') || 'unknown';
-        const mirrorFile = path.join(sessionsDir, `${entry.providerId || 'unknown'}-${safeName}`, 'mirror');
-        let isMirror = false;
-        try { isMirror = fs.existsSync(mirrorFile); } catch (_) {}
-        if (!isMirror) continue;  // not a mirror — skip (e.g. airprompt-launch session)
-        const now = Date.now();
-        const idle = now - (entry.lastActivity || 0);
-        if (idle < ORPHAN_GRACE_MS) continue;
-
-        // Check if any tmux client is attached (real terminal or web proxy)
-        let canConfirmNoClients = false;
-        try {
-          const clients = spawnSync('tmux', ['list-clients', '-t', entry.tmuxSession, '-F', '#{client_name}'], { timeout: 2000, encoding: 'utf8' });
-          if (clients.status === 0) {
-            canConfirmNoClients = true;
-            if (clients.stdout.trim()) continue; // has attached client → not orphan
-          }
-          // If list-clients failed (non-zero status), skip — can't confirm state
-        } catch (_) {}
-        if (!canConfirmNoClients) continue;
-
-        // No clients + idle > 2 min → orphan. Kill tmux session + unregister.
-        log('warn', 'orphan mirror session killed', { id, tmuxSession: entry.tmuxSession, idleMs: idle });
-        killTmuxSession(entry.tmuxSession);
-        sessions.delete(id);
-        changed = true;
-      }
-    }
-    if (changed) broadcastSessionList(wss);
+    if (runStaleSweep(sessions, { log }) > 0) broadcastSessionList(wss);
   }, STALE_CHECK_MS);
 
   httpServer.on('close', () => clearInterval(staleInterval));

@@ -8,6 +8,7 @@ const { execSync, spawnSync } = require('child_process');
 const WebSocket = require('ws');
 
 const { createApp, sessions } = require('../../server');
+const { runStaleSweep } = require('../../src/sweep');
 
 const TEST_PROVIDER = "test-prov";
 
@@ -1115,33 +1116,39 @@ test('session registration sets lastActivity', async () => {
 
 // ── Orphan killer (stale sweep) ──────────────────────────────────────
 
-test('stale sweep does not kill session with recent activity', () => {
-  // Fresh session with activity < 2 min ago — must survive
-  sessions.set('orphan-recent', {
-    sessionId: 'orphan-recent', cwd: '/tmp', name: null,
-    tmuxSession: 'airprompt-orphan-recent', createdAt: new Date().toISOString(),
-    lastActivity: Date.now(),  // just now
-  });
-  // The sweep runs every 60s but ORPHAN_GRACE_MS = 120s.
-  // Our test creates a session with activity NOW — should survive sweep.
-  assert.strictEqual(sessions.has('orphan-recent'), true);
-  // Verify entry fields
-  const entry = sessions.get('orphan-recent');
-  assert.ok(entry.lastActivity > 0);
-  assert.ok(entry.tmuxSession.startsWith('airprompt-'));
-  sessions.delete('orphan-recent');
-});
-
 test('stale sweep removes session with dead tmux', () => {
-  // Session whose tmux process is already dead
+  // Session whose tmux process doesn't exist → sweep must delete it.
   sessions.set('stale-dead-tmux', {
     sessionId: 'stale-dead-tmux', cwd: '/tmp', name: null,
     tmuxSession: 'airprompt-nonexistent-dead-session', createdAt: new Date().toISOString(),
+    lastActivity: Date.now(),
   });
   assert.strictEqual(sessions.has('stale-dead-tmux'), true);
-  // We can't trigger the 60s sweep deterministically, but verify the
-  // entry shape matches expectations for the sweep to process
-  sessions.delete('stale-dead-tmux');
+  const removed = runStaleSweep(sessions);
+  assert.ok(removed > 0, 'runStaleSweep must report removals');
+  assert.strictEqual(sessions.has('stale-dead-tmux'), false,
+    'dead-tmux session must be removed by sweep');
+});
+
+test('stale sweep does not kill session whose tmux is alive', { skip: !TMUX_AVAILABLE }, () => {
+  // Create a session entry pointing to a known-alive tmux (daemon session).
+  // Must survive the sweep — tmuxExists returns true → skip.
+  const DAEMON_TMUX = 'airprompt-daemon-test-sweep';
+  try {
+    spawnSync('tmux', ['new-session', '-d', '-s', DAEMON_TMUX], { timeout: 2000 });
+    sessions.set('alive-daemon', {
+      sessionId: 'alive-daemon', cwd: '/tmp', name: null,
+      tmuxSession: DAEMON_TMUX, createdAt: new Date().toISOString(),
+      lastActivity: Date.now(),
+    });
+    const before = sessions.size;
+    runStaleSweep(sessions);
+    assert.strictEqual(sessions.has('alive-daemon'), true,
+      'session with live tmux must survive sweep');
+    sessions.delete('alive-daemon');
+  } finally {
+    try { spawnSync('tmux', ['kill-session', '-t', DAEMON_TMUX], { timeout: 2000 }); } catch (_) {}
+  }
 });
 
 // ── sessionToJSON attachedClients edge cases ──────────────────────────

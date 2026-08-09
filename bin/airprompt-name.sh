@@ -15,6 +15,9 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 
+# ── Save original PWD before any cd ─────────────────────────────────
+ORIG_PWD="$PWD"
+
 DAEMON_PORT="${PORT:-${AIRPROMPT_PORT:-3210}}"
 SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
 PROVIDER="${AIRPROMPT_PROVIDER:?}"
@@ -74,7 +77,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
       printf '%s\n' "$NEW_NAME" > "${MY_DIR}/name"
     fi
     # ── Persist cwd→name mapping for autostart reuse ───────────────
-    node "$(dirname "$0")/lib/project-names.js" set "$PROJECT_NAMES_FILE" "$PWD" "$NEW_NAME" 2>/dev/null || true
+    node "$(dirname "$0")/lib/project-names.js" set "$PROJECT_NAMES_FILE" "$ORIG_PWD" "$NEW_NAME" 2>/dev/null || true
     echo "AirPrompt: session named '$NEW_NAME'"
   else
     if [ -n "$MY_DIR" ]; then
@@ -82,7 +85,7 @@ if echo "$RESP" | grep -q '"ok":true'; then
     fi
     # ── Clear cwd→name mapping on explicit clear ──────────────────
     if [ -f "$PROJECT_NAMES_FILE" ]; then
-      node "$(dirname "$0")/lib/project-names.js" clear "$PROJECT_NAMES_FILE" "$PWD" 2>/dev/null || true
+      node "$(dirname "$0")/lib/project-names.js" clear "$PROJECT_NAMES_FILE" "$ORIG_PWD" 2>/dev/null || true
     fi
     echo "AirPrompt: session name cleared"
   fi

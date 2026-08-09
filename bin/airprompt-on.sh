@@ -55,7 +55,7 @@ if [ -n "${TMUX:-}" ]; then
       echo "Resolved web proxy session ($TMUX_SESSION) to parent group: $PARENT_GROUP" >&2
       TMUX_SESSION="$PARENT_GROUP"
     else
-      echo "Warning: running inside web proxy session ($TMUX_SESSION), skipping" >&2
+      echo "Warning: web proxy session ($TMUX_SESSION) has no parent group — will create new session" >&2
       TMUX_SESSION=""
     fi
   fi
@@ -74,7 +74,7 @@ if [ -z "${TMUX_SESSION:-}" ]; then
   fi
 fi
 
-SESSION_ID="$(echo "$TMUX_SESSION" | tr -cd 'a-zA-Z0-9_-')"
+SESSION_ID="$(echo "$TMUX_SESSION" | tr -cd 'a-zA-Z0-9_-' | head -c 64)"
 
 LAN_IP=""
 if command -v hostname &>/dev/null; then
