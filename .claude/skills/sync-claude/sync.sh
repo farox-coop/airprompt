@@ -20,6 +20,33 @@ fi
 
 echo "=== Syncing to ${#CACHES[@]} cache dirs + ~/.claude/hooks/ + ~/.claude/commands/ ==="
 
+# ── Cleanup: prune stale caches, keep only latest 2 commits ───────────
+# Each commit creates a new cache dir with full node_modules (~70MB).
+# The hooks in settings.json point to the dev repo, not the cache, so
+# old caches serve no purpose and waste ~2.5GB after ~35 commits.
+KEEP_COUNT=2
+KNOWN_HASHES=($(git log --oneline --format="%h" -"$KEEP_COUNT" | head -"$KEEP_COUNT"))
+if [ ${#KNOWN_HASHES[@]} -gt 0 ]; then
+  REMOVED=0
+  for d in "${CACHES[@]}"; do
+    dirname=$(basename "$d")
+    KEEP=false
+    for h in "${KNOWN_HASHES[@]}"; do
+      if [[ "$dirname" == "$h"* ]]; then KEEP=true; break; fi
+    done
+    if ! $KEEP; then
+      echo "  pruning stale cache: $dirname"
+      rm -rf "$d"
+      ((REMOVED++)) || true
+    fi
+  done
+  if [ $REMOVED -gt 0 ]; then
+    echo "  removed $REMOVED stale cache dirs (keeping latest $KEEP_COUNT commits)"
+  fi
+  # Refresh cache list after pruning
+  CACHES=($(ls -d "$CACHE_BASE"/*/ 2>/dev/null || true))
+fi
+
 HOOKS=(airprompt-activate.js airprompt-deactivate.js airprompt-statusline.sh)
 BINS=(airprompt airprompt-attach.sh airprompt-autostart.sh airprompt-clean.sh airprompt-launch airprompt-name.sh airprompt-off.sh airprompt-on.sh airprompt-restart.sh airprompt-status.sh generate-cert.sh install.js)
 

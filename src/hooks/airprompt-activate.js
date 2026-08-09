@@ -26,9 +26,13 @@ async function main() {
   const ctx = ClaudeProvider.parseHookStdin(input);
   const result = await activateSession({ ...ctx, provider: ClaudeProvider });
 
-  process.stdout.write(ClaudeProvider.formatHookOutput(result) + '\n');
-  // Let event loop drain: autoApplyName PUT and sweepDeadSessions POST
-  // are fire-and-forget async — process.exit would abort them mid-flight.
+  // Only write structured output for errors — Claude Code reads this as
+  // hook feedback. Success cases already print human-friendly messages
+  // via process.stdout.write in activateSession.
+  if (result.status === 'error') {
+    process.stdout.write(ClaudeProvider.formatHookOutput(result) + '\n');
+  }
+  // Let event loop drain before exit — ensures pending async work completes.
   setImmediate(() => process.exit(0));
 }
 
