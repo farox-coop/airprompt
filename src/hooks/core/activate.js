@@ -42,7 +42,7 @@ function daemonRunning(pidFile) {
   } catch (_) { return false; }
 }
 
-function startDaemon(installDir, port, pidFile) {
+async function startDaemon(installDir, port, pidFile) {
   // Clean stale PID file before spawning — server.js writePid() uses 'wx'
   // (exclusive write) which fails if the file exists, even if the PID is dead.
   if (fs.existsSync(pidFile) && !daemonRunning(pidFile)) {
@@ -227,7 +227,7 @@ async function activateSession(ctx) {
   // 2. Ensure daemon is running
   if (!daemonRunning(pidFile)) {
     process.stdout.write('airprompt: starting daemon...');
-    if (!startDaemon(installDir, port, pidFile)) {
+    if (!await startDaemon(installDir, port, pidFile)) {
       return {
         status: 'error',
         message: `could not start daemon on port ${port}`,
@@ -283,6 +283,7 @@ async function activateSession(ctx) {
         };
       }
     }
+  }
   }
 
   // 5. Generate session ID
