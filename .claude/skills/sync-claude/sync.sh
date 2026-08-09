@@ -4,45 +4,43 @@ set -euo pipefail
 REPO="$(git rev-parse --show-toplevel 2>/dev/null || { echo "ERROR: not inside a git repo" >&2; exit 1; })"
 CACHE_BASE=$(set +o pipefail; ls -d "$HOME/.claude/plugins/cache/"*-airprompt/airprompt 2>/dev/null | head -1 || true)
 
-if [ -z "$CACHE_BASE" ]; then
-  echo "FAIL: no plugin cache found at \$HOME/.claude/plugins/cache/*-airprompt/airprompt" >&2
-  echo "       Install the plugin first: claude plugin marketplace add <publisher>/airprompt" >&2
-  exit 1
+# Discover cache dirs (optional — hooks point to dev repo, caches are copies)
+CACHES=()
+if [ -n "$CACHE_BASE" ]; then
+  CACHES=($(ls -d "$CACHE_BASE"/*/ 2>/dev/null || true))
 fi
-
-# Discover cache dirs
-CACHES=($(ls -d "$CACHE_BASE"/*/ 2>/dev/null || true))
 
 if [ ${#CACHES[@]} -eq 0 ]; then
-  echo "FAIL: no plugin cache dirs at $CACHE_BASE"
-  exit 1
+  echo "=== Syncing to ~/.claude/hooks/ + ~/.claude/commands/ (no plugin caches found) ==="
+else
+  echo "=== Syncing to ${#CACHES[@]} cache dirs + ~/.claude/hooks/ + ~/.claude/commands/ ==="
 fi
 
-echo "=== Syncing to ${#CACHES[@]} cache dirs + ~/.claude/hooks/ + ~/.claude/commands/ ==="
-
-# ── Cleanup: prune stale caches, keep only latest 2 commits ───────────
+# ── Cleanup: prune stale caches, keep only latest N by mtime ──────────
 # Each commit creates a new cache dir with full node_modules (~70MB).
-# The hooks in settings.json point to the dev repo, not the cache, so
-# old caches serve no purpose and waste ~2.5GB after ~35 commits.
+# Sort by modification time so new commits don't nuke all old caches
+# just because the git hashes changed.
 KEEP_COUNT=2
-KNOWN_HASHES=($(git log --oneline --format="%h" -"$KEEP_COUNT" | head -"$KEEP_COUNT"))
-if [ ${#KNOWN_HASHES[@]} -gt 0 ]; then
+if [ ${#CACHES[@]} -gt $KEEP_COUNT ]; then
+  # ls -dt sorts newest first — keep first $KEEP_COUNT, remove the rest
+  mapfile -t SORTED < <(ls -dt "${CACHES[@]}" 2>/dev/null)
   REMOVED=0
-  for d in "${CACHES[@]}"; do
-    dirname=$(basename "$d")
-    KEEP=false
-    for h in "${KNOWN_HASHES[@]}"; do
-      if [[ "$dirname" == "$h"* ]]; then KEEP=true; break; fi
-    done
-    if ! $KEEP; then
-      echo "  pruning stale cache: $dirname"
-      rm -rf "$d"
-      ((REMOVED++)) || true
+  for ((i=$KEEP_COUNT; i<${#SORTED[@]}; i++)); do
+    dirname=$(basename "${SORTED[$i]}")
+    _safe_canonical="$(cd "$(dirname "${SORTED[$i]}")" 2>/dev/null && pwd -P 2>/dev/null)" || {
+      echo "  SAFETY: cannot resolve parent of ${SORTED[$i]} — skipping" >&2
+      continue
+    }
+    _safe_canonical="${_safe_canonical%/}/$(basename "${SORTED[$i]}")"
+    if [[ "$_safe_canonical" != *airprompt* ]]; then
+      echo "  SAFETY: canonical path missing 'airprompt' — refusing rm -rf $_safe_canonical" >&2
+      continue
     fi
+    echo "  pruning stale cache: $dirname"
+    rm -rf "${SORTED[$i]}"
+    ((REMOVED++)) || true
   done
-  if [ $REMOVED -gt 0 ]; then
-    echo "  removed $REMOVED stale cache dirs (keeping latest $KEEP_COUNT commits)"
-  fi
+  echo "  removed $REMOVED stale cache dirs (keeping latest $KEEP_COUNT)"
   # Refresh cache list after pruning
   CACHES=($(ls -d "$CACHE_BASE"/*/ 2>/dev/null || true))
 fi
@@ -125,11 +123,12 @@ for h in "${HOOKS[@]}"; do
   fi
   if [ -d "$dest" ]; then
     echo "  WARNING: $dest is a directory, should be a symlink — removing"
+    # Safety: only rm -rf under ~/.claude/
+    [[ "$dest" == "$HOME/.claude/"* ]] || { echo "  SAFETY: refusing rm -rf outside ~/.claude/ — $dest" >&2; continue; }
     rm -rf "$dest"
     ln -s "$src" "$dest"
     echo "  restored symlink: $dest → $src"
   elif [ -L "$dest" ]; then
-    # Already a symlink — verify it points to the right place and exists
     _target=$(readlink "$dest" 2>/dev/null || echo "")
     if [ ! -e "$dest" ]; then
       echo "  broken symlink: $dest → restoring"
@@ -142,7 +141,6 @@ for h in "${HOOKS[@]}"; do
       ln -s "$src" "$dest"
     fi
   elif [ -f "$dest" ]; then
-    # Regular file — check if content matches repo (stale copy → restore symlink)
     if diff -q "$src" "$dest" >/dev/null 2>&1; then
       echo "  restoring symlink (was overwritten): $dest"
       rm "$dest"
@@ -152,7 +150,6 @@ for h in "${HOOKS[@]}"; do
       echo "  (skip $dest — user-edited copy, not overwriting)"
     fi
   else
-    # No file at dest — create symlink
     ln -s "$src" "$dest"
     echo "  symlinked: $dest → $src"
   fi
@@ -165,6 +162,7 @@ for f in airprompt.md airprompt.toml; do
   [ ! -f "$src" ] && continue
   if [ -d "$dest" ]; then
     echo "  WARNING: $dest is a directory, should be a symlink — removing"
+    [[ "$dest" == "$HOME/.claude/"* ]] || { echo "  SAFETY: refusing rm -rf outside ~/.claude/ — $dest" >&2; continue; }
     rm -rf "$dest"
     ln -s "$src" "$dest"
     echo "  restored symlink: $dest → $src"

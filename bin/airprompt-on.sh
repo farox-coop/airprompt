@@ -140,26 +140,30 @@ if [ ! -f "$PID_FILE" ]; then
     exit 1
   fi
   cd "$ORIG_PWD"
+fi
 
-  # ── First-run splash: banner + QR code — shown ONCE ever ───────────
-  FIRST_RUN_MARKER="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}/.first-run-done"
-  if [ ! -f "$FIRST_RUN_MARKER" ]; then
-    DAEMON_PID=$(cat "$PID_FILE" 2>/dev/null || echo "?")
-    echo ""
-    echo "=================================================="
-    echo "AirPrompt Server running at: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
-    echo "=================================================="
-    echo ""
-    node -e "
-      try {
-        var qr = require('qrcode-terminal');
-        qr.generate(process.argv[1], {small: true});
-      } catch(_) {}
-    " "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" 2>/dev/null || true
-    echo "Server running (PID $DAEMON_PID)"
-    mkdir -p "${FIRST_RUN_MARKER%/*}" 2>/dev/null || true
-    touch "$FIRST_RUN_MARKER" 2>/dev/null || true
-  fi
+# ── First-run splash: banner + QR code — shown ONCE ever ───────────
+# Runs whenever the daemon is running (regardless of who started it).
+# The marker survives until clean.sh tears down the state dir.
+FIRST_RUN_MARKER="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}/.first-run-done"
+if [ -f "$PID_FILE" ] && [ ! -f "$FIRST_RUN_MARKER" ]; then
+  DAEMON_PID=$(cat "$PID_FILE" 2>/dev/null || echo "?")
+  echo ""
+  echo "=================================================="
+  echo "AirPrompt Server running at: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
+  echo "=================================================="
+  echo ""
+  cd "$DAEMON_DIR"
+  node -e "
+    try {
+      var qr = require('qrcode-terminal');
+      qr.generate(process.argv[1], {small: true});
+    } catch(_) {}
+  " "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" 2>/dev/null || true
+  cd "$ORIG_PWD"
+  echo "Server running (PID $DAEMON_PID)"
+  mkdir -p "${FIRST_RUN_MARKER%/*}" 2>/dev/null || true
+  touch "$FIRST_RUN_MARKER" 2>/dev/null || true
 fi
 
 # ── Per-session directory ────────────────────────────────────────────

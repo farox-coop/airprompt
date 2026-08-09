@@ -41,12 +41,12 @@ else
   not_ok "REPO not using git rev-parse"
 fi
 
-# ── Test 5: error message mentions glob pattern ─────────────────────
-echo "[5/7] Cache-not-found error message is helpful"
-if grep -q 'plugins/cache/\*' "$SYNC_SH" && grep -q 'plugin marketplace add' "$SYNC_SH"; then
-  ok "error message shows glob pattern + install hint"
+# ── Test 5: zero caches is a noop (not a fatal error) ──────────────
+echo "[5/7] Zero plugin caches is not fatal"
+if grep -q 'no plugin caches' "$SYNC_SH" && grep -q 'plugins/cache/' "$SYNC_SH"; then
+  ok "zero caches handled gracefully (noop, not fatal error)"
 else
-  not_ok "error message missing glob or install hint"
+  not_ok "sync.sh must handle zero caches (search for 'no plugin caches' + 'plugins/cache/')"
 fi
 
 # ── Test 6: HOOKS and BINS arrays match repo files ──────────────────
