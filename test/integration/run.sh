@@ -526,6 +526,120 @@ else
   skipped "tmux not available — 409-recovery tests skipped"
 fi
 
+# ── Test 11: Sweep no-force — stale dir with shared sessionId must NOT nuke alive session ──
+echo "[11/8] Sweep no-force: stale dir shares sessionId with alive tmux → session survives"
+if $TMUX_OK; then
+  ID_SW="integtest-$(date +%s)-$$-nosweep"
+  TMUX_ALIVE="airprompt-${ID_SW}-alive"
+  TMUX_DEAD="airprompt-${ID_SW}-stale"
+  tmux new-session -d -s "$TMUX_ALIVE" 2>/dev/null || true
+
+  # Register session with alive tmux in daemon
+  REG_SW=$(curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"${ID_SW}\",\"cwd\":\"${PROJECT_DIR}\",\"tmuxSession\":\"${TMUX_ALIVE}\",\"providerId\":\"test-int\"}")
+  if echo "$REG_SW" | grep -q '"ok":true'; then ok "sweep-no-force: registered with alive tmux"
+  else not_ok "sweep-no-force: register failed: $REG_SW"; fi
+
+  # Simulate stale dir (same sessionId, different dead tmux) — the sweep would call
+  # unregister for this sessionId. Without force, daemon must reject because
+  # the entry's tmuxSession (T_alive) is still alive.
+  UNREG_SW=$(curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"${ID_SW}\"}")
+  if echo "$UNREG_SW" | grep -q '"error"'; then
+    ok "sweep-no-force: unregister refused (409 — tmux alive guard)"
+  else
+    not_ok "sweep-no-force: unregister should have been 409, got: $UNREG_SW"
+  fi
+
+  # Session must still exist in daemon
+  LIST_SW=$(curl -s "http://localhost:${PORT}/api/sessions")
+  if echo "$LIST_SW" | grep -q "$ID_SW"; then
+    ok "sweep-no-force: session SURVIVED (not nuked)"
+  else
+    not_ok "sweep-no-force: session was NUKED!: $LIST_SW"
+  fi
+
+  # Cleanup
+  tmux kill-session -t "$TMUX_ALIVE" 2>/dev/null || true
+  sleep 0.2
+  curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
+    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_SW}\",\"force\":true}" > /dev/null
+else
+  skipped "tmux not available — sweep-no-force tests skipped"
+fi
+
+# ── Test 12: grep -Fq treats dot as literal (not regex wildcard) ──
+echo "[12/8] grep -Fq: literal match (defense against tmux session names with dots)"
+# The daemon check in on.sh uses grep -Fq to match tmuxSession in JSON.
+# Without -F, a session named "dev.1" would false-match "devX1".
+# With -F, dot is literal — no false match.
+TEST_GREP='{"name":"x","tmuxSession":"dev.1"} {"tmuxSession":"devX1"}'
+if echo "$TEST_GREP" | grep -Fq '"tmuxSession":"dev.1"'; then
+  ok "grep -Fq: literal dot matches correct session"
+else
+  not_ok "grep -Fq: literal dot failed to match"
+fi
+if echo "$TEST_GREP" | grep -q '"tmuxSession":"dev.1"'; then
+  ok "grep -q: regex dot also matches (BRE . = any char — expected overlap)"
+else
+  not_ok "grep -q: unexpected failure"
+fi
+# The dangerous case: without -F, "dev.1" pattern matches "devX1" (false positive)
+# With -F, it should NOT match "devX1"
+if echo '{"tmuxSession":"devX1"}' | grep -Fq '"tmuxSession":"dev.1"'; then
+  not_ok "grep -Fq: FALSE MATCH — dot treated as wildcard (should be literal!)"
+else
+  ok "grep -Fq: dev.1 does NOT match devX1 (literal, correct)"
+fi
+# Confirm: without -F, BRE dot DOES false-match
+if echo '{"tmuxSession":"devX1"}' | grep -q '"tmuxSession":"dev.1"'; then
+  ok "grep -q: dev.1 BRE matches devX1 (false positive — -F prevents this)"
+else
+  not_ok "grep -q: expected BRE dot to match devX1"
+fi
+
+# ── Test 13: GET /api/sessions JSON shape — uses 'id' NOT 'sessionId' ──
+echo "[13/8] GET /api/sessions JSON shape contract"
+if $TMUX_OK; then
+  ID_SHAPE="integtest-$(date +%s)-$$-shape"
+  tmux new-session -d -s "airprompt-${ID_SHAPE}" 2>/dev/null || true
+
+  curl -s -X POST "http://localhost:${PORT}/api/sessions/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"${ID_SHAPE}\",\"cwd\":\"${PROJECT_DIR}\",\"name\":\"ShapeTest\",\"providerId\":\"test-int\"}" > /dev/null
+
+  LIST=$(curl -s "http://localhost:${PORT}/api/sessions")
+  # Critical: session objects use 'id' key (from sessionToJSON), NOT 'sessionId'
+  if echo "$LIST" | grep -q "\"id\":\"${ID_SHAPE}\""; then
+    ok "GET /api/sessions: session has 'id' key"
+  else
+    not_ok "GET /api/sessions: missing 'id' key in: $LIST"
+  fi
+  # If any code does resp.some(s => s.sessionId === ...), it will ALWAYS fail
+  # because sessionId is NOT a key in the JSON — it's 'id'. This test guards that.
+  if echo "$LIST" | grep -q "\"sessionId\""; then
+    not_ok "GET /api/sessions: sessionId key LEAKED (should be 'id' only): $LIST"
+  else
+    ok "GET /api/sessions: sessionId key absent (correct — only 'id')"
+  fi
+  # Name must survive the round-trip
+  if echo "$LIST" | grep -q '"name":"ShapeTest"'; then
+    ok "GET /api/sessions: name survives round-trip"
+  else
+    not_ok "GET /api/sessions: name missing from: $LIST"
+  fi
+
+  # Cleanup
+  tmux kill-session -t "airprompt-${ID_SHAPE}" 2>/dev/null || true
+  sleep 0.2
+  curl -s -X POST "http://localhost:${PORT}/api/sessions/unregister" \
+    -H "Content-Type: application/json" -d "{\"sessionId\":\"${ID_SHAPE}\",\"force\":true}" > /dev/null
+else
+  skipped "tmux not available — JSON shape tests skipped"
+fi
+
 # ── Summary ──────────────────────────────────────────────────────────
 echo ""
 echo "Integration tests: $pass passed, $fail failed, $skip skipped"

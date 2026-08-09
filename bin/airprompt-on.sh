@@ -200,8 +200,6 @@ _name_update() {
 }
 
 # ── Idempotency: skip if already registered (same tmux session) ──────
-# Daemon recovers state from on-disk markers on startup, so a simple
-# file check is sufficient — no need to double-check with daemon API.
 if [ -f "$ACTIVE_FILE" ]; then
   # Verify tmux session still exists — stale active marker + dead tmux
   # would falsely report "already active" forever, blocking re-registration.
@@ -214,15 +212,25 @@ if [ -f "$ACTIVE_FILE" ]; then
     # Tmux dead — clean up stale markers and proceed to register
     rm -f "$ACTIVE_FILE"
   else
-    if [ -n "$SESSION_NAME" ]; then
-      MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
-      if [ -n "$MY_SID" ]; then
-        _name_update "$MY_SID" "$SESSION_NAME" "$MY_DIR"
+    # Verify daemon actually holds this session. Sweep force-unregister
+    # can nuke it when a stale dir shares the same sessionId (reopened
+    # Claude session gets same session_id, different tmux).
+    DAEMON_SESSIONS=$(curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "[]")
+    if ! echo "$DAEMON_SESSIONS" | grep -Fq "\"tmuxSession\":\"$TMUX_SESSION\""; then
+      echo "Re-registering — daemon lost session (stale sweep)" >&2
+      rm -f "$ACTIVE_FILE"
+      # fall through to registration below
+    else
+      if [ -n "$SESSION_NAME" ]; then
+        MY_SID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
+        if [ -n "$MY_SID" ]; then
+          _name_update "$MY_SID" "$SESSION_NAME" "$MY_DIR"
+        fi
       fi
+      echo "AirPrompt already active for this session."
+      echo "Mobile URL: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
+      exit 0
     fi
-    echo "AirPrompt already active for this session."
-    echo "Mobile URL: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
-    exit 0
   fi
 fi
 
@@ -299,7 +307,7 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
       curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
-        -d "{\"sessionId\":\"${SID}\",\"force\":true}" > /dev/null 2>&1 || true
+        -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
       rm -rf "$d"
     fi
   done

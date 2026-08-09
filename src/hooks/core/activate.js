@@ -14,7 +14,7 @@ const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 
 const { resolveInstallDir, sessionsRootDir, sessionDir } = require('../../providers/provider');
-const { post, put, detectTls, resolvePort, stateDir } = require('./shared');
+const { post, put, get, detectTls, resolvePort, stateDir } = require('./shared');
 
 // ── TLS cert auto-generation ──────────────────────────────────────────────
 
@@ -151,7 +151,12 @@ async function sweepDeadSessions(sessionsDir, port, tls) {
     if (r.status === 1) {
       try {
         const sid = fs.readFileSync(path.join(full, 'session'), 'utf8').trim().slice(0, 128);
-        if (sid) await post('/api/sessions/unregister', { sessionId: sid, force: true }, port, tls);
+        if (sid) {
+          // No force — if daemon refuses (409, tmux alive = session reopened
+          // with new tmux), skip unregister. The outer try/catch swallows
+          // network errors. Stale dir gets cleaned regardless.
+          await post('/api/sessions/unregister', { sessionId: sid }, port, tls);
+        }
       } catch (_) {}
       try { fs.rmSync(full, { recursive: true, force: true }); } catch (_) {}
     }
@@ -265,7 +270,7 @@ async function activateSession(ctx) {
         try {
           const resp = await get('/api/sessions', port, tls);
           if (Array.isArray(resp)) {
-            daemonHasSession = resp.some(s => s.sessionId === sid || s.tmuxSession === currentTmux);
+            daemonHasSession = resp.some(s => s.id === sid || s.tmuxSession === currentTmux);
           }
         } catch (_) { daemonHasSession = true; /* unreachable — assume yes */ }
         if (!daemonHasSession) {

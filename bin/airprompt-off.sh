@@ -104,7 +104,7 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
       curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
-        -d "{\"sessionId\":\"${SID}\",\"force\":true}" > /dev/null 2>&1 || true
+        -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
       rm -rf "$d"
     fi
   done
