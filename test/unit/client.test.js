@@ -33,7 +33,7 @@ var ROWS = [
   ],
   [
     { label: 'Sft+Tab',seq: '\x1b[Z', cls: 'combo', raw: true },
-    { label: 'Undo',  seq: '/rewind\r', cls: 'combo', raw: true },
+    { label: 'Paste', seq: null, cls: 'combo', raw: true, msg: { type: 'paste_buffer' } },
     { label: 'Stash', seq: '\x13',     cls: 'combo', raw: true },
     { label: 'Search',seq: '\x12',     cls: 'combo', raw: true },
     { label: 'Send',  seq: '\r',       cls: 'send', raw: true },
@@ -1824,6 +1824,89 @@ test('computeBtnClasses — correct CSS class generation', async (t) => {
 
   await t.test('key with cls="" → keybar-btn (no extra class)', function () {
     assert.strictEqual(computeBtnClasses({ cls: '' }), 'keybar-btn');
+  });
+});
+
+// ── Combo key click handler (mirrors keybar.js buildToolbar — key.raw with msg) ──
+
+function simulateComboClick(key) {
+  // Mirrors: if (key.raw && (key.seq || key.msg)) → send(m || { type: 'input', data: s })
+  if (!key.raw) return null;
+  if (!key.seq && !key.msg) return null;
+  return key.msg || { type: 'input', data: key.seq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Tests — simulateComboClick (raw combo keys with optional msg)
+// ═══════════════════════════════════════════════════════════════════════
+
+test('simulateComboClick — Paste button sends paste_buffer message', async (t) => {
+  await t.test('Paste key → { type: "paste_buffer" } (msg wins, no seq)', function () {
+    var pasteKey = ROWS[2].find(function (k) { return k.label === 'Paste'; });
+    assert.ok(pasteKey, 'Paste key exists in row 2');
+    assert.strictEqual(pasteKey.seq, null);
+    assert.deepStrictEqual(pasteKey.msg, { type: 'paste_buffer' });
+    var r = simulateComboClick(pasteKey);
+    assert.deepStrictEqual(r, { type: 'paste_buffer' });
+  });
+});
+
+test('simulateComboClick — existing combo keys unchanged', async (t) => {
+  await t.test('Sft+Tab → { type: "input", data: "\\x1b[Z" }', function () {
+    var k = ROWS[2].find(function (x) { return x.label === 'Sft+Tab'; });
+    var r = simulateComboClick(k);
+    assert.deepStrictEqual(r, { type: 'input', data: '\x1b[Z' });
+  });
+
+  await t.test('Stash → { type: "input", data: "\\x13" }', function () {
+    var k = ROWS[2].find(function (x) { return x.label === 'Stash'; });
+    var r = simulateComboClick(k);
+    assert.deepStrictEqual(r, { type: 'input', data: '\x13' });
+  });
+
+  await t.test('Search → { type: "input", data: "\\x12" }', function () {
+    var k = ROWS[2].find(function (x) { return x.label === 'Search'; });
+    var r = simulateComboClick(k);
+    assert.deepStrictEqual(r, { type: 'input', data: '\x12' });
+  });
+
+  await t.test('Send → { type: "input", data: "\\r" }', function () {
+    var k = ROWS[2].find(function (x) { return x.label === 'Send'; });
+    var r = simulateComboClick(k);
+    assert.deepStrictEqual(r, { type: 'input', data: '\r' });
+  });
+});
+
+test('simulateComboClick — edge cases', async (t) => {
+  await t.test('non-raw key returns null', function () {
+    var escKey = ROWS[0].find(function (k) { return k.label === 'Esc'; });
+    assert.strictEqual(escKey.raw, undefined);
+    assert.strictEqual(simulateComboClick(escKey), null);
+  });
+
+  await t.test('raw key without seq and without msg → null', function () {
+    var r = simulateComboClick({ raw: true, seq: null });
+    assert.strictEqual(r, null);
+  });
+
+  await t.test('key with both msg and seq → msg wins (msg takes priority)', function () {
+    var r = simulateComboClick({
+      raw: true,
+      seq: 'should-not-be-used',
+      msg: { type: 'custom_action', payload: 42 },
+    });
+    assert.deepStrictEqual(r, { type: 'custom_action', payload: 42 });
+  });
+
+  await t.test('key with msg but empty object → empty object sent', function () {
+    var r = simulateComboClick({ raw: true, seq: null, msg: {} });
+    assert.deepStrictEqual(r, {});
+  });
+
+  await t.test('modifier sticky key (Ctrl) → null (not raw)', function () {
+    var ctrlKey = ROWS[0].find(function (k) { return k.id === 'ctrl'; });
+    assert.strictEqual(ctrlKey.raw, undefined);
+    assert.strictEqual(simulateComboClick(ctrlKey), null);
   });
 });
 

@@ -32,7 +32,7 @@
     ],
     [
       { label: 'Sft+Tab',seq: '\x1b[Z', cls: 'combo', raw: true },
-      { label: 'Undo',  seq: '/rewind\r', cls: 'combo', raw: true },
+      { label: 'Paste', seq: null, cls: 'combo', raw: true, msg: { type: 'paste_buffer' } },
       { label: 'Stash', seq: '\x13',     cls: 'combo', raw: true },
       { label: 'Search',seq: '\x12',     cls: 'combo', raw: true },
       { label: 'Send',  seq: '\r',       cls: 'send', raw: true,
@@ -209,16 +209,16 @@
           (function (m) {
             btn.addEventListener('click', function () { handleSticky(m); refocusMobileInput(); });
           })(key.id);
-        } else if (key.raw && key.seq) {
-          // Combo key: send pre-composed sequence, bypass modifier pipeline
-          (function (s) {
+        } else if (key.raw && (key.seq || key.msg)) {
+          // Combo key: send pre-composed sequence or custom message, bypass modifier pipeline
+          (function (s, m) {
             btn.addEventListener('click', function () {
               if (window._airpromptSend) {
-                window._airpromptSend({ type: 'input', data: s });
+                window._airpromptSend(m || { type: 'input', data: s });
               }
               refocusMobileInput();
             });
-          })(key.seq);
+          })(key.seq, key.msg);
         } else {
           (function (s) {
             btn.addEventListener('click', function () { sendKey(s); refocusMobileInput(); });
