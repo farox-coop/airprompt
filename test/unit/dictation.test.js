@@ -320,35 +320,6 @@ test('setLang _langSwitchGen — prevents stale race restart', async (t) => {
 
 // ── onresult isFinal vs interim flow ──────────────────────────────────
 
-// ── onresult via simulateOnresult ──────────────────────────────────
-
-test('onresult simulated — isFinal + interim behavior', async (t) => {
-  await t.test('single final → displayText set', () => {
-    const { displayText, running } = simulateOnresult([
-      { transcript: 'hola mundo', isFinal: true },
-    ]);
-    assert.strictEqual(displayText, 'hola mundo');
-    assert.strictEqual(running, 'hola mundo');
-  });
-
-  await t.test('empty final → not shown', () => {
-    const { displayText, running } = simulateOnresult([
-      { transcript: '', isFinal: true },
-    ]);
-    assert.strictEqual(displayText, '');
-    assert.strictEqual(running, '');
-  });
-
-  await t.test('interim (not final) → shown, running stays empty', () => {
-    const { displayText, latestInterim, running } = simulateOnresult([
-      { transcript: 'hola mun...', isFinal: false },
-    ]);
-    assert.strictEqual(latestInterim, 'hola mun...');
-    assert.strictEqual(displayText, 'hola mun...');
-    assert.strictEqual(running, '');
-  });
-});
-
 // ── Scroll to bottom ─────────────────────────────────────────────────
 
 test('overlay scroll — always scrolled to bottom after update', async (t) => {
@@ -444,397 +415,6 @@ test('onerror language-not-supported → falls back to en-US', async (t) => {
   });
 });
 
-// ── onresult reconstruction — cumulative transcript dedup ──────────
-// Chrome mobile fires each final result with the FULL cumulative text.
-// We reconstruct from ALL results every time, detecting cumulative finals
-// (startsWith) vs new segments. Text only updates the overlay — never
-// auto-sent to terminal. Sending happens via acceptDictation().
-
-function simulateOnresult(allResults) {
-  let running = '';
-  let latestInterim = '';
-
-  for (let i = 0; i < allResults.length; i++) {
-    const r = allResults[i];
-    const transcript = r.transcript;
-
-    if (r.isFinal) {
-      if (r.confidence === 0) continue;
-      // Case-insensitive check (matches client.js localeCompare fix)
-      if (running && transcript.length >= running.length && transcript.slice(0, running.length).localeCompare(running, undefined, { sensitivity: 'base' }) === 0) {
-        running = transcript;      // Cumulative or in-place growth
-      } else {
-        running += transcript;     // New segment: append
-      }
-    } else {
-      latestInterim = transcript;
-    }
-  }
-
-  const displayText = latestInterim || running;
-  return { displayText, running, latestInterim };
-}
-
-// ── accept/cancel flow ───────────────────────────────────────────────
-
-function simulateAccept(accumulatedText) {
-  // acceptDictation() sends text then dismisses overlay
-  const text = accumulatedText.trim();
-  const sent = text || '';
-  return { sent, accumulatedAfter: '' };  // dismissOverlay clears text
-}
-
-function simulateCancel() {
-  return { accumulatedAfter: '' };  // dismissOverlay clears text
-}
-
-// simulate full acceptDictation + dismissOverlay on a mutable state object
-function applyAccept(state) {
-  const text = state.running.trim();
-  const sent = text || '';
-  // dismissOverlay side effects
-  state.running = '';
-  state.latestInterim = '';
-  state.displayText = '';
-  return { sent };
-}
-
-function applyCancel(state) {
-  // dismissOverlay side effects
-  state.running = '';
-  state.latestInterim = '';
-  state.displayText = '';
-}
-
-test('onresult reconstruction — Chrome mobile cumulative finals', async (t) => {
-  await t.test('single final → displayText', () => {
-    const { displayText, running } = simulateOnresult([
-      { transcript: 'Hello', isFinal: true },
-    ]);
-    assert.strictEqual(displayText, 'Hello');
-    assert.strictEqual(running, 'Hello');
-  });
-
-  await t.test('two cumulative finals → only final text shown', () => {
-    // Chrome mobile: result[0]="this" final, result[1]="this is" final (cumulative)
-    const { displayText, running } = simulateOnresult([
-      { transcript: 'this', isFinal: true },
-      { transcript: 'this is', isFinal: true },
-    ]);
-    assert.strictEqual(displayText, 'this is');  // Not "thisthis is"!
-    assert.strictEqual(running, 'this is');
-  });
-
-  await t.test('full sentence cumulative chain → correct final text', () => {
-    const words = [
-      'okay', 'okay let\'s', 'okay let\'s see', 'okay let\'s see how',
-      'okay let\'s see how it', 'okay let\'s see how it works',
-      'okay let\'s see how it works now',
-    ];
-    const results = words.map(w => ({ transcript: w, isFinal: true }));
-    const { displayText, running } = simulateOnresult(results);
-    assert.strictEqual(displayText, 'okay let\'s see how it works now');
-    assert.strictEqual(running, 'okay let\'s see how it works now');
-  });
-});
-
-test('onresult reconstruction — incremental events', async (t) => {
-  await t.test('two events → accumulated text correct', () => {
-    // Event 1: first word finalized
-    const e1 = simulateOnresult([
-      { transcript: 'Hello', isFinal: true },
-    ]);
-    assert.strictEqual(e1.displayText, 'Hello');
-    assert.strictEqual(e1.running, 'Hello');
-
-    // Event 2: updated (result[0] in-place update to longer text)
-    const e2 = simulateOnresult([
-      { transcript: 'Hello world', isFinal: true },
-    ]);
-    assert.strictEqual(e2.displayText, 'Hello world');
-    assert.strictEqual(e2.running, 'Hello world');
-  });
-
-  await t.test('cumulative finals + non-cumulative final → appends both', () => {
-    const { displayText, running } = simulateOnresult([
-      { transcript: 'Hello', isFinal: true },
-      { transcript: ' world', isFinal: true },  // Non-cumulative segment
-    ]);
-    assert.strictEqual(displayText, 'Hello world');
-    assert.strictEqual(running, 'Hello world');
-  });
-
-  await t.test('interim shown when present', () => {
-    const { displayText, latestInterim } = simulateOnresult([
-      { transcript: 'Hello', isFinal: false },
-    ]);
-    assert.strictEqual(displayText, 'Hello');
-    assert.strictEqual(latestInterim, 'Hello');
-  });
-});
-
-test('onresult reconstruction — confidence zero ghost filter', async (t) => {
-  await t.test('confidence 0 final → skipped', () => {
-    const { running } = simulateOnresult([
-      { transcript: 'real', isFinal: true, confidence: 0.9 },
-      { transcript: 'ghost', isFinal: true, confidence: 0 },
-    ]);
-    assert.strictEqual(running, 'real');
-  });
-});
-
-test('acceptDictation — sends text and clears', async (t) => {
-  await t.test('non-empty text → sent, state cleared', () => {
-    const state = { running: 'Hello world', latestInterim: '' };
-    const { sent } = applyAccept(state);
-    assert.strictEqual(sent, 'Hello world');
-    assert.strictEqual(state.running, '');
-    assert.strictEqual(state.displayText, '');
-  });
-
-  await t.test('empty text → nothing sent, still clears', () => {
-    const state = { running: '   ', latestInterim: '' };
-    const { sent } = applyAccept(state);
-    assert.strictEqual(sent, '');
-    assert.strictEqual(state.running, '');
-  });
-
-  await t.test('no text → nothing sent, clears', () => {
-    const state = { running: '', latestInterim: '' };
-    const { sent } = applyAccept(state);
-    assert.strictEqual(sent, '');
-    assert.strictEqual(state.running, '');
-  });
-});
-
-test('cancelDictation — clears without sending', async (t) => {
-  await t.test('state cleared after cancel', () => {
-    const state = { running: 'hello', latestInterim: '', displayText: 'hello' };
-    applyCancel(state);
-    assert.strictEqual(state.running, '');
-    assert.strictEqual(state.displayText, '');
-  });
-});
-
-test('full flow: dictate → accept → send', async (t) => {
-  await t.test('speak 3 words, accept → sends all at once', () => {
-    const state = { running: '', latestInterim: '', displayText: '' };
-
-    // Speak phase: 3 cumulative events
-    const r1 = simulateOnresult([{ transcript: 'hello', isFinal: true }]);
-    state.running = r1.running; state.displayText = r1.displayText;
-    assert.strictEqual(state.displayText, 'hello');
-
-    const r2 = simulateOnresult([
-      { transcript: 'hello', isFinal: true },
-      { transcript: 'hello world', isFinal: true },
-    ]);
-    state.running = r2.running; state.displayText = r2.displayText;
-    assert.strictEqual(state.displayText, 'hello world');
-
-    const r3 = simulateOnresult([
-      { transcript: 'hello', isFinal: true },
-      { transcript: 'hello world', isFinal: true },
-      { transcript: 'hello world testing', isFinal: true },
-    ]);
-    state.running = r3.running; state.displayText = r3.displayText;
-    assert.strictEqual(state.displayText, 'hello world testing');
-
-    // User taps Accept
-    const { sent } = applyAccept(state);
-    assert.strictEqual(sent, 'hello world testing');
-    // State clears after accept
-    assert.strictEqual(state.running, '');
-    assert.strictEqual(state.displayText, '');
-  });
-
-  await t.test('speak, cancel → nothing sent, state cleared', () => {
-    const state = { running: '', latestInterim: '', displayText: '' };
-    const r1 = simulateOnresult([{ transcript: 'goodbye', isFinal: true }]);
-    state.running = r1.running; state.displayText = r1.displayText;
-    assert.strictEqual(state.displayText, 'goodbye');
-
-    applyCancel(state);
-    assert.strictEqual(state.running, '');
-    assert.strictEqual(state.displayText, '');
-  });
-
-  await t.test('stop dictation (toggle) → implicit accept', () => {
-    // toggleDictation() calls acceptDictation() on stop — same as Accept button
-    const state = { running: '', latestInterim: '', displayText: '' };
-    const r = simulateOnresult([
-      { transcript: 'implicit', isFinal: true },
-      { transcript: 'implicit accept', isFinal: true },
-    ]);
-    state.running = r.running; state.displayText = r.displayText;
-    assert.strictEqual(state.displayText, 'implicit accept');
-
-    // User toggles dictation off — same code path as acceptDictation()
-    const { sent } = applyAccept(state);
-    assert.strictEqual(sent, 'implicit accept');
-    assert.strictEqual(state.running, '');
-  });
-});
-
-test('onresult edge: case-insensitive cumulative', async (t) => {
-  // startsWith() is case-sensitive. If Chrome changes case across results,
-  // "hello" → "Hello world" would NOT be detected as cumulative,
-  // resulting in "helloHello world" (duplication). This is a known limitation.
-  await t.test('same case → detected as cumulative', () => {
-    const { running } = simulateOnresult([
-      { transcript: 'hello', isFinal: true },
-      { transcript: 'hello world', isFinal: true },
-    ]);
-    assert.strictEqual(running, 'hello world');
-  });
-
-  await t.test('different case → DETECTED as cumulative (case-insensitive fix)', () => {
-    // Case-insensitive localeCompare now detects "hello" → "Hello world" as cumulative
-    const { running } = simulateOnresult([
-      { transcript: 'hello', isFinal: true },
-      { transcript: 'Hello world', isFinal: true },
-    ]);
-    assert.strictEqual(running, 'Hello world'); // case-insensitive replace
-  });
-});
-
-test('onresult edge: empty/blank transcript', async (t) => {
-  await t.test('empty transcript → not accumulated, displayText empty', () => {
-    const { displayText, running } = simulateOnresult([
-      { transcript: '', isFinal: true },
-    ]);
-    assert.strictEqual(running, '');
-    assert.strictEqual(displayText, '');
-  });
-
-  await t.test('only whitespace → accumulated as-is', () => {
-    const { running } = simulateOnresult([
-      { transcript: ' ', isFinal: true },
-    ]);
-    assert.strictEqual(running, ' ');
-  });
-});
-
-test('onresult edge: interim-only then stop → shows interim', async (t) => {
-  await t.test('interim without any final → displayText is interim', () => {
-    // On desktop Chrome, user speaks but hasn't paused — only interim results
-    const { displayText, latestInterim, running } = simulateOnresult([
-      { transcript: 'I am thinking...', isFinal: false },
-    ]);
-    assert.strictEqual(latestInterim, 'I am thinking...');
-    assert.strictEqual(displayText, 'I am thinking...');
-    assert.strictEqual(running, '');
-  });
-});
-
-// ── Cross-session accumulator (Chrome Android restarts) ──────────────
-
-// Chrome Android ignores continuous:true — onend fires after each
-// utterance, recognition restarts. Each new session has fresh results.
-// Accumulator bridges sessions so user sees incremental progress.
-
-function simulateAccumulatorEvents(events, accumulator) {
-  // events: array of arrays (simulate multiple onresult invocations)
-  // Each inner array = one event's results
-  for (const eventResults of events) {
-    const { running } = simulateOnresult(eventResults);
-    if (running) {
-      // Match production: case-insensitive localeCompare (client.js:850)
-      if (accumulator.text && running.length >= accumulator.text.length && running.slice(0, accumulator.text.length).localeCompare(accumulator.text, undefined, { sensitivity: 'base' }) === 0) {
-        accumulator.text = running;
-      } else if (accumulator.text) {
-        const lower = running.charAt(0).toLowerCase() + running.slice(1);
-        accumulator.text = (accumulator.text + ', ' + lower).trim();
-      } else {
-        accumulator.text = running;
-      }
-    }
-    accumulator.displayText = accumulator.text;
-  }
-  return accumulator;
-}
-
-test('cross-session accumulator — Chrome Android pattern', async (t) => {
-  await t.test('two utterances across restarts → joined', () => {
-    const acc = { text: '', displayText: '' };
-    // Utterance 1: "hello" → onend → restart
-    simulateAccumulatorEvents([
-      [{ transcript: 'hello', isFinal: true }],
-    ], acc);
-    assert.strictEqual(acc.text, 'hello');
-    assert.strictEqual(acc.displayText, 'hello');
-
-    // Utterance 2: "world" (fresh session, no knowledge of prior)
-    simulateAccumulatorEvents([
-      [{ transcript: 'world', isFinal: true }],
-    ], acc);
-    assert.strictEqual(acc.text, 'hello, world');
-    assert.strictEqual(acc.displayText, 'hello, world');
-  });
-
-  await t.test('three utterances → all joined with spaces', () => {
-    const acc = { text: '', displayText: '' };
-    simulateAccumulatorEvents([
-      [{ transcript: 'this', isFinal: true }],
-      [{ transcript: 'is', isFinal: true }],
-      [{ transcript: 'working', isFinal: true }],
-    ], acc);
-    assert.strictEqual(acc.text, 'this, is, working');
-  });
-
-  await t.test('cumulative within one session → no duplicate join', () => {
-    // Desktop pattern: cumulative results within one event
-    const acc = { text: '', displayText: '' };
-    simulateAccumulatorEvents([
-      [
-        { transcript: 'hello', isFinal: true },
-        { transcript: 'hello world', isFinal: true },
-      ],
-    ], acc);
-    assert.strictEqual(acc.text, 'hello world');
-  });
-
-  await t.test('cumulative across sessions → extends naturally', () => {
-    const acc = { text: '', displayText: '' };
-    // Session 1: "hello"
-    simulateAccumulatorEvents([
-      [{ transcript: 'hello', isFinal: true }],
-    ], acc);
-    // Session 2: "hello world" (cumulative within session, includes prior)
-    simulateAccumulatorEvents([
-      [
-        { transcript: 'hello', isFinal: true },
-        { transcript: 'hello world', isFinal: true },
-      ],
-    ], acc);
-    // startsWith catches it → no duplicate "hello hello world"
-    assert.strictEqual(acc.text, 'hello world');
-  });
-});
-
-test('cross-session accumulator — reset on accept/cancel/start', async (t) => {
-  await t.test('accept clears accumulator', () => {
-    const { sent } = simulateAccept('hello world');
-    assert.strictEqual(sent, 'hello world');
-    // After accept, accumulator should be '' (cleared by acceptDictation)
-    // verify via the returned state
-    assert.strictEqual(simulateAccept('').sent, '');
-  });
-
-  await t.test('cancel clears accumulator', () => {
-    const result = simulateCancel();
-    assert.strictEqual(result.accumulatedAfter, '');
-  });
-
-  await t.test('new start resets accumulator to empty', () => {
-    // simulate fresh start: accumulator = ''
-    const acc = { text: '', displayText: '' };
-    simulateAccumulatorEvents([
-      [{ transcript: 'new session', isFinal: true }],
-    ], acc);
-    assert.strictEqual(acc.text, 'new session');
-  });
-});
 
 // ── Dictate button click isolation ─────────────────────────────────────
 
@@ -947,8 +527,8 @@ function simulateToggleState(isListening, isPaused, stopPending) {
     return { action: 'ignored' };
   } else {
     // START path — production toggleDictation() does not have an isPaused branch;
-    // tapping mic while paused triggers a fresh start (accumulator cleared).
-    return { action: 'start', accumulator: '' };
+    // tapping mic while paused triggers a fresh start.
+    return { action: 'start' };
   }
 }
 
@@ -969,16 +549,14 @@ test('toggleDictation — _stopPending guard and state transitions', async (t) =
     assert.strictEqual(r.action, 'ignored');
   });
 
-  await t.test('stopped + no guard → start with fresh accumulator', () => {
+  await t.test('stopped + no guard → start', () => {
     const r = simulateToggleState(false, false, false);
     assert.strictEqual(r.action, 'start');
-    assert.strictEqual(r.accumulator, '');
   });
 
   await t.test('paused + no guard → start (production toggleDictation has no isPaused branch)', () => {
     const r = simulateToggleState(false, true, false);
     assert.strictEqual(r.action, 'start');
-    assert.strictEqual(r.accumulator, '');
   });
 });
 
@@ -1146,5 +724,294 @@ test('acceptAndSend — split write behavior', async (t) => {
     assert.strictEqual(writes[0].data, 'x');
     assert.strictEqual(writes[1].data, '\r');
   });
+});
+
+// ── Dictation macros — integration with onresult fragment flow ─────────
+// Simulates the fragment-detection + macro-processing loop added to
+// dictation.js onresult handler. Uses the real production module.
+
+const M_INT = (function() {
+  global.window = global.window || {};
+  require('../../public/dictation-macros.js');
+  return global.window.DictationMacros;
+})();
+
+// Simulates the fragment loop added to dictation.js onresult.
+// Uses delta-extraction per result index (matching production code).
+function simulateMacroOnresult(fragments, lang) {
+  const state = { segments: [], pendingFormat: null, lastTranscripts: [] };
+
+  for (let i = 0; i < fragments.length; i++) {
+    // Each fragment arrives at index i as a growing `event.results` array.
+    // Simulate Chrome cumulative behavior: transcript at index i is the new fragment.
+    const transcript = fragments[i];
+    const prev = state.lastTranscripts[i] || '';
+    if (transcript === prev) continue;
+
+    // Delta extraction (matching production)
+    let delta = transcript;
+    if (prev && transcript.length > prev.length &&
+        transcript.slice(0, prev.length).localeCompare(prev, undefined, { sensitivity: 'base' }) === 0) {
+      delta = transcript.slice(prev.length).trim();
+    } else {
+      delta = transcript.trim();
+    }
+    state.lastTranscripts[i] = transcript;
+    if (!delta) continue;
+
+    const m = M_INT.processFragment(delta, lang);
+    if (m.type === 'macro') {
+      if (m.insert) {
+        state.segments.push(m.insert);
+        state.pendingFormat = null; // insert consumes any pending format (matches production)
+      } else {
+        state.pendingFormat = m.format;
+      }
+    } else {
+      // Production applies inline first (onEnd triggers match at fragment end),
+      // then wraps with pending format.
+      let text = M_INT.applyInline(delta, lang);
+      text = state.pendingFormat ? M_INT.applyFormat(text, state.pendingFormat) : text;
+      state.pendingFormat = null;
+      state.segments.push(text);
+    }
+  }
+
+  const rawDisplay = state.segments.join(' ');
+  // Production re-applies applyInline to the display/accept text for spacing
+  // normalization (e.g. insert "punto" → "fin ." → "fin."). It is idempotent.
+  const processed = M_INT.applyInline(rawDisplay, lang);
+  return {
+    displayText: processed,
+    finalText: processed,
+    segments: state.segments,
+    pendingFormat: state.pendingFormat,
+  };
+}
+
+test('dictation macros integration — onresult fragment flow', async (t) => {
+  await t.test('text → macro → text: quotes next fragment (es-AR)', () => {
+    const r = simulateMacroOnresult([
+      'este feature',
+      'entre comillas',
+      'lindo',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, 'este feature "lindo"');
+    assert.strictEqual(r.finalText, 'este feature "lindo"');
+    assert.strictEqual(r.pendingFormat, null);
+  });
+
+  await t.test('text → macro → text (en-US)', () => {
+    const r = simulateMacroOnresult([
+      'this feature',
+      'in quotes',
+      'nice',
+    ], 'en-US');
+
+    assert.strictEqual(r.displayText, 'this feature "nice"');
+  });
+
+  await t.test('macro consumed — not shown in display', () => {
+    const r = simulateMacroOnresult([
+      'entre comillas',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, '');
+    assert.strictEqual(r.segments.length, 0);
+    assert.strictEqual(r.pendingFormat, 'quotes');
+  });
+
+  await t.test('uppercase format applies to next fragment', () => {
+    const r = simulateMacroOnresult([
+      'en mayúsculas',
+      'casa',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, 'Casa');
+  });
+
+  await t.test('allcaps format applies to next fragment', () => {
+    const r = simulateMacroOnresult([
+      'todo mayúsculas',
+      'gritar',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, 'GRITAR');
+  });
+
+  await t.test('consecutive macros → last wins', () => {
+    const r = simulateMacroOnresult([
+      'entre comillas',
+      'en mayúsculas',
+      'hola',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, 'Hola');
+    assert.strictEqual(r.pendingFormat, null);
+  });
+
+  await t.test('macro + text with inline → both processed', () => {
+    const r = simulateMacroOnresult([
+      'entre comillas',
+      'hola signo de pregunta',
+    ], 'es-AR');
+
+    assert.strictEqual(r.finalText, '"hola?"');
+  });
+
+  await t.test('uppercase + inline → format first, then inline', () => {
+    const r = simulateMacroOnresult([
+      'en mayúsculas',
+      'hola signo de pregunta',
+    ], 'es-AR');
+
+    assert.strictEqual(r.finalText, 'Hola?');
+  });
+
+  await t.test('no macros → plain passthrough', () => {
+    const r = simulateMacroOnresult([
+      'hola mundo',
+      'cómo estás',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, 'hola mundo cómo estás');
+    assert.strictEqual(r.segments.length, 2);
+  });
+
+  await t.test('embedded macro phrase in longer text → NOT treated as macro', () => {
+    const r = simulateMacroOnresult([
+      'dije entre comillas ayer',
+      'lindo',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, 'dije entre comillas ayer lindo');
+    assert.strictEqual(r.pendingFormat, null);
+  });
+
+  await t.test('empty fragment after macro → skipped, format applies to next', () => {
+    const r = simulateMacroOnresult([
+      'entre comillas',
+      '   ',
+      'real text',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, '"real text"');
+  });
+
+  await t.test('results reset (Android pattern) — covered by simulateMacroOnresult', () => {
+    // Chrome Android: each utterance is a fresh recognition session, so each
+    // fragment arrives at a new result index (exactly what simulateMacroOnresult
+    // models via per-index _lastTranscripts). production's onstart clears
+    // _lastTranscripts so a fresh session reprocesses from index 0.
+    const r = simulateMacroOnresult(['hello', 'in quotes', 'world'], 'en-US');
+    assert.strictEqual(r.displayText, 'hello "world"');
+  });
+
+  await t.test('parens: text → macro → text wraps in parentheses', () => {
+    const r = simulateMacroOnresult([
+      'este',
+      'entre paréntesis',
+      'feature',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, 'este (feature)');
+    assert.strictEqual(r.pendingFormat, null);
+  });
+
+  await t.test('single-quote stateful (entre comillas simples)', () => {
+    const r = simulateMacroOnresult([
+      'entre comillas simples',
+      'hola',
+    ], 'es-AR');
+
+    assert.strictEqual(r.displayText, "'hola'");
+  });
+
+  await t.test('fragment-level insert: "coma" standalone → ","', () => {
+    const r = simulateMacroOnresult(['no', 'coma', 'gracias'], 'es-AR');
+    assert.strictEqual(r.displayText, 'no, gracias');
+  });
+
+  await t.test('fragment-level insert: "punto" standalone → "."', () => {
+    const r = simulateMacroOnresult(['fin', 'punto'], 'es-AR');
+    assert.strictEqual(r.displayText, 'fin.');
+  });
+
+  await t.test('"coma" embedded in phrase — NOT replaced', () => {
+    const r = simulateMacroOnresult(['no quisiera que se coma esto'], 'es-AR');
+    assert.strictEqual(r.displayText, 'no quisiera que se coma esto');
+  });
+
+  await t.test('insert consumes pending format (quote then comma)', () => {
+    const r = simulateMacroOnresult(['entre comillas', 'coma', 'gracias'], 'es-AR');
+    // "entre comillas" sets pendingFormat=quotes; "coma" insert clears it;
+    // "gracias" is NOT quoted.
+    assert.strictEqual(r.displayText, ', gracias');
+  });
+
+  await t.test('accept: pending format applies to interim only, not prior segments', () => {
+    // Finalized: "algo" → segment. Macro "entre comillas" → pendingFormat.
+    // Interim: "hola". Accept must wrap only "hola", not "algo".
+    const state = { segments: [], pendingFormat: null, lastTranscripts: [] };
+    // fragment loop over finalized parts
+    const m1 = M_INT.processFragment('algo', 'es-AR');
+    if (m1.type === 'macro') { state.pendingFormat = m1.format; }
+    else state.segments.push(M_INT.applyInline('algo', 'es-AR'));
+    const m2 = M_INT.processFragment('entre comillas', 'es-AR');
+    if (m2.type === 'macro') state.pendingFormat = m2.format;
+
+    // accept-time: interim "hola" + pendingFormat
+    const segmentsText = state.segments.join(' ');
+    let interimText = 'hola';
+    if (state.pendingFormat && interimText) {
+      interimText = M_INT.applyInline(interimText, 'es-AR');
+      interimText = M_INT.applyFormat(interimText, state.pendingFormat);
+      state.pendingFormat = null;
+    }
+    const rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    const text = M_INT.applyInline(rawText, 'es-AR');
+
+    assert.strictEqual(text, 'algo "hola"');
+  });
+
+  await t.test('accept: pending format with empty interim is dropped', () => {
+    const state = { segments: ['algo'], pendingFormat: 'quotes' };
+    const segmentsText = state.segments.join(' ');
+    let interimText = '';
+    if (state.pendingFormat && interimText) {
+      interimText = M_INT.applyInline(interimText, 'es-AR');
+      interimText = M_INT.applyFormat(interimText, state.pendingFormat);
+      state.pendingFormat = null;
+    }
+    const rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    const text = M_INT.applyInline(rawText, 'es-AR');
+
+    assert.strictEqual(text, 'algo');
+  });
+
+  await t.test('accept: wrapping format + onEnd trigger at interim', () => {
+    // "entre comillas" (pendingFormat=quotes) + interim "hola signo de pregunta".
+    // Inline (onEnd → "hola?") must run BEFORE the quote wrapper → '"hola?"'.
+    const state = { segments: [], pendingFormat: 'quotes' };
+    const segmentsText = state.segments.join(' ');
+    let interimText = 'hola signo de pregunta';
+    if (state.pendingFormat && interimText) {
+      interimText = M_INT.applyInline(interimText, 'es-AR');
+      interimText = M_INT.applyFormat(interimText, state.pendingFormat);
+      state.pendingFormat = null;
+    }
+    const rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    const text = M_INT.applyInline(rawText, 'es-AR');
+
+    assert.strictEqual(text, '"hola?"');
+  });
+
+  await t.test('separate utterances that are prefix-related are NOT deduped', () => {
+    // "hola" then "hola mundo" as two distinct indices → no false dedup.
+    const r = simulateMacroOnresult(['hola', 'hola mundo'], 'es-AR');
+    assert.strictEqual(r.displayText, 'hola hola mundo');
+  });
+
 });
 

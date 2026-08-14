@@ -11,7 +11,10 @@
   var isPaused = false;          // Long-tap while recording → pause
   var _stopPending = false;     // Guard: ignore taps while stop is in-flight
   var _onendGen = 0;            // Prevents stale onend from pauseDictation() restarting
-  var dictationAccumulator = '';   // Persists across recognition restarts (Chrome Android)
+  var _pendingFormat = null;     // 'quotes'|'uppercase'|'allcaps' — set by stateful macro fragment
+  var _segments = [];            // Array of display strings, one per accepted fragment
+  var _lastTranscripts = [];     // Per-index transcript tracking for delta extraction
+  var _latestInterim = '';       // Current interim transcript (survives across onresult)
 
   // ── Dependencies (injected by client.js init) ─────────────────────────
   var _send, _log, _blurInput, _sessionLabel;
@@ -240,43 +243,69 @@
     recognition.continuous = true;
 
     recognition.onresult = function(event) {
-      var running = '';
       var latestInterim = '';
 
       for (var i = 0; i < event.results.length; i++) {
         var result = event.results[i];
         var transcript = result[0].transcript;
 
-        if (result.isFinal) {
-          if (result[0].confidence === 0) continue;
-          if (running && transcript.length >= running.length &&
-              transcript.slice(0, running.length).localeCompare(running, undefined, { sensitivity: 'base' }) === 0) {
-            running = transcript;
-          } else {
-            running += transcript;
-          }
-        } else {
+        if (!result.isFinal) {
           latestInterim = transcript;
         }
       }
 
-      if (running) {
-        if (dictationAccumulator && running.length >= dictationAccumulator.length &&
-            running.slice(0, dictationAccumulator.length).localeCompare(dictationAccumulator, undefined, { sensitivity: 'base' }) === 0) {
-          dictationAccumulator = running;
-        } else if (dictationAccumulator) {
-          var lower = running.charAt(0).toLowerCase() + running.slice(1);
-          dictationAccumulator = (dictationAccumulator + ', ' + lower).trim();
+      _latestInterim = latestInterim;
+
+      // ── Fragment detection & macro processing ────────────────────────
+      // Each result index is an independent segment; Chrome cumulates the
+      // SAME index across events (e.g. "this" → "this is"). Extract the
+      // per-index delta so standalone macro fragments are detected once.
+      for (var j = 0; j < event.results.length; j++) {
+        var _r = event.results[j];
+        if (!_r.isFinal) continue;
+        if (_r[0].confidence === 0) continue;
+        var transcript = _r[0].transcript;
+        var prev = _lastTranscripts[j] || '';
+        if (transcript === prev) continue;
+        _lastTranscripts[j] = transcript;
+        // Cumulative growth of the same index → extract only the new part.
+        var delta;
+        if (prev && transcript.length > prev.length &&
+            transcript.slice(0, prev.length).localeCompare(prev, undefined, { sensitivity: 'base' }) === 0) {
+          delta = transcript.slice(prev.length).trim();
         } else {
-          dictationAccumulator = running;
+          delta = transcript.trim();
+        }
+        if (!delta) continue;
+        var _m = DictationMacros && DictationMacros.processFragment(delta, currentLang);
+        if (_m && _m.type === 'macro') {
+          if (_m.insert) {
+            _segments.push(_m.insert);
+            _pendingFormat = null; // insert consumes any pending format
+          } else {
+            _pendingFormat = _m.format;
+          }
+        } else {
+          var _text = delta;
+          // Apply inline first (so onEnd triggers match at fragment end),
+          // then wrap with any pending format.
+          _text = DictationMacros.applyInline(_text, currentLang);
+          if (_pendingFormat) {
+            _text = DictationMacros.applyFormat(_text, _pendingFormat);
+            _pendingFormat = null;
+          }
+          _segments.push(_text);
         }
       }
 
       if (dictateOverlay.classList.contains('dictate-hidden')) return;
 
-      var displayText = latestInterim || dictationAccumulator;
+      var displayText = _latestInterim || _segments.join(' ');
+      if (displayText && DictationMacros) {
+        displayText = DictationMacros.applyInline(displayText, currentLang);
+      }
+      dictateText.textContent = displayText;
       if (displayText) {
-        dictateText.textContent = displayText;
         dictateText.style.height = 'auto';
         var h = dictateText.scrollHeight;
         dictateText.style.height = Math.min(h, window.innerHeight * 0.3) + 'px';
@@ -292,6 +321,10 @@
     };
 
     recognition.onstart = function() {
+      // Reset result-index tracking so new session results get processed.
+      // _segments and _pendingFormat survive across Android restarts.
+      _lastTranscripts = [];
+      _latestInterim = '';
       if (isListening && !dictateBtn.classList.contains('recording')) {
         isPaused = false;
         dictateBtn.classList.remove('paused');
@@ -355,7 +388,10 @@
     } else {
       if (_blurInput) _blurInput();
       isListening = true;
-      dictationAccumulator = '';
+      _latestInterim = '';
+      _pendingFormat = null;
+      _segments = [];
+      _lastTranscripts = [];
       dictateOverlay.classList.remove('dictate-hidden');
       dictateText.textContent = '';
       dictateText.style.height = '';
@@ -368,7 +404,20 @@
 
   function acceptDictation() {
     _stopPending = false;
-    var text = dictateText.textContent.trim();
+    // Build text from state (segments + current interim), not the display —
+    // the display shows only interim while an utterance is mid-speech.
+    var segmentsText = _segments.join(' ');
+    var interimText = _latestInterim;
+    // Apply any pending format (e.g. quotes set by a macro before the
+    // current utterance started) to the CURRENT utterance only — finalized
+    // segments were already processed in the fragment loop.
+    if (_pendingFormat && DictationMacros && interimText) {
+      interimText = DictationMacros.applyInline(interimText, currentLang);
+      interimText = DictationMacros.applyFormat(interimText, _pendingFormat);
+      _pendingFormat = null;
+    }
+    var rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    var text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
     if (isListening) {
       isListening = false;
       recognition.abort();
@@ -379,7 +428,10 @@
     if (text) {
       _send({ type: 'input', data: text });
     }
-    dictationAccumulator = '';
+    _latestInterim = '';
+    _pendingFormat = null;
+    _segments = [];
+    _lastTranscripts = [];
     dismissOverlay();
   }
 
@@ -392,7 +444,10 @@
       dictateIcon.textContent = '🎤';
       dictateLabel.textContent = tr('dictate');
     }
-    dictationAccumulator = '';
+    _latestInterim = '';
+    _pendingFormat = null;
+    _segments = [];
+    _lastTranscripts = [];
     dismissOverlay();
   }
 
@@ -402,11 +457,23 @@
     dictateOverlay.classList.add('dictate-hidden');
     dictateText.textContent = '';
     dictateText.style.height = '';
+    _pendingFormat = null;
+    _segments = [];
+    _lastTranscripts = [];
+    _latestInterim = '';
   }
 
   function acceptAndSend() {
     _stopPending = false;
-    var text = dictateText.textContent.trim();
+    var segmentsText = _segments.join(' ');
+    var interimText = _latestInterim;
+    if (_pendingFormat && DictationMacros && interimText) {
+      interimText = DictationMacros.applyInline(interimText, currentLang);
+      interimText = DictationMacros.applyFormat(interimText, _pendingFormat);
+      _pendingFormat = null;
+    }
+    var rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    var text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
     if (isListening) {
       isListening = false;
       recognition.abort();
@@ -418,9 +485,12 @@
       _send({ type: 'input', data: text });
       setTimeout(function() {
         _send({ type: 'input', data: '\r' });
-      }, 50);
+      }, 200);
     }
-    dictationAccumulator = '';
+    _latestInterim = '';
+    _pendingFormat = null;
+    _segments = [];
+    _lastTranscripts = [];
     dismissOverlay();
   }
 
