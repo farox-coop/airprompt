@@ -102,11 +102,11 @@ Chrome/Android block `SpeechRecognition` over plain HTTP to LAN IPs. AirPrompt a
 
 Voice macros let you control formatting and punctuation by speaking trigger phrases. Three types:
 
-- **Inline macros** — spoken within a continuous fragment, replaced in-place: "hola signo de pregunta" → `hola?`, "punto y coma" → `;`, "nueva línea" → newline. These are unambiguous multi-word phrases safe to match anywhere. Inline triggers: `signo de pregunta`, `signo de exclamación`, `punto y coma`, `dos puntos`, `puntos suspensivos`, `nueva línea`, `nuevo párrafo`, `abre/abrí comillas`, `abre/abrí comillas simples`, `abre/abrí tics`, `abre/abrí paréntesis`, plus close variants (es-AR) / equivalents in en-US.
-- **Fragment-level inserts** — a standalone fragment consisting ONLY of the trigger word: say "coma" between pauses → inserts `,`. Same for "punto" → `.`, "guion" → `-`. These common words are NOT replaced when embedded in longer text ("se coma esto" stays literal).
+- **Inline macros** — replaced in-place within a continuous fragment: "hola signo de pregunta" → `hola?`. Triggers are unambiguous multi-word commands: `abre/abrí` + `cierra/cerrá` `paréntesis` → `(`/`)`, `comillas` → `"`, `comillas simples` → `'`, `tics` → `` ` ``, and `signo de pregunta` → `?`, `signo de exclamación`/`signo de admiración` → `!` (es-AR) / equivalents in en-US.
+- **Fragment-level inserts** — a standalone fragment consisting ONLY of the trigger word/phrase inserts the character: `punto` → `.`, `coma` → `,`, `guion` → `-`, `punto y coma` → `;`, `dos puntos` → `:`, `puntos suspensivos` → `…`, `nueva línea` → newline, `nuevo párrafo` → blank line. These common words are NOT replaced when embedded in longer text ("se coma esto" stays literal).
 - **Stateful macros** — a standalone fragment that sets formatting for the *next* fragment: say "entre comillas" → next fragment wrapped in `"..."`. Also: "entre comillas simples" → `'...'`, "entre tics" → `` `...` ``, "entre paréntesis" → `(...)`, "en mayúsculas" (capitalize first letter), "todo mayúsculas" (ALL CAPS). Trigger phrases must be the *only* thing in their fragment to activate — embedded in longer speech they're treated as literal text.
 
-Both Spanish (es-AR, including voseo "abrí"/"cerrá") and English (en-US) supported with the same macro set.
+Both Spanish (es-AR, including voseo "abrí"/"cerrá") and English (en-US) supported with the same macro set. Accent-dropping by the recognizer is tolerated (e.g. "abri paréntesis" still matches).
 
 ## IDE Integration
 

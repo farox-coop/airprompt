@@ -7,6 +7,7 @@ AirPrompt's dictation currently uses the browser's **Web Speech API** (`SpeechRe
 - **Pause/utterance segmentation** — the engine decides where fragments start and end, and it is unpredictable across Chrome desktop, Chrome Android, and iOS Safari. This directly hurts our dictation macros: a "fragment-level" macro (e.g. say `coma` standalone → `,`) only fires when the engine happens to segment it as its own utterance.
 - **Word-level timestamps** — not available. We cannot detect real silences (e.g. silence > 500 ms = pause), only whatever the engine reports as final/partial results.
 - **The audio path** — on Chrome the audio goes to a Google cloud endpoint; it never stays local.
+- **Built-in dictation commands** — the recognizer pre-converts phrases into punctuation/newlines on its own (e.g. "nuevo párrafo" → `\n\n`, "nueva línea" → `\n`), inconsistently even mid-sentence. Our macro engine has to *revert* these back to the literal words (`revertSttNewlines` in `public/dictation-macros.js`) so its own isolated-only macros decide — a workaround for behavior we can't disable.
 
 This document explores replacing the Web Speech API with **local inference** so AirPrompt owns the audio, the segmentation, and the timestamps. It is research/planning only — no implementation is scheduled.
 

@@ -8,21 +8,23 @@
   // Each entry has a `trigger` (string or array of aliases). Arrays
   // support regional variants (e.g. Argentine "abrí" vs neutral "abre").
   // Inline entries sorted longest-trigger-first to prevent partial matches.
+  // Accented triggers MUST use RegExp with [aá]/[eé]/[ií]/[oó]/[uú] classes —
+  // never plain strings — so accent-dropping by the recognizer still matches.
 
   var MACROS = {
     'es-AR': {
       inline: [
-        { trigger: [/(abre|abrí) par[eé]ntesis/i],   replace: '(' },
-        { trigger: [/(cierra|cerrá) par[eé]ntesis/i], replace: ')' },
+        { trigger: [/(abre|abr[ií]) par[eé]ntesis/i],   replace: '(' },
+        { trigger: [/([cs]ierra|[cs]err[aá]) par[eé]ntesis/i], replace: ')' },
         { trigger: 'signo de pregunta',         replace: '?', onEnd: true },
-        { trigger: ['signo de exclamación', 'signo de admiración'], replace: '!', onEnd: true },
+        { trigger: [/signo de exclamaci[oó]n/i, /signo de admiraci[oó]n/i], replace: '!', onEnd: true },
         // Quote/tic inline — regex handles all singular/plural + voseo variants
-        { trigger: [/(abre|abrí) comillas? simples?/i],  replace: "'" },
-        { trigger: [/(cierra|cerrá) comillas? simples?/i], replace: "'" },
-        { trigger: [/(abre|abrí) comillas?/i],   replace: '"' },
-        { trigger: [/(cierra|cerrá) comillas?/i], replace: '"' },
-        { trigger: [/(abre|abrí) tics?/i],        replace: '`' },
-        { trigger: [/(cierra|cerrá) tics?/i],     replace: '`' },
+        { trigger: [/(abre|abr[ií]) comillas? simples?/i],  replace: "'", open: true },
+        { trigger: [/([cs]ierra|[cs]err[aá]) comillas? simples?/i], replace: "'", close: true },
+        { trigger: [/(abre|abr[ií]) comillas?/i],   replace: '"', open: true },
+        { trigger: [/([cs]ierra|[cs]err[aá]) comillas?/i], replace: '"', close: true },
+        { trigger: [/(abre|abr[ií]) tics?/i],        replace: '`', open: true },
+        { trigger: [/([cs]ierra|[cs]err[aá]) tics?/i],     replace: '`', close: true },
       ],
       stateful: [
         // Fragment-level single-char inserts (standalone only — won't match inside longer text)
@@ -35,8 +37,8 @@
         { trigger: [/^punto y coma$/i],          insert: ';' },
         { trigger: [/^dos puntos$/i],            insert: ':' },
         // Standalone parens/quote/tic — same chars as inline, fragment-safe
-        { trigger: [/^(abre|abrí) par[eé]ntesis$/i], insert: '(' },
-        { trigger: [/^(cierra|cerrá) par[eé]ntesis$/i], insert: ')' },
+        { trigger: [/^(abre|abr[ií]) par[eé]ntesis$/i], insert: '(' },
+        { trigger: [/^([cs]ierra|[cs]err[aá]) par[eé]ntesis$/i], insert: ')' },
         // Wrapping macros
         { trigger: [/entre comillas?/i],         format: 'quotes' },
         { trigger: [/entre comillas? simples?/i], format: 'squotes' },
@@ -53,12 +55,12 @@
         { trigger: 'question mark',             replace: '?', onEnd: true },
         { trigger: 'exclamation point',         replace: '!', onEnd: true },
         // Quote/tic inline — regex handles singular/plural variants
-        { trigger: [/(open|begin) single quotes?/i], replace: "'" },
-        { trigger: [/(close|end) single quotes?/i],  replace: "'" },
-        { trigger: [/(open|begin) quotes?/i],   replace: '"' },
-        { trigger: [/(close|end) quotes?/i],    replace: '"' },
-        { trigger: [/(open|begin) backticks?/i], replace: '`' },
-        { trigger: [/(close|end) backticks?/i], replace: '`' },
+        { trigger: [/(open|begin) single quotes?/i], replace: "'", open: true },
+        { trigger: [/(close|end) single quotes?/i],  replace: "'", close: true },
+        { trigger: [/(open|begin) quotes?/i],   replace: '"', open: true },
+        { trigger: [/(close|end) quotes?/i],    replace: '"', close: true },
+        { trigger: [/(open|begin) backticks?/i], replace: '`', open: true },
+        { trigger: [/(close|end) backticks?/i], replace: '`', close: true },
       ],
       stateful: [
         { trigger: [/^period$/i],               insert: '.' },
@@ -92,6 +94,40 @@
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  // Strip leading/trailing spaces (and tabs) — not newlines, so the
+  // recognizer's "\n\n" for "nuevo párrafo" survives to be reverted.
+  function trimSpaces(str) {
+    return str.replace(/^[ \t]+|[ \t]+$/g, '');
+  }
+
+  // The recognizer has its own dictation commands: it transcribes "nuevo párrafo"
+  // (or "new paragraph") as "\n\n" and "nueva línea" (or "new line") as "\n" —
+  // inconsistently, even mid-sentence. Revert them to the literal phrases (in the
+  // current language) so our own isolated-only macros decide.
+  function revertSttNewlines(text, lang) {
+    var para = (lang === 'es-AR') ? 'nuevo párrafo' : 'new paragraph';
+    var line = (lang === 'es-AR') ? 'nueva línea' : 'new line';
+    return text
+      .replace(/\n{2,}/g, ' ' + para + ' ')
+      .replace(/\n/g, ' ' + line + ' ')
+      .replace(/ +/g, ' ')
+      .trim();
+  }
+
+  // Extract the "new" part of a cumulative transcript (per result index).
+  // Returns '' when unchanged — including accent/case corrections, which the
+  // recognizer emits as a different string for the same words ("parrafo"→"párrafo").
+  function extractDelta(transcript, prev) {
+    prev = prev || '';
+    if (!prev) return trimSpaces(transcript);
+    if (transcript.localeCompare(prev, undefined, { sensitivity: 'base' }) === 0) return '';
+    if (transcript.length > prev.length &&
+        transcript.slice(0, prev.length).localeCompare(prev, undefined, { sensitivity: 'base' }) === 0) {
+      return trimSpaces(transcript.slice(prev.length));
+    }
+    return trimSpaces(transcript);
+  }
+
   // ── Public API ──────────────────────────────────────────────────────────
 
   function processFragment(segment, lang) {
@@ -112,7 +148,7 @@
             if (entry.insert) return { type: 'macro', insert: entry.insert };
             return { type: 'macro', format: entry.format };
           }
-        } else if (normalized === alias.toLowerCase()) {
+        } else if (normalized.localeCompare(alias, undefined, { sensitivity: 'base' }) === 0) {
           if (entry.insert) return { type: 'macro', insert: entry.insert };
           return { type: 'macro', format: entry.format };
         }
@@ -143,12 +179,21 @@
       if (entry.onEnd) {
         var endPattern = new RegExp('\\b(?:' + parts.join('|') + ')\\s*$', 'gi');
         result = result.replace(endPattern, entry.replace);
+      } else if (entry.open) {
+        // Opener: consume trailing whitespace so no space after the char.
+        var openPattern = new RegExp('\\b(?:' + parts.join('|') + ')\\s*', 'gi');
+        result = result.replace(openPattern, entry.replace);
+      } else if (entry.close) {
+        // Closer: consume leading whitespace so no space before the char.
+        var closePattern = new RegExp('\\s*(?:' + parts.join('|') + ')\\b', 'gi');
+        result = result.replace(closePattern, entry.replace);
       } else {
         var pattern = new RegExp('\\b(?:' + parts.join('|') + ')\\b', 'gi');
         result = result.replace(pattern, entry.replace);
       }
     }
     result = result.replace(/ ([.,;:?!%)…])/g, '$1');
+    result = result.replace(/\( /g, '(');
     result = result.replace(/ ?\n ?/g, '\n');
     return result;
   }
@@ -180,6 +225,9 @@
     processFragment: processFragment,
     applyInline: applyInline,
     applyFormat: applyFormat,
+    extractDelta: extractDelta,
+    revertSttNewlines: revertSttNewlines,
+    trimSpaces: trimSpaces,
   };
 
 })();

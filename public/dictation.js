@@ -266,17 +266,12 @@
         if (_r[0].confidence === 0) continue;
         var transcript = _r[0].transcript;
         var prev = _lastTranscripts[j] || '';
-        if (transcript === prev) continue;
-        _lastTranscripts[j] = transcript;
         // Cumulative growth of the same index → extract only the new part.
-        var delta;
-        if (prev && transcript.length > prev.length &&
-            transcript.slice(0, prev.length).localeCompare(prev, undefined, { sensitivity: 'base' }) === 0) {
-          delta = transcript.slice(prev.length).trim();
-        } else {
-          delta = transcript.trim();
-        }
+        // Accent/case corrections ("parrafo"→"párrafo") return '' → skipped.
+        var delta = DictationMacros.extractDelta(transcript, prev);
         if (!delta) continue;
+        _lastTranscripts[j] = transcript;
+        delta = DictationMacros.revertSttNewlines(delta, currentLang);
         var _m = DictationMacros && DictationMacros.processFragment(delta, currentLang);
         if (_m && _m.type === 'macro') {
           if (_m.insert) {
@@ -302,6 +297,9 @@
 
       var displayText = _latestInterim || _segments.join(' ');
       if (displayText && DictationMacros) {
+        // Revert the STT's newlines in the live interim (segments were already
+        // reverted in the fragment loop).
+        if (_latestInterim) displayText = DictationMacros.revertSttNewlines(displayText, currentLang);
         displayText = DictationMacros.applyInline(displayText, currentLang);
       }
       dictateText.textContent = displayText;
@@ -407,7 +405,7 @@
     // Build text from state (segments + current interim), not the display —
     // the display shows only interim while an utterance is mid-speech.
     var segmentsText = _segments.join(' ');
-    var interimText = _latestInterim;
+    var interimText = DictationMacros.revertSttNewlines(_latestInterim, currentLang);
     // Apply any pending format (e.g. quotes set by a macro before the
     // current utterance started) to the CURRENT utterance only — finalized
     // segments were already processed in the fragment loop.
@@ -416,7 +414,8 @@
       interimText = DictationMacros.applyFormat(interimText, _pendingFormat);
       _pendingFormat = null;
     }
-    var rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    // Strip leading/trailing spaces only — keep intentional \n from nueva línea/nuevo párrafo.
+    var rawText = DictationMacros.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
     var text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
     if (isListening) {
       isListening = false;
@@ -466,13 +465,14 @@
   function acceptAndSend() {
     _stopPending = false;
     var segmentsText = _segments.join(' ');
-    var interimText = _latestInterim;
+    var interimText = DictationMacros.revertSttNewlines(_latestInterim, currentLang);
     if (_pendingFormat && DictationMacros && interimText) {
       interimText = DictationMacros.applyInline(interimText, currentLang);
       interimText = DictationMacros.applyFormat(interimText, _pendingFormat);
       _pendingFormat = null;
     }
-    var rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    // Strip leading/trailing spaces only — keep intentional \n from nueva línea/nuevo párrafo.
+    var rawText = DictationMacros.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
     var text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
     if (isListening) {
       isListening = false;

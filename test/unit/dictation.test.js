@@ -746,18 +746,12 @@ function simulateMacroOnresult(fragments, lang) {
     // Simulate Chrome cumulative behavior: transcript at index i is the new fragment.
     const transcript = fragments[i];
     const prev = state.lastTranscripts[i] || '';
-    if (transcript === prev) continue;
 
-    // Delta extraction (matching production)
-    let delta = transcript;
-    if (prev && transcript.length > prev.length &&
-        transcript.slice(0, prev.length).localeCompare(prev, undefined, { sensitivity: 'base' }) === 0) {
-      delta = transcript.slice(prev.length).trim();
-    } else {
-      delta = transcript.trim();
-    }
-    state.lastTranscripts[i] = transcript;
+    // Delta extraction + STT-newline revert — real production functions.
+    let delta = M_INT.extractDelta(transcript, prev);
     if (!delta) continue;
+    state.lastTranscripts[i] = transcript;
+    delta = M_INT.revertSttNewlines(delta, lang);
 
     const m = M_INT.processFragment(delta, lang);
     if (m.type === 'macro') {
@@ -969,7 +963,7 @@ test('dictation macros integration — onresult fragment flow', async (t) => {
       interimText = M_INT.applyFormat(interimText, state.pendingFormat);
       state.pendingFormat = null;
     }
-    const rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    const rawText = M_INT.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
     const text = M_INT.applyInline(rawText, 'es-AR');
 
     assert.strictEqual(text, 'algo "hola"');
@@ -984,7 +978,7 @@ test('dictation macros integration — onresult fragment flow', async (t) => {
       interimText = M_INT.applyFormat(interimText, state.pendingFormat);
       state.pendingFormat = null;
     }
-    const rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    const rawText = M_INT.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
     const text = M_INT.applyInline(rawText, 'es-AR');
 
     assert.strictEqual(text, 'algo');
@@ -1001,16 +995,40 @@ test('dictation macros integration — onresult fragment flow', async (t) => {
       interimText = M_INT.applyFormat(interimText, state.pendingFormat);
       state.pendingFormat = null;
     }
-    const rawText = (segmentsText + (interimText ? ' ' + interimText : '')).trim();
+    const rawText = M_INT.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
     const text = M_INT.applyInline(rawText, 'es-AR');
 
     assert.strictEqual(text, '"hola?"');
+  });
+
+  await t.test('accept: interim mid-sentence newline is reverted to literal', () => {
+    // Interim still mid-utterance: the STT emitted "\n\n" for a mid-sentence
+    // "nuevo párrafo". Accept must revert it to the literal phrase.
+    const state = { segments: ['hola'], pendingFormat: null };
+    const segmentsText = state.segments.join(' ');
+    let interimText = M_INT.revertSttNewlines('esto va en un \n\n', 'es-AR');
+    const rawText = M_INT.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
+    const text = M_INT.applyInline(rawText, 'es-AR');
+    assert.strictEqual(text, 'hola esto va en un nuevo párrafo');
   });
 
   await t.test('separate utterances that are prefix-related are NOT deduped', () => {
     // "hola" then "hola mundo" as two distinct indices → no false dedup.
     const r = simulateMacroOnresult(['hola', 'hola mundo'], 'es-AR');
     assert.strictEqual(r.displayText, 'hola hola mundo');
+  });
+
+  await t.test('STT newline command "\\n\\n" → revert → paragraph break', () => {
+    // The recognizer emits "\n\n" for "nuevo párrafo"; the loop reverts it to
+    // the literal phrase, then our macro re-applies it (isolated).
+    const r = simulateMacroOnresult(['hola', '\n\n', 'chau'], 'es-AR');
+    assert.strictEqual(r.displayText, 'hola\n\nchau');
+  });
+
+  await t.test('STT mid-sentence "\\n\\n" → revert → literal text', () => {
+    // Embedded newline inside a phrase → reverted to literal "nuevo párrafo".
+    const r = simulateMacroOnresult(['esto va en un \n\n y sigue'], 'es-AR');
+    assert.strictEqual(r.displayText, 'esto va en un nuevo párrafo y sigue');
   });
 
 });

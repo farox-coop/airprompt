@@ -157,7 +157,12 @@ function recoverSessionsFromDisk() {
 function createApp() {
   const app = express();
   app.use(express.json());
-  app.use(express.static(path.join(__dirname, 'public')));
+  app.use(express.static(path.join(__dirname, 'public'), {
+    // LAN PoC: always revalidate so dev edits show up without cache-busting.
+    setHeaders: function(res) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    },
+  }));
 
   app.get('/api/sessions', (_req, res) => {
     res.json(Array.from(sessions.values()).map(s => sessionToJSON(s)));
@@ -495,7 +500,18 @@ function createApp() {
           // 64 KiB per message protects against paste-bombs on LAN.
           if (msg.data.length > 65536) break;
           if (ptyProcess) {
-            try { ptyProcess.write(msg.data); } catch (e) { /* ok */ }
+            try {
+              var inputData = msg.data;
+              if (inputData.indexOf('\n') !== -1) {
+                // Multi-line input: paste via tmux buffer with bracketed paste
+                // so newlines are literal, not "Enter" (which submits mid-text).
+                // Named buffer avoids clobbering the user's default copy buffer.
+                spawnSync('tmux', ['load-buffer', '-b', 'airprompt-input', '-'], { input: inputData, encoding: 'utf8', timeout: 2000 });
+                spawnSync('tmux', ['paste-buffer', '-p', '-b', 'airprompt-input', '-t', ptyProcess._airpromptWebSession], { timeout: 2000 });
+              } else {
+                ptyProcess.write(inputData);
+              }
+            } catch (e) { /* ok */ }
             const activeEntry = activeSessionId ? sessions.get(activeSessionId) : null;
             if (activeEntry) activeEntry.lastActivity = Date.now();
           } else {
