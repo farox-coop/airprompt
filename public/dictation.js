@@ -5,33 +5,33 @@
   'use strict';
 
   // ── State ────────────────────────────────────────────────────────────
-  var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  var recognition = null;
-  var isListening = false;
-  var isPaused = false;          // Long-tap while recording → pause
-  var _stopPending = false;     // Guard: ignore taps while stop is in-flight
-  var _onendGen = 0;            // Prevents stale onend from pauseDictation() restarting
-  var _pendingFormat = null;     // 'quotes'|'uppercase'|'allcaps' — set by stateful macro fragment
-  var _segments = [];            // Array of display strings, one per accepted fragment
-  var _lastTranscripts = [];     // Per-index transcript tracking for delta extraction
-  var _latestInterim = '';       // Current interim transcript (survives across onresult)
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+  let isListening = false;
+  let isPaused = false;          // Long-tap while recording → pause
+  let _stopPending = false;     // Guard: ignore taps while stop is in-flight
+  let _onendGen = 0;            // Prevents stale onend from pauseDictation() restarting
+  let _pendingFormat = null;     // 'quotes'|'uppercase'|'allcaps' — set by stateful macro fragment
+  let _segments = [];            // Array of display strings, one per accepted fragment
+  let _lastTranscripts = [];     // Per-index transcript tracking for delta extraction
+  let _latestInterim = '';       // Current interim transcript (survives across onresult)
 
   // ── Dependencies (injected by client.js init) ─────────────────────────
-  var _send, _log, _blurInput, _sessionLabel;
+  let _send, _log, _blurInput, _sessionLabel;
 
   // ── Dictation overlay DOM ────────────────────────────────────────────
-  var dictateBtn      = document.getElementById('dictate-btn');
-  var dictateIcon     = document.getElementById('dictate-icon');
-  var dictateLabel    = document.getElementById('dictate-label');
-  var dictateOverlay  = document.getElementById('dictate-overlay');
-  var dictateText     = document.getElementById('dictate-text');
-  var dictateAccept   = document.getElementById('dictate-accept');
-  var dictateAcceptSend = document.getElementById('dictate-accept-send');
-  var dictateCancel   = document.getElementById('dictate-cancel');
-  var micError        = document.getElementById('mic-error');
+  const dictateBtn      = document.getElementById('dictate-btn');
+  const dictateIcon     = document.getElementById('dictate-icon');
+  const dictateLabel    = document.getElementById('dictate-label');
+  const dictateOverlay  = document.getElementById('dictate-overlay');
+  const dictateText     = document.getElementById('dictate-text');
+  const dictateAccept   = document.getElementById('dictate-accept');
+  const dictateAcceptSend = document.getElementById('dictate-accept-send');
+  const dictateCancel   = document.getElementById('dictate-cancel');
+  const micError        = document.getElementById('mic-error');
 
   // ── i18n: labels change with selected language ────────────────────────
-  var T = {
+  const T = {
     'en-US': {
       dictate: 'Dictate', recording: 'Recording', paused: 'Paused',
       cancel: 'Cancel', accept: 'Accept', send: 'Send',
@@ -54,7 +54,7 @@
     },
   };
 
-  var currentLang = normalizeLang(
+  let currentLang = normalizeLang(
     (function() { try { return localStorage.getItem('airprompt-lang'); } catch (_) {} return ''; })()
     || navigator.language || 'en-US'
   );
@@ -81,12 +81,12 @@
     dictateText.style.setProperty('--listen-text', '"' + tr('listening') + '"');
     dictateText.style.setProperty('--speak-text', '"' + tr('speaking') + '"');
     // Modal
-    var modalTitle = document.querySelector('#session-modal-content h3');
+    const modalTitle = document.querySelector('#session-modal-content h3');
     if (modalTitle) modalTitle.textContent = tr('activeSessions');
-    var modalClose = document.getElementById('modal-close');
+    const modalClose = document.getElementById('modal-close');
     if (modalClose) modalClose.textContent = tr('close');
     // Refresh button title
-    var refreshBtn = document.getElementById('refresh-btn');
+    const refreshBtn = document.getElementById('refresh-btn');
     if (refreshBtn) refreshBtn.title = tr('refresh');
     // Session label (if no session)
     if (_sessionLabel && _sessionLabel.classList.contains('no-session')) {
@@ -99,26 +99,26 @@
   }
 
   // Update CSS placeholder texts via custom properties
-  var _i18nStyle = document.createElement('style');
+  const _i18nStyle = document.createElement('style');
   _i18nStyle.textContent = '\n' +
     '#dictate-text:empty::after { content: var(--listen-text, "Listening\\2026"); }\n' +
     '#dictate-overlay.speaking #dictate-text:empty::after { content: var(--speak-text, "\\25cf Speaking\\2026"); }\n';
   document.head.appendChild(_i18nStyle);
 
   // ── Language management ──────────────────────────────────────────────
-  var BASE_LANGS = [
+  const BASE_LANGS = [
     { code: 'en-US', name: 'English (US)' },
     { code: 'es-AR', name: 'Español (AR)' },
   ];
 
-  var dictateFlag   = document.getElementById('dictate-flag');
-  var langDropdown  = document.getElementById('lang-dropdown');
-  var langList      = document.getElementById('lang-list');
-  var langCancel    = document.getElementById('lang-cancel');
+  const dictateFlag   = document.getElementById('dictate-flag');
+  const langDropdown  = document.getElementById('lang-dropdown');
+  const langList      = document.getElementById('lang-list');
+  const langCancel    = document.getElementById('lang-cancel');
 
   function langToFlag(code) {
-    var parts = code.split('-');
-    var region = parts[parts.length - 1].toUpperCase();
+    const parts = code.split('-');
+    const region = parts[parts.length - 1].toUpperCase();
     if (!region || region.length !== 2) return code.toUpperCase();
     try {
       return String.fromCodePoint(
@@ -132,7 +132,7 @@
 
   function normalizeLang(code) {
     if (!code || !code.includes('-')) {
-      var map = { en: 'en-US', es: 'es-AR', fr: 'fr-FR', de: 'de-DE',
+      const map = { en: 'en-US', es: 'es-AR', fr: 'fr-FR', de: 'de-DE',
                   pt: 'pt-BR', it: 'it-IT', ja: 'ja-JP', zh: 'zh-CN', ko: 'ko-KR' };
       code = map[code] || (code || 'en-US');
     }
@@ -140,13 +140,13 @@
   }
 
   function resolveLanguageList() {
-    var langs = BASE_LANGS.slice();
-    var addIfMissing = function(code) {
+    const langs = BASE_LANGS.slice();
+    const addIfMissing = function(code) {
       if (!langs.some(function(l) { return l.code === code; })) {
         langs.unshift({ code: code, name: code + ' (browser)' });
       }
     };
-    var browserLang = navigator.language;
+    const browserLang = navigator.language;
     if (browserLang) addIfMissing(normalizeLang(browserLang));
     if (currentLang && !langs.some(function(l) { return l.code === currentLang; })) {
       langs.unshift({ code: currentLang, name: currentLang + ' (saved)' });
@@ -155,10 +155,10 @@
   }
 
   function buildLangList() {
-    var langs = resolveLanguageList();
+    const langs = resolveLanguageList();
     langList.innerHTML = '';
     langs.forEach(function(lang) {
-      var el = document.createElement('div');
+      const el = document.createElement('div');
       el.className = 'lang-option' + (lang.code === currentLang ? ' active' : '');
       el.innerHTML = '<span class="lang-flag">' + langToFlag(lang.code) +
                      '</span> ' + lang.name;
@@ -175,13 +175,13 @@
     if (dictateFlag) dictateFlag.textContent = langToFlag(currentLang);
   }
 
-  var _langSwitchGen = 0;
+  let _langSwitchGen = 0;
 
   function setLang(code) {
     currentLang = code;
     try { localStorage.setItem('airprompt-lang', code); } catch (_) {}
-    var wasListening = isListening;
-    var gen = ++_langSwitchGen;
+    const wasListening = isListening;
+    const gen = ++_langSwitchGen;
     if (wasListening) {
       isListening = false;
       recognition.stop();
@@ -243,11 +243,11 @@
     recognition.continuous = true;
 
     recognition.onresult = function(event) {
-      var latestInterim = '';
+      let latestInterim = '';
 
-      for (var i = 0; i < event.results.length; i++) {
-        var result = event.results[i];
-        var transcript = result[0].transcript;
+      for (let i = 0; i < event.results.length; i++) {
+        const result = event.results[i];
+        const transcript = result[0].transcript;
 
         if (!result.isFinal) {
           latestInterim = transcript;
@@ -260,19 +260,19 @@
       // Each result index is an independent segment; Chrome cumulates the
       // SAME index across events (e.g. "this" → "this is"). Extract the
       // per-index delta so standalone macro fragments are detected once.
-      for (var j = 0; j < event.results.length; j++) {
-        var _r = event.results[j];
+      for (let j = 0; j < event.results.length; j++) {
+        const _r = event.results[j];
         if (!_r.isFinal) continue;
         if (_r[0].confidence === 0) continue;
-        var transcript = _r[0].transcript;
-        var prev = _lastTranscripts[j] || '';
+        const transcript = _r[0].transcript;
+        const prev = _lastTranscripts[j] || '';
         // Cumulative growth of the same index → extract only the new part.
         // Accent/case corrections ("parrafo"→"párrafo") return '' → skipped.
-        var delta = DictationMacros.extractDelta(transcript, prev);
+        let delta = DictationMacros.extractDelta(transcript, prev);
         if (!delta) continue;
         _lastTranscripts[j] = transcript;
         delta = DictationMacros.revertSttNewlines(delta, currentLang);
-        var _m = DictationMacros && DictationMacros.processFragment(delta, currentLang);
+        const _m = DictationMacros && DictationMacros.processFragment(delta, currentLang);
         if (_m && _m.type === 'macro') {
           if (_m.insert) {
             _segments.push(_m.insert);
@@ -281,7 +281,7 @@
             _pendingFormat = _m.format;
           }
         } else {
-          var _text = delta;
+          let _text = delta;
           // Apply inline first (so onEnd triggers match at fragment end),
           // then wrap with any pending format.
           _text = DictationMacros.applyInline(_text, currentLang);
@@ -295,7 +295,7 @@
 
       if (dictateOverlay.classList.contains('dictate-hidden')) return;
 
-      var displayText = _latestInterim || _segments.join(' ');
+      let displayText = _latestInterim || _segments.join(' ');
       if (displayText && DictationMacros) {
         // Revert the STT's newlines in the live interim (segments were already
         // reverted in the fragment loop).
@@ -305,7 +305,7 @@
       dictateText.textContent = displayText;
       if (displayText) {
         dictateText.style.height = 'auto';
-        var h = dictateText.scrollHeight;
+        const h = dictateText.scrollHeight;
         dictateText.style.height = Math.min(h, window.innerHeight * 0.3) + 'px';
         dictateText.scrollTop = dictateText.scrollHeight;
       }
@@ -352,7 +352,7 @@
       // Transient errors — onend will restart
     };
 
-    var onendExpectedGen = _onendGen;
+    const onendExpectedGen = _onendGen;
     recognition.onend = function() {
       dictateOverlay.classList.remove('speaking');
       if (isListening && onendExpectedGen === _onendGen && !_stopPending) _safeRecognitionStart();
@@ -404,8 +404,8 @@
     _stopPending = false;
     // Build text from state (segments + current interim), not the display —
     // the display shows only interim while an utterance is mid-speech.
-    var segmentsText = _segments.join(' ');
-    var interimText = DictationMacros.revertSttNewlines(_latestInterim, currentLang);
+    const segmentsText = _segments.join(' ');
+    let interimText = DictationMacros.revertSttNewlines(_latestInterim, currentLang);
     // Apply any pending format (e.g. quotes set by a macro before the
     // current utterance started) to the CURRENT utterance only — finalized
     // segments were already processed in the fragment loop.
@@ -415,8 +415,8 @@
       _pendingFormat = null;
     }
     // Strip leading/trailing spaces only — keep intentional \n from nueva línea/nuevo párrafo.
-    var rawText = DictationMacros.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
-    var text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
+    const rawText = DictationMacros.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
+    const text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
     if (isListening) {
       isListening = false;
       recognition.abort();
@@ -464,16 +464,16 @@
 
   function acceptAndSend() {
     _stopPending = false;
-    var segmentsText = _segments.join(' ');
-    var interimText = DictationMacros.revertSttNewlines(_latestInterim, currentLang);
+    const segmentsText = _segments.join(' ');
+    let interimText = DictationMacros.revertSttNewlines(_latestInterim, currentLang);
     if (_pendingFormat && DictationMacros && interimText) {
       interimText = DictationMacros.applyInline(interimText, currentLang);
       interimText = DictationMacros.applyFormat(interimText, _pendingFormat);
       _pendingFormat = null;
     }
     // Strip leading/trailing spaces only — keep intentional \n from nueva línea/nuevo párrafo.
-    var rawText = DictationMacros.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
-    var text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
+    const rawText = DictationMacros.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
+    const text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
     if (isListening) {
       isListening = false;
       recognition.abort();
@@ -522,8 +522,8 @@
 
   // ── Event listeners ─────────────────────────────────────────────────
 
-  var longTapTimer = null;
-  var longTapFired = false;
+  let longTapTimer = null;
+  let longTapFired = false;
 
   function onLongTap() {
     longTapFired = true;
@@ -566,11 +566,11 @@
     // Block click from bubbling to session-bar (would open modal)
     dictateBtn.addEventListener('click', function(e) { e.stopPropagation(); });
 
-    var _useTouch = false;
+    let _useTouch = false;
     try { _useTouch = window.matchMedia('(pointer: coarse)').matches; } catch (_) {}
 
     if (_useTouch) {
-      var _touchStartT = 0;
+      let _touchStartT = 0;
       dictateBtn.addEventListener('touchstart', function(e) {
         e.stopPropagation();
         longTapFired = false;

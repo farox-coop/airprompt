@@ -40,7 +40,7 @@ Pure functions, zero DOM dependencies. Exposes via `window.DictationMacros`:
 
 **New state** (added to existing state block, ~line 14):
 ```javascript
-var _pendingFormat = null;  // string|null — format to apply to next text fragment
+let _pendingFormat = null;  // string|null — format to apply to next text fragment
 ```
 
 **Reset on START** in `toggleDictation()` (line 354 area):
@@ -53,7 +53,7 @@ _pendingFormat = null;
 ## Macro registry
 
 ```javascript
-var DICTATION_MACROS = {
+const DICTATION_MACROS = {
   'es-AR': {
     inline: [
       { trigger: 'puntos suspensivos',  replace: '…' },

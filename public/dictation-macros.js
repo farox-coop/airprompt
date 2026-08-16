@@ -11,7 +11,7 @@
   // Accented triggers MUST use RegExp with [aá]/[eé]/[ií]/[oó]/[uú] classes —
   // never plain strings — so accent-dropping by the recognizer still matches.
 
-  var MACROS = {
+  const MACROS = {
     'es-AR': {
       inline: [
         { trigger: [/(abre|abr[ií]) par[eé]ntesis/i],   replace: '(' },
@@ -85,7 +85,7 @@
 
   // Normalize a trigger field to an array of strings (regex entries left as-is).
   function triggers(entry) {
-    var t = entry.trigger;
+    const t = entry.trigger;
     if (t instanceof RegExp) return [t];
     return Array.isArray(t) ? t : [t];
   }
@@ -105,8 +105,8 @@
   // inconsistently, even mid-sentence. Revert them to the literal phrases (in the
   // current language) so our own isolated-only macros decide.
   function revertSttNewlines(text, lang) {
-    var para = (lang === 'es-AR') ? 'nuevo párrafo' : 'new paragraph';
-    var line = (lang === 'es-AR') ? 'nueva línea' : 'new line';
+    const para = (lang === 'es-AR') ? 'nuevo párrafo' : 'new paragraph';
+    const line = (lang === 'es-AR') ? 'nueva línea' : 'new line';
     return text
       .replace(/\n{2,}/g, ' ' + para + ' ')
       .replace(/\n/g, ' ' + line + ' ')
@@ -131,19 +131,19 @@
   // ── Public API ──────────────────────────────────────────────────────────
 
   function processFragment(segment, lang) {
-    var cfg = MACROS[lang] || MACROS['en-US'];
-    var normalized = segment.trim().toLowerCase();
+    const cfg = MACROS[lang] || MACROS['en-US'];
+    const normalized = segment.trim().toLowerCase();
     if (!normalized) return { type: 'text' };
 
-    var stateful = cfg.stateful;
-    for (var i = 0; i < stateful.length; i++) {
-      var entry = stateful[i];
-      var aliases = triggers(entry);
-      for (var a = 0; a < aliases.length; a++) {
-        var alias = aliases[a];
+    const stateful = cfg.stateful;
+    for (let i = 0; i < stateful.length; i++) {
+      const entry = stateful[i];
+      const aliases = triggers(entry);
+      for (let a = 0; a < aliases.length; a++) {
+        const alias = aliases[a];
         if (alias instanceof RegExp) {
           // Anchor to full segment for exact-match semantics
-          var anchored = new RegExp('^(?:' + alias.source + ')$', alias.flags);
+          const anchored = new RegExp('^(?:' + alias.source + ')$', alias.flags);
           if (anchored.test(normalized)) {
             if (entry.insert) return { type: 'macro', insert: entry.insert };
             return { type: 'macro', format: entry.format };
@@ -158,16 +158,16 @@
   }
 
   function applyInline(text, lang) {
-    var cfg = MACROS[lang] || MACROS['en-US'];
-    var result = text;
-    var inline = cfg.inline;
-    for (var i = 0; i < inline.length; i++) {
-      var entry = inline[i];
-      var aliases = triggers(entry);
+    const cfg = MACROS[lang] || MACROS['en-US'];
+    let result = text;
+    const inline = cfg.inline;
+    for (let i = 0; i < inline.length; i++) {
+      const entry = inline[i];
+      const aliases = triggers(entry);
       // Build a single pattern: combine regex entries and escaped-string entries
-      var parts = [];
-      for (var a = 0; a < aliases.length; a++) {
-        var alias = aliases[a];
+      const parts = [];
+      for (let a = 0; a < aliases.length; a++) {
+        const alias = aliases[a];
         if (alias instanceof RegExp) {
           parts.push('(?:' + alias.source + ')');
         } else {
@@ -177,18 +177,18 @@
       // onEnd: only match when the trigger is at the end of the text
       // (optionally followed by trailing whitespace).
       if (entry.onEnd) {
-        var endPattern = new RegExp('\\b(?:' + parts.join('|') + ')\\s*$', 'gi');
+        const endPattern = new RegExp('\\b(?:' + parts.join('|') + ')\\s*$', 'gi');
         result = result.replace(endPattern, entry.replace);
       } else if (entry.open) {
         // Opener: consume trailing whitespace so no space after the char.
-        var openPattern = new RegExp('\\b(?:' + parts.join('|') + ')\\s*', 'gi');
+        const openPattern = new RegExp('\\b(?:' + parts.join('|') + ')\\s*', 'gi');
         result = result.replace(openPattern, entry.replace);
       } else if (entry.close) {
         // Closer: consume leading whitespace so no space before the char.
-        var closePattern = new RegExp('\\s*(?:' + parts.join('|') + ')\\b', 'gi');
+        const closePattern = new RegExp('\\s*(?:' + parts.join('|') + ')\\b', 'gi');
         result = result.replace(closePattern, entry.replace);
       } else {
-        var pattern = new RegExp('\\b(?:' + parts.join('|') + ')\\b', 'gi');
+        const pattern = new RegExp('\\b(?:' + parts.join('|') + ')\\b', 'gi');
         result = result.replace(pattern, entry.replace);
       }
     }

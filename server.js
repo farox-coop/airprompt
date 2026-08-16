@@ -302,9 +302,9 @@ function createApp() {
       spawnSync('tmux', ['send-keys', '-t', tmux, '/airprompt off', 'Enter'], { timeout: 2000 });
 
       // Phase 2: Wait up to 5s for session to die
-      var deadline = Date.now() + 5000;
-      var died = false;
-      var wasGraceful = false;
+      const deadline = Date.now() + 5000;
+      let died = false;
+      let wasGraceful = false;
       while (Date.now() < deadline) {
         await new Promise(function (r) { setTimeout(r, 300); });
         if (!tmuxExists(tmux)) { died = true; wasGraceful = true; break; }
@@ -501,7 +501,7 @@ function createApp() {
           if (msg.data.length > 65536) break;
           if (ptyProcess) {
             try {
-              var inputData = msg.data;
+              const inputData = msg.data;
               if (inputData.indexOf('\n') !== -1) {
                 // Multi-line input: paste via tmux buffer with bracketed paste
                 // so newlines are literal, not "Enter" (which submits mid-text).
@@ -549,7 +549,7 @@ function createApp() {
         case 'paste_buffer':
           if (ptyProcess) {
             try {
-              var result = spawnSync('tmux', ['save-buffer', '-'], { encoding: 'utf8', timeout: 2000 });
+              const result = spawnSync('tmux', ['save-buffer', '-'], { encoding: 'utf8', timeout: 2000 });
               if (result.status === 0 && result.stdout) {
                 ptyProcess.write(result.stdout);
               }

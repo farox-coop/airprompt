@@ -156,7 +156,7 @@ if [ -f "$PID_FILE" ] && [ ! -f "$FIRST_RUN_MARKER" ]; then
   cd "$DAEMON_DIR"
   node -e "
     try {
-      var qr = require('qrcode-terminal');
+      const qr = require('qrcode-terminal');
       qr.generate(process.argv[1], {small: true});
     } catch(_) {}
   " "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" 2>/dev/null || true

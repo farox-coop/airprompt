@@ -578,10 +578,10 @@ test('input queue capped at 200 messages — excess dropped', { skip: !TMUX_AVAI
       const msg = JSON.parse(raw.toString());
       if (msg.type === 'session_list' || msg.type === 'pty_spawned') return;
       if (msg.type === 'output') {
-        var m = msg.data.match(/CAP_(\d+)/g);
+        const m = msg.data.match(/CAP_(\d+)/g);
         if (m) {
           m.forEach(function (s) {
-            var n = parseInt(s.slice(4), 10);
+            const n = parseInt(s.slice(4), 10);
             if (n > maxSeen) maxSeen = n;
             if (n >= 220) seen220 = true;
           });
@@ -591,7 +591,7 @@ test('input queue capped at 200 messages — excess dropped', { skip: !TMUX_AVAI
 
     ws.on('open', () => {
       // Send 250 inputs; only 200 queued (server cap).
-      for (var i = 0; i < 250; i++) {
+      for (let i = 0; i < 250; i++) {
         ws.send(JSON.stringify({ type: 'input', data: 'echo CAP_' + i + '\r' }));
       }
       ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-qcap' }));

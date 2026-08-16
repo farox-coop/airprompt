@@ -36,12 +36,12 @@ function shouldSuppressToast(activeSessionId, notificationSessionId) {
 // ── Label builder (notify.js:46-58) ───────────────────────────────────
 
 function buildSessionLabel(n, sessions) {
-  var sid = String(n.session_id || '');
-  var label = n.session_label || '';
+  const sid = String(n.session_id || '');
+  let label = n.session_label || '';
 
   // Priority 2: lookup in sessions array by id
   if (!label && sid && sessions) {
-    var match = sessions.find(function (s) { return s.id === sid; });
+    const match = sessions.find(function (s) { return s.id === sid; });
     if (match) {
       label = match.name || (match.cwd ? String(match.cwd).split('/').pop() : '');
     }
@@ -49,7 +49,7 @@ function buildSessionLabel(n, sessions) {
 
   // Priority 3: cwd basename → session_id prefix
   if (!label) {
-    var cwd = (n.cwd != null && n.cwd !== 'null' && typeof n.cwd === 'string')
+    const cwd = (n.cwd != null && n.cwd !== 'null' && typeof n.cwd === 'string')
       ? n.cwd.split('/').pop()
       : '';
     label = cwd || (sid ? sid.slice(0, 8) : '');
@@ -108,8 +108,8 @@ test('NOTIFY_SUMMARIES — all known types have human-readable summary', async (
     assert.strictEqual(NOTIFY_SUMMARIES.agent_completed, 'Background agent finished');
   });
   await t.test('EMOJIS and SUMMARIES cover same keys', function () {
-    var emojiKeys = Object.keys(NOTIFY_EMOJIS).sort();
-    var summaryKeys = Object.keys(NOTIFY_SUMMARIES).sort();
+    const emojiKeys = Object.keys(NOTIFY_EMOJIS).sort();
+    const summaryKeys = Object.keys(NOTIFY_SUMMARIES).sort();
     assert.deepStrictEqual(emojiKeys, summaryKeys);
   });
 });
@@ -149,8 +149,8 @@ test('shouldSuppressToast — different session → show toast', async (t) => {
   });
 
   await t.test('watching session A, notification from session B', function () {
-    var activeSessionId = 'claude-42';
-    var notifySessionId  = 'claude-43';
+    const activeSessionId = 'claude-42';
+    const notifySessionId  = 'claude-43';
     assert.strictEqual(shouldSuppressToast(activeSessionId, notifySessionId), false);
   });
 });
@@ -218,44 +218,44 @@ test('shouldSuppressToast — notification with null/undefined session_id', asyn
 
 test('buildSessionLabel — session_label has top priority', async (t) => {
   await t.test('session_label present → returned directly', function () {
-    var n = { session_label: 'my-project', session_id: 'abc', cwd: '/home/proj' };
+    const n = { session_label: 'my-project', session_id: 'abc', cwd: '/home/proj' };
     assert.strictEqual(buildSessionLabel(n, []), 'my-project');
   });
 
   await t.test('session_label present → ignores sessions array', function () {
-    var n = { session_label: 'explicit-label', session_id: 'abc' };
-    var sessions = [{ id: 'abc', name: 'from-session-array' }];
+    const n = { session_label: 'explicit-label', session_id: 'abc' };
+    const sessions = [{ id: 'abc', name: 'from-session-array' }];
     assert.strictEqual(buildSessionLabel(n, sessions), 'explicit-label');
   });
 });
 
 test('buildSessionLabel — fallback to sessions array lookup', async (t) => {
   await t.test('no session_label, matched by id → returns session name', function () {
-    var n = { session_id: 'abc' };
-    var sessions = [{ id: 'abc', name: 'Cool Project' }];
+    const n = { session_id: 'abc' };
+    const sessions = [{ id: 'abc', name: 'Cool Project' }];
     assert.strictEqual(buildSessionLabel(n, sessions), 'Cool Project');
   });
 
   await t.test('matched by id, session has no name → returns cwd basename', function () {
-    var n = { session_id: 'abc' };
-    var sessions = [{ id: 'abc', cwd: '/home/user/work' }];
+    const n = { session_id: 'abc' };
+    const sessions = [{ id: 'abc', cwd: '/home/user/work' }];
     assert.strictEqual(buildSessionLabel(n, sessions), 'work');
   });
 
   await t.test('matched by id, session has both name and cwd → name wins', function () {
-    var n = { session_id: 'abc' };
-    var sessions = [{ id: 'abc', name: 'Named', cwd: '/home/fallback' }];
+    const n = { session_id: 'abc' };
+    const sessions = [{ id: 'abc', name: 'Named', cwd: '/home/fallback' }];
     assert.strictEqual(buildSessionLabel(n, sessions), 'Named');
   });
 
   await t.test('session_id not found in sessions array → falls to cwd/session_id', function () {
-    var n = { session_id: 'xyz', cwd: '/tmp/mywork' };
-    var sessions = [{ id: 'abc', name: 'Other' }];
+    const n = { session_id: 'xyz', cwd: '/tmp/mywork' };
+    const sessions = [{ id: 'abc', name: 'Other' }];
     assert.strictEqual(buildSessionLabel(n, sessions), 'mywork');
   });
 
   await t.test('sessions array is null/undefined → falls through to cwd', function () {
-    var n = { session_id: 'abc', cwd: '/home/fallback' };
+    const n = { session_id: 'abc', cwd: '/home/fallback' };
     assert.strictEqual(buildSessionLabel(n, null), 'fallback');
     assert.strictEqual(buildSessionLabel(n, undefined), 'fallback');
   });
@@ -263,57 +263,57 @@ test('buildSessionLabel — fallback to sessions array lookup', async (t) => {
 
 test('buildSessionLabel — fallback to notification cwd basename', async (t) => {
   await t.test('cwd present, no session_label → basename', function () {
-    var n = { cwd: '/home/diego/projects/airprompt' };
+    const n = { cwd: '/home/diego/projects/airprompt' };
     assert.strictEqual(buildSessionLabel(n, []), 'airprompt');
   });
 
   await t.test('cwd with trailing slash → basename', function () {
-    var n = { cwd: '/home/user/' };
+    const n = { cwd: '/home/user/' };
     // split('/').pop() on trailing slash gives ''
     assert.strictEqual(buildSessionLabel(n, []), '');
   });
 
   await t.test('cwd is "null" string → treated as falsy (filtered by cwd !== "null")', function () {
-    var n = { cwd: 'null', session_id: 'sid-123' };
+    const n = { cwd: 'null', session_id: 'sid-123' };
     // cwd === 'null' → filtered out → falls to session_id prefix
     assert.strictEqual(buildSessionLabel(n, []), 'sid-123');
   });
 
   await t.test('cwd is null (actual null) → filtered by != null check', function () {
-    var n = { cwd: null, session_id: 'abc12345' };
+    const n = { cwd: null, session_id: 'abc12345' };
     assert.strictEqual(buildSessionLabel(n, []), 'abc12345');
   });
 
   await t.test('cwd is number → filtered by typeof string check', function () {
     // typeof 42 !== 'string' → cwd = '' → falls to session_id
-    var n = { cwd: 42, session_id: 'prefix-h' };
+    const n = { cwd: 42, session_id: 'prefix-h' };
     assert.strictEqual(buildSessionLabel(n, []), 'prefix-h');
   });
 });
 
 test('buildSessionLabel — final fallback to session_id prefix', async (t) => {
   await t.test('no label, no cwd, no sessions match → session_id first 8 chars', function () {
-    var n = { session_id: 'claude-32142-1785341055' };
+    const n = { session_id: 'claude-32142-1785341055' };
     assert.strictEqual(buildSessionLabel(n, []), 'claude-3');
   });
 
   await t.test('short session_id → full id', function () {
-    var n = { session_id: 'abc' };
+    const n = { session_id: 'abc' };
     assert.strictEqual(buildSessionLabel(n, []), 'abc');
   });
 
   await t.test('session_id is null → empty string', function () {
-    var n = {};
+    const n = {};
     assert.strictEqual(buildSessionLabel(n, []), '');
   });
 
   await t.test('session_id is empty string → empty string', function () {
-    var n = { session_id: '' };
+    const n = { session_id: '' };
     assert.strictEqual(buildSessionLabel(n, []), '');
   });
 
   await t.test('everything missing → empty string', function () {
-    var n = {};
+    const n = {};
     assert.strictEqual(buildSessionLabel(n, undefined), '');
   });
 });
@@ -394,7 +394,7 @@ test('multi-client scenario — each WebUI suppresses only its own active sessio
 
 test('multi-client scenario — session switch updates suppression target', async (t) => {
   // Client starts watching "proj-x", then switches to "proj-y"
-  var activeSessionId;
+  let activeSessionId;
 
   // Initially watching proj-x
   activeSessionId = 'proj-x';

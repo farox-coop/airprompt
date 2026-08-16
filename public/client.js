@@ -20,6 +20,9 @@ const term = new window.Terminal({
   fontSize: 14,
   scrollback: 10000,
   allowTransparency: false,
+  // 1:1 wheel deltas for the normal-screen scroll path (viewport scroll).
+  // xterm's default 2 would double every delta.
+  scrollSensitivity: 1,
   theme: {
     background: '#0d1117',
     foreground: '#c9d1d9',
@@ -98,79 +101,6 @@ fitAddon.fit();
   });
 })();
 
-// ── One-finger touch → synthetic wheel scroll (rAF-batched) ───────────
-// xterm.js has poor mobile touch support (xtermjs/xterm.js#5377).
-// iOS Safari: scroll fails completely if touch starts on rendered text
-// (xtermjs/xterm.js#3613).
-//
-// Strategy: intercept one-finger vertical touch in capture phase, batch
-// deltas via requestAnimationFrame, dispatch one WheelEvent per frame.
-// Without rAF batching, every touchmove (60fps) dispatches a tiny wheel
-// event synchronously. xterm's scrollLines() triggers main-thread layout
-// + repaint, so 60 small events/sec choke the main thread → scroll feels
-// progressively slower. Batching produces fewer, larger wheel events —
-// same pattern as a real mouse wheel on desktop.
-(function () {
-  var container = document.getElementById('terminal-container');
-  var viewport = container.querySelector('.xterm-viewport');
-  var lastY = 0;
-  var accumDY = 0;
-  var scrollActive = false;
-  var rafId = null;
-
-  container.addEventListener('touchstart', function (e) {
-    if (e.touches.length !== 1) {
-      scrollActive = false;
-      return;
-    }
-    scrollActive = true;
-    lastY = e.touches[0].clientY;
-    accumDY = 0;
-  }, { passive: true, capture: true });
-
-  function flushScroll() {
-    if (!scrollActive) { rafId = null; return; }
-    if (accumDY !== 0 && viewport) {
-      viewport.dispatchEvent(new WheelEvent('wheel', {
-        deltaY: accumDY * 8,
-        deltaMode: 0,
-        bubbles: true,
-        cancelable: true,
-      }));
-      accumDY = 0;
-    }
-    rafId = requestAnimationFrame(flushScroll);
-  }
-
-  container.addEventListener('touchmove', function (e) {
-    if (!scrollActive || e.touches.length !== 1) return;
-    var dy = lastY - e.touches[0].clientY;
-    lastY = e.touches[0].clientY;
-    accumDY += dy;
-    // Dead zone: skip preventDefault for tiny movements so taps still
-    // synthesize click events for keyboard focus on mobile.
-    if (Math.abs(accumDY) < 4) return;
-    e.preventDefault();
-    if (!rafId) {
-      rafId = requestAnimationFrame(flushScroll);
-    }
-  }, { passive: false, capture: true });
-
-  container.addEventListener('touchend', function () {
-    scrollActive = false;
-    lastY = 0;
-    accumDY = 0;
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-  }, { passive: true, capture: true });
-
-  container.addEventListener('touchcancel', function () {
-    scrollActive = false;
-    lastY = 0;
-    accumDY = 0;
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-  }, { passive: true, capture: true });
-})();
-
 // ── Resize debounce ────────────────────────────────────────────────────
 let resizeTimer = null;
 function scheduleResize() {
@@ -185,7 +115,7 @@ function scheduleResize() {
 setTimeout(scheduleResize, 300);
 window.addEventListener('resize', scheduleResize);
 
-var Dictation = window.Dictation;
+const Dictation = window.Dictation;
 function tr(key) { return Dictation.tr(key); }
 
 // ── DOM refs ────────────────────────────────────────────────────────
@@ -309,8 +239,8 @@ function _flushPending() {
   if (!ws || ws.readyState !== WebSocket.OPEN || _pendingMessages.length === 0) return;
   // Drain queue in order. If a send throws (unlikely for WS), stop —
   // remaining messages stay in queue for next flush attempt.
-  var sent = 0;
-  for (var i = 0; i < _pendingMessages.length; i++) {
+  let sent = 0;
+  for (let i = 0; i < _pendingMessages.length; i++) {
     try { ws.send(JSON.stringify(_pendingMessages[i])); sent++; }
     catch (e) { break; }
   }
@@ -340,7 +270,7 @@ function wsMessageHandler(event) {
       // Valid active session with PTY already spawned — nothing to do.
       // Unless server-side PTY died (attachedClients=0) — re-spawn it.
       if (activeSessionId && sessions.some((s) => s.id === activeSessionId) && !_needPtySpawn) {
-        var cur = sessions.find(function(s) { return s.id === activeSessionId; });
+        const cur = sessions.find(function(s) { return s.id === activeSessionId; });
         if (cur && cur.attachedClients === 0) _needPtySpawn = true;
         else break;
       }
@@ -484,18 +414,18 @@ document.getElementById('keybar-toggle').addEventListener('click', function (e) 
   e.stopPropagation();
   window._airpromptKeybar && window._airpromptKeybar.toggle();
   // Keybar has 0.2s CSS transition. Fit + scroll after it finishes.
-  var keybarEl = document.getElementById('keybar-container');
+  const keybarEl = document.getElementById('keybar-container');
   function refit() {
     try { fitAddon.fit(); } catch (_) {}
     // Force xterm canvas repaint — prevents "black screen" after resize
     try { term.refresh(0, term.rows - 1); } catch (_) {}
-    var vp = document.querySelector('#terminal-container .xterm-viewport');
+    const vp = document.querySelector('#terminal-container .xterm-viewport');
     if (vp) { vp.scrollTop = vp.scrollHeight; }
     // Restore focus so native keyboard stays open on mobile.
     // fitAddon.fit() can blur xterm's hidden textarea, dismissing the
     // virtual keyboard. On mobile, focus the invisible input instead
     // of xterm's readonly textarea.
-    var mi = document.getElementById('mobile-input');
+    const mi = document.getElementById('mobile-input');
     if (mi && mi.classList.contains('visible')) { try { mi.focus(); } catch (_) {} }
     else { try { term.focus(); } catch (_) {} }
   }
@@ -543,7 +473,7 @@ term.onData((data) => {
   // onData with empty string, which would disarm one-shot modifiers.
   if (!data) return;
 
-  var kb = window._airpromptKeybar;
+  const kb = window._airpromptKeybar;
   if (!kb || !kb.hasAnyModifier || !kb.hasAnyModifier()) {
     send({ type: 'input', data });
     return;
@@ -554,7 +484,7 @@ term.onData((data) => {
   if (kb.isCopyPasteCombo && kb.isCopyPasteCombo(data)) {
     if (data === 'c') {
       // Copy: grab xterm.js selection, send to server → tmux load-buffer
-      var sel = term.getSelection();
+      const sel = term.getSelection();
       if (sel) send({ type: 'copy_buffer', data: sel });
     } else if (data === 'v') {
       // Paste: server reads tmux save-buffer → writes to PTY
@@ -587,20 +517,20 @@ if (window.visualViewport) {
     if (_vvhRaf) return;
     _vvhRaf = requestAnimationFrame(function () {
       _vvhRaf = 0;
-      var vh = window.visualViewport.height;
-      var termContainer = document.getElementById('terminal-container');
-      var viewport = termContainer && termContainer.querySelector('.xterm-viewport');
-      var lh = window.innerHeight;
-      var kbHeight = lh - vh;
-      var sessionBar = document.getElementById('session-bar');
-      var barH = sessionBar ? sessionBar.offsetHeight : 44;
-      var overlayH = Dictation.getOverlayHeight();
-      var keybarEl = document.getElementById('keybar-container');
-      var keybarH = (keybarEl && !keybarEl.classList.contains('keybar-hidden')) ? keybarEl.offsetHeight : 0;
+      const vh = window.visualViewport.height;
+      const termContainer = document.getElementById('terminal-container');
+      const viewport = termContainer && termContainer.querySelector('.xterm-viewport');
+      const lh = window.innerHeight;
+      const kbHeight = lh - vh;
+      const sessionBar = document.getElementById('session-bar');
+      const barH = sessionBar ? sessionBar.offsetHeight : 44;
+      const overlayH = Dictation.getOverlayHeight();
+      const keybarEl = document.getElementById('keybar-container');
+      const keybarH = (keybarEl && !keybarEl.classList.contains('keybar-hidden')) ? keybarEl.offsetHeight : 0;
 
       // Only react to significant height drops (keyboard open)
       if (kbHeight > 80) {
-        var termH = vh - window.visualViewport.offsetTop - barH - overlayH - keybarH;
+        const termH = vh - window.visualViewport.offsetTop - barH - overlayH - keybarH;
         termContainer.style.height = termH + 'px';
         termContainer.style.flex = 'none';
         try { fitAddon.fit(); } catch (_) {}
@@ -641,8 +571,8 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
 // (read-only display). On Enter, the text is committed + \r sent.
 // The invisible textarea captures all keyboard input on touch devices —
 (function () {
-  var inputEl = document.getElementById('mobile-input');
-  var isMobile = false;
+  const inputEl = document.getElementById('mobile-input');
+  let isMobile = false;
   try { isMobile = window.matchMedia('(pointer: coarse)').matches; } catch (_) {}
 
   if (!isMobile || !inputEl) return;
@@ -650,9 +580,9 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
   inputEl.classList.add('visible');
   // Expose for dictation: blur to dismiss native keyboard before voice input.
   window._airpromptBlurMobileInput = function () { inputEl.blur(); };
-  var _prev = '';                // tracks input value as code-point array
-  var _enterTimer = null;        // debounce timer — resolves single vs double tap
-  var DOUBLE_ENTER_MS = 400;     // max gap between Enter taps to submit
+  let _prev = '';                // tracks input value as code-point array
+  let _enterTimer = null;        // debounce timer — resolves single vs double tap
+  const DOUBLE_ENTER_MS = 400;   // max gap between Enter taps to submit
 
   // Prevent xterm.js textarea from stealing focus — we manage input
   // ourselves. Hide it visually (still in DOM for xterm internals).
@@ -662,7 +592,7 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
   // .focus() to steal focus on mousedown, which kills the keyboard.
   // With the noop, xterm still processes clicks (cursor positioning
   // via internal mousedown handler) but can never steal focus.
-  var _xtermTA = document.querySelector('.xterm-helper-textarea');
+  const _xtermTA = document.querySelector('.xterm-helper-textarea');
   if (_xtermTA) {
     _xtermTA.setAttribute('readonly', '');
     _xtermTA.style.opacity = '0';
@@ -689,21 +619,21 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
   // ❯ not found in buffer → use cursorY ± 4 rows as zone.
   document.getElementById('terminal-container').addEventListener('click', function (ev) {
     // ── Step 1: get the viewport row of the tap ──────────────────
-    var coords = term._core._mouseService.getMouseReportCoords(ev, term.element);
+    const coords = term._core._mouseService.getMouseReportCoords(ev, term.element);
     if (!coords || typeof coords.row !== 'number') return;
-    var tapRow = coords.row;
+    const tapRow = coords.row;
 
     // ── Step 2: find the prompt start line (❯ marker) ───────────
-    var buf = term.buffer.active;
-    var cursorBufY = buf.cursorY;
-    var viewportY = buf.viewportY;
-    var promptStartBufY = cursorBufY;
-    var found = false;
+    const buf = term.buffer.active;
+    const cursorBufY = buf.cursorY;
+    const viewportY = buf.viewportY;
+    let promptStartBufY = cursorBufY;
+    let found = false;
 
-    for (var y = cursorBufY; y >= Math.max(0, cursorBufY - 30); y--) {
-      var line = buf.getLine(y);
+    for (let y = cursorBufY; y >= Math.max(0, cursorBufY - 30); y--) {
+      const line = buf.getLine(y);
       if (line) {
-        var text = line.translateToString(true);
+        const text = line.translateToString(true);
         if (text.indexOf('❯') !== -1) {
           promptStartBufY = y;
           found = true;
@@ -717,8 +647,8 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
     }
 
     // ── Step 3: focus if tap is within the prompt zone ──────────
-    var promptStartRow = promptStartBufY - viewportY;
-    var cursorRow = cursorBufY - viewportY;
+    const promptStartRow = promptStartBufY - viewportY;
+    const cursorRow = cursorBufY - viewportY;
 
     if (tapRow >= promptStartRow && tapRow <= cursorRow) {
       inputEl.focus();
@@ -739,10 +669,10 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
   // Also checks copy/paste combo BEFORE modifier application so
   // Ctrl+Shift+C/V from mobile input works like term.onData.
   function _sendWithModifiers(data) {
-    var kb = window._airpromptKeybar;
+    const kb = window._airpromptKeybar;
     if (kb && kb.isCopyPasteCombo && kb.isCopyPasteCombo(data)) {
       if (data === 'c') {
-        var sel = term.getSelection();
+        const sel = term.getSelection();
         if (sel) send({ type: 'copy_buffer', data: sel });
       } else if (data === 'v') {
         send({ type: 'paste_buffer' });
@@ -770,13 +700,13 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
       _enterTimer = null;
     }
 
-    var cur = inputEl.value;
+    const cur = inputEl.value;
     if (cur === _prev) return;
 
-    var prevArr = _prevArr();
-    var curArr  = _toArray(cur);
-    var prevLen = prevArr.length;
-    var curLen  = curArr.length;
+    const prevArr = _prevArr();
+    const curArr  = _toArray(cur);
+    const prevLen = prevArr.length;
+    const curLen  = curArr.length;
 
     if (curLen > prevLen) {
       // Characters added — route through keybar modifier pipeline
@@ -791,7 +721,7 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
     } else if (curLen < prevLen) {
       // Characters deleted — modifiers don't apply to backspace.
       if (_prev.lastIndexOf(cur, 0) === 0) {
-        var delCount = prevLen - curLen;
+        const delCount = prevLen - curLen;
         send({ type: 'input', data: '\x7f'.repeat(delCount) });
       } else {
         // Deletion not from end (selected text then typed over, etc.).
@@ -809,7 +739,7 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
 
   // Special keys that don't produce visible characters or may not
   // trigger the input event. Mapped to terminal escape sequences.
-  var SPECIAL_KEYS = {
+  const SPECIAL_KEYS = {
     Backspace: '\x7f',
     Delete: '\x1b[3~',
     Tab: '\t',
@@ -839,7 +769,7 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
       }
     }
 
-    var seq = SPECIAL_KEYS[e.key];
+    const seq = SPECIAL_KEYS[e.key];
     if (seq) {
       e.preventDefault();
       send({ type: 'input', data: seq });
@@ -893,7 +823,7 @@ document.getElementById('refresh-btn').addEventListener('click', function (e) {
     // Ctrl alone (not AltGr / Cmd) — mask with 0x1f before sending.
     if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
       e.preventDefault();
-      var code = e.key.charCodeAt(0);
+      const code = e.key.charCodeAt(0);
       if (code >= 0x20 && code < 0x7f) {
         send({ type: 'input', data: String.fromCharCode(code & 0x1f) });
       }

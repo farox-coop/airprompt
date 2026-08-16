@@ -35,6 +35,7 @@ Examples from this project:
 - Keyboard bar → `public/keybar.js` (already separated)
 - Voice dictation → `public/dictation.js` (extracted from `client.js`)
 - Dictation macros → `public/dictation-macros.js` (voice formatting & punctuation commands)
+- Touch scroll → `public/scroll.js` (adaptive: SGR mouse wheel / viewport scroll / arrow keys, by terminal state)
 - Stale session sweep → `src/sweep.js` (extracted from `server.js`)
 - Session management could be `public/sessions.js`
 

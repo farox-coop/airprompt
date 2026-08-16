@@ -40,40 +40,40 @@ function showNotification(n) {
   if (!n) return;
   // Suppress toast when notification is for the session currently being viewed
   if (typeof activeSessionId !== 'undefined' && activeSessionId && String(n.session_id) === String(activeSessionId)) return;
-  var esc = typeof escHtml === 'function' ? function (s) { return escHtml(String(s)); } : function (s) { return String(s); };
-  var emoji = NOTIFY_EMOJIS[n.notification_type] || '📨';
-  var summary = NOTIFY_SUMMARIES[n.notification_type] || ('Notification: ' + (n.notification_type || 'unknown'));
+  const esc = typeof escHtml === 'function' ? function (s) { return escHtml(String(s)); } : function (s) { return String(s); };
+  const emoji = NOTIFY_EMOJIS[n.notification_type] || '📨';
+  let summary = NOTIFY_SUMMARIES[n.notification_type] || ('Notification: ' + (n.notification_type || 'unknown'));
 
   // Build session label from available fields
   // Priority: notify.sh enriched label → session name → cwd basename → session_id prefix
-  var sid = String(n.session_id || '');
-  var label = n.session_label || '';
+  const sid = String(n.session_id || '');
+  let label = n.session_label || '';
   if (!label && sid && typeof sessions !== 'undefined' && sessions) {
-    var match = sessions.find(function (s) { return s.id === sid; });
+    const match = sessions.find(function (s) { return s.id === sid; });
     if (match) {
       label = match.name || (match.cwd ? String(match.cwd).split('/').pop() : '');
     }
   }
   if (!label) {
-    var cwd = (n.cwd != null && n.cwd !== 'null' && typeof n.cwd === 'string') ? n.cwd.split('/').pop() : '';
+    const cwd = (n.cwd != null && n.cwd !== 'null' && typeof n.cwd === 'string') ? n.cwd.split('/').pop() : '';
     label = cwd || (sid ? sid.slice(0, 8) : '');
   }
 
-  var metaHtml = emoji + (label ? ' [' + esc(label) + ']' : '');
+  let metaHtml = emoji + (label ? ' [' + esc(label) + ']' : '');
   if (n.permission_mode && n.permission_mode !== 'null' && typeof n.permission_mode === 'string') metaHtml += ' · ' + esc(n.permission_mode);
   if (n.effort && n.effort.level && n.effort.level !== 'null' && typeof n.effort.level === 'string') metaHtml += ' · ' + esc(n.effort.level);
 
-  var toast = document.createElement('div');
+  const toast = document.createElement('div');
   toast.className = 'notify-toast';
   toast.setAttribute('data-session-id', sid || '');
 
-  var metaEl = document.createElement('div');
+  const metaEl = document.createElement('div');
   metaEl.className = 'notify-meta';
   metaEl.innerHTML = metaHtml;
 
   if (n.turn_info) summary += '  (' + n.turn_info + ')';
 
-  var summaryEl = document.createElement('div');
+  const summaryEl = document.createElement('div');
   summaryEl.className = 'notify-summary';
   summaryEl.textContent = summary;
 
@@ -82,14 +82,14 @@ function showNotification(n) {
 
   // Filter out default/empty IDE status messages
   if (n.message && n.message !== 'null' && n.message !== 'Claude Code' && n.message !== 'Codex' && n.message !== 'Cursor') {
-    var msgEl = document.createElement('div');
+    const msgEl = document.createElement('div');
     msgEl.className = 'notify-message';
     msgEl.textContent = n.message;
     toast.appendChild(msgEl);
   }
 
   if (n.subtitle) {
-    var subEl = document.createElement('div');
+    const subEl = document.createElement('div');
     subEl.className = 'notify-subtitle';
     subEl.textContent = n.subtitle;
     toast.appendChild(subEl);
@@ -98,7 +98,7 @@ function showNotification(n) {
   // ── Tap to navigate to source session ──
   toast.addEventListener('click', function (e) {
     if (toast._swiped || toast._dragged) return;
-    var targetSessionId = toast.getAttribute('data-session-id');
+    const targetSessionId = toast.getAttribute('data-session-id');
     // sessions / selectSession are globals from client.js
     if (targetSessionId && typeof sessions !== 'undefined' && typeof selectSession === 'function') {
       if (sessions.some(function (s) { return s.id === targetSessionId; })) {
@@ -109,9 +109,9 @@ function showNotification(n) {
   });
 
   // ── Swipe left/right to dismiss ──
-  var startX = 0, startY = 0, deltaX = 0, swiping = false;
+  let startX = 0, startY = 0, deltaX = 0, swiping = false;
   function onStart(e) {
-    var t = e.touches ? e.touches[0] : e;
+    const t = e.touches ? e.touches[0] : e;
     startX = t.clientX;
     startY = t.clientY;
     deltaX = 0;
@@ -121,9 +121,9 @@ function showNotification(n) {
   }
   function onMove(e) {
     if (e.touches && e.touches.length > 1) return;
-    var t = e.touches ? e.touches[0] : e;
-    var dx = t.clientX - startX;
-    var dy = Math.abs(t.clientY - startY);
+    const t = e.touches ? e.touches[0] : e;
+    const dx = t.clientX - startX;
+    const dy = Math.abs(t.clientY - startY);
     toast._dragged = true;  // any movement → skip click-to-navigate
     if (!swiping && Math.abs(dx) > SWIPE_DEAD_ZONE_PX && Math.abs(dx) > dy) {
       swiping = true;
@@ -166,8 +166,8 @@ function showNotification(n) {
   });
 
   // Cap toast stack at 5 — dismiss oldest when exceeded
-  var container = getNotifyContainer();
-  var toasts = container.querySelectorAll('.notify-toast');
+  const container = getNotifyContainer();
+  const toasts = container.querySelectorAll('.notify-toast');
   if (toasts.length >= 5) dismissToast(toasts[0]);
 
   container.appendChild(toast);

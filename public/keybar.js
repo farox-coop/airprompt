@@ -7,9 +7,9 @@
   // In a raw PTY, Ctrl+Shift+letter sends the same control char as Ctrl+letter.
 
   // ── Key definitions ──────────────────────────────────────────────────
-  var SPACER = { label: '', seq: null, cls: 'spacer' };
+  const SPACER = { label: '', seq: null, cls: 'spacer' };
 
-  var ROWS = [
+  const ROWS = [
     [
       { label: 'Esc',   seq: '\x1b',     cls: 'modifier' },
       { label: 'Tab',   seq: '\t',       cls: 'modifier' },
@@ -44,20 +44,20 @@
   ];
 
   // ── State ─────────────────────────────────────────────────────────────
-  var container = null;
-  var modBtns = {};       // { ctrl: btn, alt: btn, shift: btn }
-  var modState = {
+  let container = null;
+  const modBtns = {};     // { ctrl: btn, alt: btn, shift: btn }
+  const modState = {
     ctrl:  { armed: false, locked: false, lastTap: 0 },
     alt:   { armed: false, locked: false, lastTap: 0 },
     shift: { armed: false, locked: false, lastTap: 0 },
   };
-  var DOUBLE_TAP_MS = 300;
+  const DOUBLE_TAP_MS = 300;
 
   // ── Helpers ───────────────────────────────────────────────────────────
   // SHIFT_MAP: terminal control sequences → Shift-modified version.
   // This is NOT character casing (a→A). It maps terminal escape codes
   // that change when Shift is held (e.g. Tab → reverse tab \x1b[Z]).
-  var SHIFT_MAP = {
+  const SHIFT_MAP = {
     '\t': '\x1b[Z',   // Tab → Shift+Tab (reverse tab)
   };
 
@@ -75,7 +75,7 @@
   function refocusMobileInput() {
     if (!isMobile()) return;
     suppressDisarm(300);
-    var mi = document.getElementById('mobile-input');
+    const mi = document.getElementById('mobile-input');
     if (mi) {
       try { mi.focus(); } catch (_) {}
     }
@@ -85,9 +85,9 @@
     if (!seq) return;
 
     // Apply sticky Ctrl: mask ASCII chars with 0x1f
-    var s = modState.ctrl;
+    const s = modState.ctrl;
     if ((s.armed || s.locked) && seq.length === 1) {
-      var code = seq.charCodeAt(0);
+      const code = seq.charCodeAt(0);
       if (code >= 0x20 && code < 0x7f) {
         seq = String.fromCharCode(code & 0x1f);
       }
@@ -95,7 +95,7 @@
     if (s.armed) { s.armed = false; updateModUI(); }
 
     // Apply sticky Alt: prefix \x1b
-    var a = modState.alt;
+    const a = modState.alt;
     if (a.armed || a.locked) {
       seq = '\x1b' + seq;
       if (!a.locked) { a.armed = false; updateModUI(); }
@@ -103,7 +103,7 @@
 
     // Apply sticky Shift: map known control sequences. Only for keys in
     // SHIFT_MAP — regular characters are NOT transformed (a stays a).
-    var sh = modState.shift;
+    const sh = modState.shift;
     if ((sh.armed || sh.locked) && SHIFT_MAP[seq]) {
       seq = SHIFT_MAP[seq];
     }
@@ -119,8 +119,8 @@
   }
 
   function updateModUI() {
-    for (var mod in modState) {
-      var btn = modBtns[mod];
+    for (const mod in modState) {
+      const btn = modBtns[mod];
       if (!btn) continue;
       btn.classList.toggle('armed', modState[mod].armed);
       btn.classList.toggle('locked', modState[mod].locked);
@@ -128,8 +128,8 @@
   }
 
   function handleSticky(mod) {
-    var now = Date.now();
-    var s = modState[mod];
+    const now = Date.now();
+    const s = modState[mod];
     if (!s) return;
 
     if (s.locked) {
@@ -164,28 +164,28 @@
 
     container.innerHTML = '';
 
-    for (var ri = 0; ri < ROWS.length; ri++) {
-      var row = ROWS[ri];
-      var rowDiv = document.createElement('div');
+    for (let ri = 0; ri < ROWS.length; ri++) {
+      const row = ROWS[ri];
+      const rowDiv = document.createElement('div');
       rowDiv.className = 'keybar-row';
       rowDiv.style.gridTemplateColumns = 'repeat(' + row.length + ', 1fr)';
 
-      for (var ki = 0; ki < row.length; ki++) {
-        var key = row[ki];
-        var clsList = key.cls ? key.cls.split(' ') : [];
+      for (let ki = 0; ki < row.length; ki++) {
+        const key = row[ki];
+        const clsList = key.cls ? key.cls.split(' ') : [];
 
         // Spacer: invisible placeholder for layout
         if (clsList.indexOf('spacer') !== -1) {
-          var spacer = document.createElement('div');
+          const spacer = document.createElement('div');
           spacer.className = 'keybar-spacer';
           spacer.setAttribute('aria-hidden', 'true');
           rowDiv.appendChild(spacer);
           continue;
         }
 
-        var btn = document.createElement('button');
+        const btn = document.createElement('button');
         btn.className = 'keybar-btn';
-        for (var ci = 0; ci < clsList.length; ci++) {
+        for (let ci = 0; ci < clsList.length; ci++) {
           btn.className += ' keybar-' + clsList[ci];
         }
         if (key.html) {
@@ -234,8 +234,8 @@
 
   function toggle() {
     if (!container) return;
-    var hidden = container.classList.toggle('keybar-hidden');
-    var toggleBtn = document.getElementById('keybar-toggle');
+    const hidden = container.classList.toggle('keybar-hidden');
+    const toggleBtn = document.getElementById('keybar-toggle');
     if (toggleBtn) {
       toggleBtn.classList.toggle('active', !hidden);
     }
@@ -245,7 +245,7 @@
     buildToolbar();
 
     if (!isMobile()) {
-      var toggle = document.getElementById('keybar-toggle');
+      const toggle = document.getElementById('keybar-toggle');
       toggle && (toggle.style.display = 'none');
       container && container.classList.add('keybar-hidden');
     } else {
@@ -253,7 +253,7 @@
     }
   }
 
-  var _focusGraceUntil = 0;  // suppress disarm until this timestamp
+  let _focusGraceUntil = 0;  // suppress disarm until this timestamp
 
   // ── Apply modifiers to data from native keyboard ──────────────────────
   // Called by client.js term.onData() to inject Ctrl/Alt/Shift before send.
@@ -262,12 +262,12 @@
     // Guard: empty/ghost events must not disarm one-shot modifiers.
     if (!data) return Promise.resolve(data);
 
-    var ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
-    var alt   = modState.alt.armed   || modState.alt.locked;
-    var shift = modState.shift.armed || modState.shift.locked;
+    const ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
+    const alt   = modState.alt.armed   || modState.alt.locked;
+    const shift = modState.shift.armed || modState.shift.locked;
 
     // Disarm one-shot modifiers (locked stay active)
-    var inGrace = Date.now() < _focusGraceUntil;
+    const inGrace = Date.now() < _focusGraceUntil;
     if (!inGrace) {
       if (modState.ctrl.armed)  { modState.ctrl.armed = false; }
       if (modState.alt.armed && !modState.alt.locked) {
@@ -277,14 +277,14 @@
       updateModUI();
     }
 
-    var result = data;
+    let result = data;
 
     // Apply Ctrl mask per code point (emoji-safe — iterates chars, not UTF-16 units)
     if (ctrl) {
-      var masked = '';
-      var chars = Array.from(result);
-      for (var i = 0; i < chars.length; i++) {
-        var code = chars[i].codePointAt(0);
+      let masked = '';
+      const chars = Array.from(result);
+      for (let i = 0; i < chars.length; i++) {
+        const code = chars[i].codePointAt(0);
         if (code >= 0x20 && code < 0x7f) {
           masked += String.fromCharCode(code & 0x1f);
         } else {
@@ -313,7 +313,7 @@
           result = result.toUpperCase();
         } else {
           // One-shot: uppercase first character only
-          var chars = Array.from(result);
+          const chars = Array.from(result);
           if (chars.length > 0) chars[0] = chars[0].toUpperCase();
           result = chars.join('');
         }
@@ -327,8 +327,8 @@
   // These are pure checks — client.js calls them before applyModifiers()
   // to decide whether to send copy_buffer / paste_buffer to server.
   function isCopyPasteCombo(key) {
-    var ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
-    var shift = modState.shift.armed || modState.shift.locked;
+    const ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
+    const shift = modState.shift.armed || modState.shift.locked;
     return ctrl && shift && (key === 'c' || key === 'v');
   }
 

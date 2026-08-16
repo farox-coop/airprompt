@@ -19,7 +19,7 @@ AirPrompt lets you view and interact with remote IDE/CLI sessions running on you
 
 - **Daemon**: Single `server.js` instance on port 3210 managing multiple IDE sessions
 - **Sessions**: One tmux session per IDE/CLI instance
-- **Mobile UI**: Web-based terminal with session selector, xterm.js, push-to-talk voice dictation, and keyboard input fallback
+- **Mobile UI**: Web-based terminal with session selector, xterm.js, adaptive touch scrolling, push-to-talk voice dictation, and keyboard input fallback
 - **Statusline**: Integrated badge `[AirPrompt: https://<IP>:3210]` in IDE terminal
 
 ### tmux feature usage
