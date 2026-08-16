@@ -294,6 +294,18 @@ if [ -x "$AUTOSTART_SCRIPT" ]; then
     not_ok "autostart accepted invalid arg"
   fi
 
+  # Settings file given → provider resolution must be skipped. A machine
+  # with no IDE installed (fresh CI runner) has no detectable provider, so
+  # resolve-config-dir.js would fail. The settings path is already known,
+  # so the provider is irrelevant here.
+  rm -f "$TMP_SETTINGS"
+  if AIRPROMPT_SETTINGS_FILE="$TMP_SETTINGS" AIRPROMPT_INSTALL_DIR="$PROJECT_DIR" \
+    AIRPROMPT_PROVIDER="nonexistent-provider" bash "$AUTOSTART_SCRIPT" on 2>/dev/null; then
+    ok "autostart on needs no provider when settings file given"
+  else
+    not_ok "autostart on requires provider even with settings file given"
+  fi
+
   # off preserves other SessionStart hooks (not just airprompt's)
   cat > "$TMP_SETTINGS" << 'JSONEOF'
 {

@@ -31,9 +31,14 @@ if [ ! -d "$INSTALL_DIR" ]; then
   exit 1
 fi
 
-# Resolve IDE config dir via provider registry helper
-CONFIG_DIR=$(AIRPROMPT_INSTALL_DIR="$INSTALL_DIR" node "${INSTALL_DIR}/bin/lib/resolve-config-dir.js" "${AIRPROMPT_PROVIDER:-}" 2>/dev/null) || { echo "AirPrompt autostart: cannot resolve IDE config dir" >&2; exit 1; }
-SETTINGS="${AIRPROMPT_SETTINGS_FILE:-${CONFIG_DIR}/settings.json}"
+# Resolve settings path. When AIRPROMPT_SETTINGS_FILE is provided, use it
+# directly — no provider detection needed (a fresh machine/CI has none).
+if [ -n "${AIRPROMPT_SETTINGS_FILE:-}" ]; then
+  SETTINGS="$AIRPROMPT_SETTINGS_FILE"
+else
+  CONFIG_DIR=$(AIRPROMPT_INSTALL_DIR="$INSTALL_DIR" node "${INSTALL_DIR}/bin/lib/resolve-config-dir.js" "${AIRPROMPT_PROVIDER:-}" 2>/dev/null) || { echo "AirPrompt autostart: cannot resolve IDE config dir" >&2; exit 1; }
+  SETTINGS="${CONFIG_DIR}/settings.json"
+fi
 ACTIVATE_SCRIPT="${INSTALL_DIR}/src/hooks/airprompt-activate.js"
 SETTINGS_LIB="${INSTALL_DIR}/bin/lib/settings.js"
 
