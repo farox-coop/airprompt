@@ -114,6 +114,7 @@ done
 
 # Sync hooks to ~/.claude/ — prefer symlinks into repo. If symlink was
 # overwritten by a stale copy (content matches repo), restore it.
+mkdir -p "$HOME/.claude/hooks" "$HOME/.claude/commands"
 for h in "${HOOKS[@]}"; do
   dest="$HOME/.claude/hooks/$h"
   src="$REPO/src/hooks/$h"

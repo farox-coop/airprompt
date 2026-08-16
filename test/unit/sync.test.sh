@@ -68,10 +68,15 @@ for b in "${BINS[@]}"; do
 done
 if [ "$all_ok" -eq 1 ]; then ok "all ${#HOOKS[@]} hooks + ${#BINS[@]} bins exist"; else not_ok "some files missing"; fi
 
-# ── Test 7: script runs successfully from repo root ──────────────────
-echo "[7/7] End-to-end sync from repo root"
+# ── Test 7: script runs successfully from repo root (fresh HOME) ──────
+# Isolate HOME so sync.sh must create ~/.claude/{hooks,commands} itself —
+# a fresh machine (or CI runner) has none. Also avoids mutating the real
+# ~/.claude and ~/bin as a side effect.
+echo "[7/7] End-to-end sync from repo root (fresh HOME)"
 cd "$REPO_ROOT"
-OUT=$(bash "$SYNC_SH" 2>&1) && rc=$? || rc=$?
+FAKE_HOME=$(mktemp -d)
+OUT=$(HOME="$FAKE_HOME" bash "$SYNC_SH" 2>&1) && rc=$? || rc=$?
+rm -rf "$FAKE_HOME"
 if [ "$rc" -eq 0 ] && echo "$OUT" | grep -q "SYNCED OK"; then
   ok "sync completed ($(echo "$OUT" | grep 'SYNCED OK' | head -1))"
 else
