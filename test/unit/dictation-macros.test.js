@@ -1005,3 +1005,160 @@ test('dictation macros — trimSpaces', async (t) => {
     assert.strictEqual(M.trimSpaces(' hola \n\n '), 'hola \n\n');
   });
 });
+
+test('dictation macros — preferences (enable/disable + display helpers)', async (t) => {
+  await t.test('directText — regex → plain text (user example #1)', () => {
+    assert.strictEqual(
+      M.directText({ trigger: [/(abre|abr[ií]) par[eé]ntesis/i] }),
+      'abre|abrí paréntesis'
+    );
+  });
+
+  await t.test('directText — aliases joined with | (user example #2)', () => {
+    assert.strictEqual(
+      M.directText({ trigger: [/signo de exclamaci[oó]n/i, /signo de admiraci[oó]n/i] }),
+      'signo de exclamación|admiración'
+    );
+  });
+
+  await t.test('directText — [cs] class collapses to first char', () => {
+    assert.strictEqual(
+      M.directText({ trigger: [/([cs]ierra|[cs]err[aá]) par[eé]ntesis/i] }),
+      'cierra|cerrá paréntesis'
+    );
+  });
+
+  await t.test('directText — string trigger passthrough', () => {
+    assert.strictEqual(M.directText({ trigger: 'signo de pregunta' }), 'signo de pregunta');
+  });
+
+  await t.test('directText — negative lookahead + \\b stripped from display', () => {
+    assert.strictEqual(
+      M.directText({ trigger: [/(abre|abr[ií]) comillas?\b(?!\s+simples?)/i] }),
+      'abre|abrí comillas'
+    );
+  });
+
+  await t.test('valueLabel — insert/replace/format', () => {
+    assert.strictEqual(M.valueLabel({ insert: '\n' }), '↵');
+    assert.strictEqual(M.valueLabel({ insert: '\n\n' }), '↵↵');
+    assert.strictEqual(M.valueLabel({ replace: '(' }), '(');
+    assert.strictEqual(M.valueLabel({ insert: '…' }), '…');
+    assert.strictEqual(M.valueLabel({ format: 'quotes' }), '"…"');
+    assert.strictEqual(M.valueLabel({ format: 'uppercase' }), 'Aa');
+    assert.strictEqual(M.valueLabel({ format: 'allcaps' }), 'AA');
+  });
+
+  await t.test('disabled inline macro produces no replacement', () => {
+    M.resetPrefs();
+    assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), '(nota');
+    M.setEnabledByKey('inline:replace:(', false);
+    assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), 'abre paréntesis nota');
+    M.setEnabledByKey('inline:replace:(', true);
+    assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), '(nota');
+    M.resetPrefs();
+  });
+
+  await t.test('disabled stateful macro produces no insert', () => {
+    M.resetPrefs();
+    assert.strictEqual(M.processFragment('punto', 'es-AR').insert, '.');
+    M.setEnabledByKey('stateful:insert:.', false);
+    assert.strictEqual(M.processFragment('punto', 'es-AR').type, 'text');
+    M.resetPrefs();
+  });
+
+  await t.test('toggle is language-agnostic (es + en share one key)', () => {
+    M.resetPrefs();
+    assert.strictEqual(M.applyInline('open paren note', 'en-US'), '(note');
+    M.setEnabledByKey('inline:replace:(', false);
+    assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), 'abre paréntesis nota');
+    assert.strictEqual(M.applyInline('open paren note', 'en-US'), 'open paren note');
+    M.resetPrefs();
+  });
+
+  await t.test('global toggle disables all without touching per-macro state', () => {
+    M.resetPrefs();
+    assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), '(nota');
+    M.setGlobalEnabled(false);
+    assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), 'abre paréntesis nota');
+    assert.strictEqual(M.processFragment('punto', 'es-AR').type, 'text');
+    // per-macro checkboxes unchanged by the global flag
+    const openParen = M.getMacroList('es-AR').find(function (i) { return i.key === 'inline:replace:('; });
+    assert.strictEqual(openParen.enabled, true);
+    M.setGlobalEnabled(true);
+    assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), '(nota');
+    M.resetPrefs();
+  });
+
+  await t.test('getMacroList — shape + inline before stateful', () => {
+    M.resetPrefs();
+    const list = M.getMacroList('es-AR');
+    assert.ok(Array.isArray(list) && list.length > 0);
+    const inlineIdx = list.findIndex(function (i) { return i.category === 'inline'; });
+    const statefulIdx = list.findIndex(function (i) { return i.category === 'stateful'; });
+    assert.strictEqual(inlineIdx, 0);
+    assert.ok(statefulIdx > inlineIdx);
+    list.forEach(function (i) {
+      assert.strictEqual(typeof i.key, 'string');
+      assert.strictEqual(typeof i.triggerText, 'string');
+      assert.strictEqual(typeof i.valueLabel, 'string');
+      assert.strictEqual(typeof i.enabled, 'boolean');
+    });
+    // exclamation macro → aliased trigger text + '!' value
+    const ex = list.find(function (i) { return i.key === 'inline:replace:!:end'; });
+    assert.ok(ex);
+    assert.strictEqual(ex.triggerText, 'signo de exclamación|admiración');
+    assert.strictEqual(ex.valueLabel, '!');
+  });
+});
+
+test('dictation macros — preferences edge cases', async (t) => {
+  await t.test('paren open/close is one macro — single key disables both paths', () => {
+    M.resetPrefs();
+    // both inline + stateful paths fire by default
+    assert.strictEqual(M.processFragment('abre paréntesis', 'es-AR').insert, '(');
+    assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), '(nota');
+    // one key covers both
+    M.setEnabledByKey('inline:replace:(', false);
+    assert.strictEqual(M.processFragment('abre paréntesis', 'es-AR').type, 'text');
+    assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), 'abre paréntesis nota');
+    M.resetPrefs();
+  });
+
+  await t.test('getMacroList has no duplicate keys (paren listed once)', () => {
+    M.resetPrefs();
+    const list = M.getMacroList('es-AR');
+    const keys = list.map(function (i) { return i.key; });
+    assert.strictEqual(new Set(keys).size, keys.length);
+    const parenRows = list.filter(function (i) { return i.key === 'inline:replace:('; });
+    assert.strictEqual(parenRows.length, 1);
+    assert.strictEqual(parenRows[0].category, 'inline');
+  });
+
+  await t.test('disabling single-quote does not let double-quote shadow (es-AR)', () => {
+    M.resetPrefs();
+    assert.strictEqual(M.applyInline('abre comillas simples hola', 'es-AR'), "'hola");
+    M.setEnabledByKey("inline:replace:':open", false);
+    assert.strictEqual(M.applyInline('abre comillas simples hola', 'es-AR'), 'abre comillas simples hola');
+    M.setEnabledByKey("inline:replace:':close", false);
+    assert.strictEqual(M.applyInline('hola cerrá comillas simples chau', 'es-AR'), 'hola cerrá comillas simples chau');
+    M.resetPrefs();
+  });
+
+  await t.test('setEnabledByKey reflects in getMacroList().enabled', () => {
+    M.resetPrefs();
+    M.setEnabledByKey('inline:replace:(', false);
+    const row = M.getMacroList('es-AR').find(function (i) { return i.key === 'inline:replace:('; });
+    assert.strictEqual(row.enabled, false);
+    M.resetPrefs();
+  });
+
+  await t.test('resetPrefs clears disabled set + global flag', () => {
+    M.setEnabledByKey('inline:replace:(', false);
+    M.setGlobalEnabled(false);
+    M.resetPrefs();
+    assert.strictEqual(M.getGlobalEnabled(), true);
+    const row = M.getMacroList('es-AR').find(function (i) { return i.key === 'inline:replace:('; });
+    assert.strictEqual(row.enabled, true);
+  });
+});

@@ -255,7 +255,9 @@ const T_MAP = {
     cancel: 'Cancel', accept: 'Accept', send: 'Send',
     listening: 'Listening…', speaking: '● Speaking…',
     noSession: 'No session selected', noActive: 'No active sessions',
-    activeSessions: 'Active Sessions', close: 'Close', refresh: 'Refresh',
+    activeSessions: 'Active Sessions', close: 'Close',
+    preferences: 'Preferences',
+    enableAllMacros: 'Enable all dictation macros', inline: 'Inline', stateful: 'Stateful',
     micHttps: 'Voice needs HTTPS or localhost.',
     langFallback: 'Language not supported. Falling back to English.',
     disconnected: '⚠️ DISCONNECTED — Tap to dismiss',
@@ -265,7 +267,9 @@ const T_MAP = {
     cancel: 'Cancelar', accept: 'Aceptar', send: 'Enviar',
     listening: 'Escuchando…', speaking: '● Hablando…',
     noSession: 'Sin sesión', noActive: 'Sin sesiones activas',
-    activeSessions: 'Sesiones Activas', close: 'Cerrar', refresh: 'Recargar',
+    activeSessions: 'Sesiones Activas', close: 'Cerrar',
+    preferences: 'Preferencias',
+    enableAllMacros: 'Activar todas las macros de dictado', inline: 'Inline', stateful: 'Stateful',
     micHttps: 'El micrófono requiere HTTPS o localhost.',
     langFallback: 'Idioma no soportado. Cambiando a inglés.',
     disconnected: '⚠️ DESCONECTADO — Tocar para cerrar',
@@ -1511,6 +1515,10 @@ test('trClient — known language keys', async (t) => {
     assert.strictEqual(trClient('send', 'en-US'), 'Send');
     assert.strictEqual(trClient('noSession', 'en-US'), 'No session selected');
     assert.strictEqual(trClient('disconnected', 'en-US'), '⚠️ DISCONNECTED — Tap to dismiss');
+    assert.strictEqual(trClient('preferences', 'en-US'), 'Preferences');
+    assert.strictEqual(trClient('enableAllMacros', 'en-US'), 'Enable all dictation macros');
+    assert.strictEqual(trClient('inline', 'en-US'), 'Inline');
+    assert.strictEqual(trClient('stateful', 'en-US'), 'Stateful');
   });
 
   await t.test('all es-AR keys resolve', function () {
@@ -1520,6 +1528,10 @@ test('trClient — known language keys', async (t) => {
     assert.strictEqual(trClient('send', 'es-AR'), 'Enviar');
     assert.strictEqual(trClient('noSession', 'es-AR'), 'Sin sesión');
     assert.strictEqual(trClient('disconnected', 'es-AR'), '⚠️ DESCONECTADO — Tocar para cerrar');
+    assert.strictEqual(trClient('preferences', 'es-AR'), 'Preferencias');
+    assert.strictEqual(trClient('enableAllMacros', 'es-AR'), 'Activar todas las macros de dictado');
+    assert.strictEqual(trClient('inline', 'es-AR'), 'Inline');
+    assert.strictEqual(trClient('stateful', 'es-AR'), 'Stateful');
   });
 });
 

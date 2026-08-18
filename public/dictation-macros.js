@@ -21,8 +21,8 @@
         // Quote/tic inline — regex handles all singular/plural + voseo variants
         { trigger: [/(abre|abr[ií]) comillas? simples?/i],  replace: "'", open: true },
         { trigger: [/([cs]ierra|[cs]err[aá]) comillas? simples?/i], replace: "'", close: true },
-        { trigger: [/(abre|abr[ií]) comillas?/i],   replace: '"', open: true },
-        { trigger: [/([cs]ierra|[cs]err[aá]) comillas?/i], replace: '"', close: true },
+        { trigger: [/(abre|abr[ií]) comillas?\b(?!\s+simples?)/i],   replace: '"', open: true },
+        { trigger: [/([cs]ierra|[cs]err[aá]) comillas?\b(?!\s+simples?)/i], replace: '"', close: true },
         { trigger: [/(abre|abr[ií]) tics?/i],        replace: '`', open: true },
         { trigger: [/([cs]ierra|[cs]err[aá]) tics?/i],     replace: '`', close: true },
       ],
@@ -128,6 +128,177 @@
     return trimSpaces(transcript);
   }
 
+  // ── Trigger/display helpers ────────────────────────────────────────────
+  // Convert a regex source to plain "direct text" for display: strip
+  // anchors, group delimiters, and quantifiers; collapse char classes
+  // ([aá]→á, [cs]→c — accented variant preferred, else first char).
+  function regexToText(source) {
+    let s = source;
+    s = s.replace(/^\^/, '').replace(/\$$/, '');   // ^…$ anchors
+    s = s.replace(/\(\?[=!][^)]*\)/g, '');           // (?=…) / (?!…) lookarounds — assertions, not text
+    s = s.replace(/\(\?:/g, '');                     // non-capturing openers
+    s = s.replace(/\(/g, '').replace(/\)/g, '');     // group delimiters
+    s = s.replace(/[?*+]/g, '');                     // quantifiers
+    s = s.replace(/\\[bBdDsSwW]/g, '');              // \b \s \d \w … escape classes
+    s = s.replace(/\[([^\[\]]*)\]/g, function (m, inner) {
+      const acc = inner.match(/[áéíóúÁÉÍÓÚ]/);
+      return acc ? acc[0] : inner.charAt(0);
+    });
+    return s;
+  }
+
+  // Human-readable trigger text for a macro entry. Multiple aliases are
+  // joined with "|" after eliding their shared word-boundary prefix, so
+  // ["signo de exclamación", "signo de admiración"] → "signo de exclamación|admiración".
+  function directText(entry) {
+    const texts = triggers(entry).map(function (alias) {
+      return alias instanceof RegExp ? regexToText(alias.source) : alias;
+    });
+    if (texts.length < 2) return texts[0] || '';
+    let prefix = texts[0];
+    for (let i = 1; i < texts.length; i++) {
+      while (texts[i].slice(0, prefix.length) !== prefix) {
+        prefix = prefix.slice(0, prefix.length - 1);
+        if (!prefix) break;
+      }
+      if (!prefix) break;
+    }
+    const cut = prefix.lastIndexOf(' ');
+    const head = cut === -1 ? prefix : prefix.slice(0, cut + 1);
+    return head + texts.map(function (txt) { return txt.slice(head.length); }).join('|');
+  }
+
+  // Human-readable value for a macro entry's replace|insert|format.
+  function valueLabel(entry) {
+    if (entry.insert !== undefined) {
+      if (entry.insert === '\n') return '↵';
+      if (entry.insert === '\n\n') return '↵↵';
+      return entry.insert;
+    }
+    if (entry.replace !== undefined) return entry.replace;
+    if (entry.format !== undefined) {
+      const map = {
+        quotes: '"…"', squotes: "'…'", bticks: '`…`', parens: '(…)',
+        uppercase: 'Aa', allcaps: 'AA',
+      };
+      return map[entry.format] || entry.format;
+    }
+    return '';
+  }
+
+  // Language-agnostic identity for a macro: category + effect. Equivalent
+  // macros across languages (es "abre paréntesis" / en "open parenthesis")
+  // share one key, so a single toggle applies to every language.
+  function entryKey(category, entry) {
+    if (entry.replace !== undefined) {
+      let key = category + ':replace:' + entry.replace;
+      if (entry.onEnd) key += ':end';
+      else if (entry.open) key += ':open';
+      else if (entry.close) key += ':close';
+      return key;
+    }
+    if (entry.insert !== undefined) {
+      // Standalone paren inserts are the same spoken macro as their inline
+      // replace counterparts — share one key so a single toggle covers both.
+      if (entry.insert === '(' || entry.insert === ')') {
+        return 'inline:replace:' + entry.insert;
+      }
+      return category + ':insert:' + entry.insert;
+    }
+    if (entry.format !== undefined) return category + ':format:' + entry.format;
+    return '';
+  }
+
+  // ── Macro preferences (enable/disable) ─────────────────────────────────
+  // Stored as a DISABLED set (default: everything enabled) plus one global
+  // master flag. Keys carry no lang, so a toggle set in Spanish applies to
+  // the equivalent English macro too. localStorage is guarded so unit tests
+  // (no localStorage) fall back to in-memory state.
+
+  const PREFS_DISABLED_KEY = 'airprompt-macro-disabled';
+  const PREFS_GLOBAL_KEY = 'airprompt-macro-all';
+
+  let _disabled = loadDisabled();
+  let _globalEnabled = loadGlobal();
+
+  function loadDisabled() {
+    try {
+      const raw = localStorage.getItem(PREFS_DISABLED_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return arr;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  function loadGlobal() {
+    try {
+      if (localStorage.getItem(PREFS_GLOBAL_KEY) === 'false') return false;
+    } catch (_) {}
+    return true;
+  }
+
+  function saveDisabled() {
+    try { localStorage.setItem(PREFS_DISABLED_KEY, JSON.stringify(_disabled)); } catch (_) {}
+  }
+
+  function isMacroDisabled(key) {
+    return _disabled.indexOf(key) !== -1;
+  }
+
+  function isEnabled(category, entry) {
+    if (!_globalEnabled) return false;
+    return !isMacroDisabled(entryKey(category, entry));
+  }
+
+  function setEnabledByKey(key, enabled) {
+    const idx = _disabled.indexOf(key);
+    if (enabled && idx !== -1) _disabled.splice(idx, 1);
+    else if (!enabled && idx === -1) _disabled.push(key);
+    saveDisabled();
+  }
+
+  function getGlobalEnabled() { return _globalEnabled; }
+
+  function setGlobalEnabled(v) {
+    _globalEnabled = !!v;
+    try { localStorage.setItem(PREFS_GLOBAL_KEY, JSON.stringify(_globalEnabled)); } catch (_) {}
+  }
+
+  function resetPrefs() {
+    _disabled = [];
+    _globalEnabled = true;
+    saveDisabled();
+    setGlobalEnabled(true);
+  }
+
+  function getMacroList(lang) {
+    const cfg = MACROS[lang] || MACROS['en-US'];
+    const out = [];
+    const seen = new Set();
+    ['inline', 'stateful'].forEach(function (category) {
+      const entries = cfg[category];
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const key = entryKey(category, entry);
+        // Inline + standalone paren share a key — list the macro once.
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          key: key,
+          category: category,
+          triggerText: directText(entry),
+          valueLabel: valueLabel(entry),
+          // Per-macro state only — the global flag is separate and must not
+          // affect how each macro's own checkbox renders.
+          enabled: !isMacroDisabled(key),
+        });
+      }
+    });
+    return out;
+  }
+
   // ── Public API ──────────────────────────────────────────────────────────
 
   function processFragment(segment, lang) {
@@ -138,6 +309,7 @@
     const stateful = cfg.stateful;
     for (let i = 0; i < stateful.length; i++) {
       const entry = stateful[i];
+      if (!isEnabled('stateful', entry)) continue;
       const aliases = triggers(entry);
       for (let a = 0; a < aliases.length; a++) {
         const alias = aliases[a];
@@ -163,6 +335,7 @@
     const inline = cfg.inline;
     for (let i = 0; i < inline.length; i++) {
       const entry = inline[i];
+      if (!isEnabled('inline', entry)) continue;
       const aliases = triggers(entry);
       // Build a single pattern: combine regex entries and escaped-string entries
       const parts = [];
@@ -228,6 +401,16 @@
     extractDelta: extractDelta,
     revertSttNewlines: revertSttNewlines,
     trimSpaces: trimSpaces,
+    // Macro preferences
+    getMacroList: getMacroList,
+    isEnabled: isEnabled,
+    setEnabledByKey: setEnabledByKey,
+    getGlobalEnabled: getGlobalEnabled,
+    setGlobalEnabled: setGlobalEnabled,
+    resetPrefs: resetPrefs,
+    entryKey: entryKey,
+    directText: directText,
+    valueLabel: valueLabel,
   };
 
 })();

@@ -553,11 +553,6 @@ Dictation.init({ send: function(m) { send(m); }, log: log, blurInput: function()
   if (window._airpromptBlurMobileInput) window._airpromptBlurMobileInput();
 }, sessionLabel: sessionLabel });
 function tr(key) { return Dictation.tr(key); }
-// ── Refresh button ────────────────────────────────────────────────────
-document.getElementById('refresh-btn').addEventListener('click', function (e) {
-  e.preventDefault(); e.stopPropagation();
-  location.reload();
-});
 
 // ── Mobile input bar ──────────────────────────────────────────────────
 // On touch devices, a real <input> captures keyboard input instead of

@@ -37,26 +37,7 @@ logs:
 	@tail -f $(LOG_FILE)
 
 lint:
-	@node --check server.js
-	@node --check public/client.js
-	@node --check bin/install.js
-	@node --check bin/lib/settings.js
-	@node --check src/utils.js
-	@node --check src/status-formatter.js
-	@node --check src/install-helpers.js
-	@node --check src/providers/provider.js
-	@node --check src/providers/claude.js
-	@node --check src/providers/registry.js
-	@node --check src/hooks/airprompt-activate.js
-	@node --check src/hooks/airprompt-deactivate.js
-	@node --check src/hooks/core/activate.js
-	@node --check src/hooks/core/deactivate.js
-	@node --check src/hooks/core/shared.js
-	@node --check bin/lib/resolve-config-dir.js
-	@node --check bin/lib/project-names.js
-	@node --check bin/lib/autostart.js
-	@node --check test/unit/provider-claude.test.js
-	@node --check test/unit/provider-interface.test.js
+	@npm run --silent lint
 
 test-unit:
 	@node --test test/unit/*.test.js
@@ -67,7 +48,7 @@ test-unit:
 test-integration:
 	@bash test/integration/run.sh
 
-test-all: test-unit test-integration
+test-all: lint test-unit test-integration
 
 agnostic-check:
 	@bash bin/airprompt-agnostic-check.sh

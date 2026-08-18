@@ -19,7 +19,7 @@
     "register": "bash bin/airprompt on",
     "unregister": "bash bin/airprompt off",
     "test": "node --test test/unit/*.test.js && for f in test/unit/*.test.sh; do bash \"$f\" || exit 1; done && bash test/integration/run.sh",
-    "lint": "for f in server.js public/client.js bin/install.js bin/lib/*.js src/providers/*.js src/hooks/*.js src/hooks/core/*.js src/*.js test/unit/*.test.js; do node --check \"$f\" || exit 1; done"
+    "lint": "find . -path ./node_modules -prune -o -name '*.js' -type f -print0 | xargs -0 -n1 node --check"
   },
   "author": "Farox",
   "license": "MIT",

@@ -28,7 +28,7 @@ body, html {
 #session-label .name { color: #58a6ff; }
 #session-label .cwd { color: #c9d1d9; font-size: 11px; }
 #session-label.no-session { color: #8b949e; }
-#refresh-btn {
+#prefs-btn {
   width: 32px; height: 32px; background: #21262d; color: #c9d1d9;
   border: 1px solid #d29922; border-radius: 6px; font-size: 20px;
   cursor: pointer; flex-shrink: 0; margin-left: 8px;
@@ -37,7 +37,7 @@ body, html {
   padding: 0; line-height: 1;
   box-shadow: 0 0 10px rgba(210, 153, 34, 0.6), 0 0 20px rgba(210, 153, 34, 0.25);
 }
-#refresh-btn:active { background: #30363d; }
+#prefs-btn:active { background: #30363d; }
 #dictate-btn {
   background: #1f6feb; color: #fff; border: 1px solid #388bfd;
   border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer;
@@ -101,6 +101,71 @@ body, html {
   display: block; width: 100%; background: #21262d; color: #c9d1d9;
   border: 1px solid #30363d; border-radius: 6px; padding: 10px;
   font-size: 14px; cursor: pointer; margin-top: 8px;
+}
+
+/* ── Preferences modal ───────────────────────── */
+#preferences-modal {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.8); z-index: 100;
+  flex-direction: column; align-items: center; justify-content: center;
+}
+#preferences-modal.open { display: flex; }
+#preferences-modal-content {
+  background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+  width: 92%; max-width: 760px; max-height: 80vh; overflow-y: auto; padding: 16px;
+}
+#preferences-modal-content h3 {
+  margin: 0 0 12px 0; font-size: 16px; color: #c9d1d9;
+}
+.pref-global {
+  display: flex; align-items: center; gap: 10px;
+  background: #21262d; border: 1px solid #30363d; border-radius: 8px;
+  padding: 12px 14px; margin-bottom: 12px; cursor: pointer;
+  font-size: 15px; font-weight: 600; color: #c9d1d9;
+  user-select: none; -webkit-user-select: none;
+}
+.pref-global input { width: 20px; height: 20px; flex-shrink: 0; }
+#pref-macro-list {
+  display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start;
+}
+.pref-col {
+  flex: 1 1 300px; min-width: 0;
+}
+.pref-section {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+  padding: 8px 10px; margin: 0 0 6px 0;
+  font-family: inherit; font-size: 12px; font-weight: 700; line-height: 1.4;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: #8b949e; text-align: left; cursor: pointer;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+}
+.pref-section::before {
+  content: '▸'; flex-shrink: 0;
+}
+.pref-section[aria-expanded='true']::before { content: '▾'; }
+.pref-section:active { background: #30363d; }
+.pref-col-body.collapsed { display: none; }
+.pref-macro-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-bottom: 1px solid #21262d; cursor: pointer;
+  font-size: 15px; color: #c9d1d9;
+  user-select: none; -webkit-user-select: none;
+}
+.pref-macro-row:last-child { border-bottom: none; }
+.pref-macro-row input { width: 18px; height: 18px; flex-shrink: 0; }
+.pref-trigger {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pref-value {
+  flex-shrink: 0; font-family: monospace; font-size: 14px;
+  color: #58a6ff; background: #21262d; border-radius: 4px;
+  padding: 2px 8px; min-width: 28px; text-align: center;
+}
+#pref-close {
+  display: block; width: 100%; background: #21262d; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 6px; padding: 10px;
+  font-size: 14px; cursor: pointer; margin-top: 12px;
 }
 
 /* ── Terminal ────────────────────────────────── */

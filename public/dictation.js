@@ -37,7 +37,9 @@
       cancel: 'Cancel', accept: 'Accept', send: 'Send',
       listening: 'Listening…', speaking: '● Speaking…',
       noSession: 'No session selected', noActive: 'No active sessions',
-      activeSessions: 'Active Sessions', close: 'Close', refresh: 'Refresh',
+      activeSessions: 'Active Sessions', close: 'Close',
+      preferences: 'Preferences',
+      enableAllMacros: 'Enable all dictation macros', inline: 'Inline', stateful: 'Stateful',
       micHttps: 'Voice needs HTTPS or localhost. Chrome blocks mic on HTTP LAN IP. Use keyboard below.',
       langFallback: 'Language not supported. Falling back to English.',
       disconnected: '⚠️ DISCONNECTED — Tap to dismiss',
@@ -47,7 +49,9 @@
       cancel: 'Cancelar', accept: 'Aceptar', send: 'Enviar',
       listening: 'Escuchando…', speaking: '● Hablando…',
       noSession: 'Sin sesión', noActive: 'Sin sesiones activas',
-      activeSessions: 'Sesiones Activas', close: 'Cerrar', refresh: 'Recargar',
+      activeSessions: 'Sesiones Activas', close: 'Cerrar',
+      preferences: 'Preferencias',
+      enableAllMacros: 'Activar todas las macros de dictado', inline: 'Inline', stateful: 'Stateful',
       micHttps: 'El micrófono requiere HTTPS o localhost. Chrome bloquea el mic en IPs LAN HTTP.',
       langFallback: 'Idioma no soportado. Cambiando a inglés.',
       disconnected: '⚠️ DESCONECTADO — Tocar para cerrar',
@@ -85,9 +89,9 @@
     if (modalTitle) modalTitle.textContent = tr('activeSessions');
     const modalClose = document.getElementById('modal-close');
     if (modalClose) modalClose.textContent = tr('close');
-    // Refresh button title
-    const refreshBtn = document.getElementById('refresh-btn');
-    if (refreshBtn) refreshBtn.title = tr('refresh');
+    // Preferences button title
+    const prefsBtn = document.getElementById('prefs-btn');
+    if (prefsBtn) prefsBtn.title = tr('preferences');
     // Session label (if no session)
     if (_sessionLabel && _sessionLabel.classList.contains('no-session')) {
       _sessionLabel.textContent = tr('noSession');
@@ -648,6 +652,7 @@
     toggle: toggleDictation,
     tr: tr,
     updateAllLabels: updateAllLabels,
+    getLang: function() { return currentLang; },
     getOverlayHeight: function() {
       return dictateOverlay.classList.contains('dictate-hidden') ? 0 : dictateOverlay.offsetHeight;
     },

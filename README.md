@@ -19,7 +19,7 @@ AirPrompt lets you view and interact with remote IDE/CLI sessions running on you
 
 - **Daemon**: Single `server.js` instance on port 3210 managing multiple IDE sessions
 - **Sessions**: One tmux session per IDE/CLI instance
-- **Mobile UI**: Web-based terminal with session selector, xterm.js, adaptive touch scrolling, push-to-talk voice dictation, and keyboard input fallback
+- **Mobile UI**: Web-based terminal with session selector, xterm.js, adaptive touch scrolling, push-to-talk voice dictation, keyboard input fallback, and dictation-macro preferences
 - **Statusline**: Integrated badge `[AirPrompt: https://<IP>:3210]` in IDE terminal
 
 ### tmux feature usage
@@ -107,6 +107,8 @@ Voice macros let you control formatting and punctuation by speaking trigger phra
 - **Stateful macros** — a standalone fragment that sets formatting for the *next* fragment: say "entre comillas" → next fragment wrapped in `"..."`. Also: "entre comillas simples" → `'...'`, "entre tics" → `` `...` ``, "entre paréntesis" → `(...)`, "en mayúsculas" (capitalize first letter), "todo mayúsculas" (ALL CAPS). Trigger phrases must be the *only* thing in their fragment to activate — embedded in longer speech they're treated as literal text.
 
 Both Spanish (es-AR, including voseo "abrí"/"cerrá") and English (en-US) supported with the same macro set. Accent-dropping by the recognizer is tolerated (e.g. "abri paréntesis" still matches).
+
+Every macro can be toggled from the web UI: tap the ⚙ gear button in the header to open **Preferences**, which lists all macros for the current dictation language, grouped into inline and stateful sections. Each row shows the trigger phrase and its replacement, with a per-macro checkbox (all enabled by default) plus a global "enable all" switch at the top. Disabled macros produce no replacement during dictation, and settings persist in the browser (`localStorage`).
 
 ## IDE Integration
 
