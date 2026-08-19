@@ -70,7 +70,7 @@ body, html {
 #session-modal.open { display: flex; }
 #session-modal-content {
   background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-  width: 90%; max-height: 70vh; overflow-y: auto; padding: 16px;
+  width: fit-content; max-width: 90%; max-height: 70vh; overflow-y: auto; padding: 16px;
 }
 #session-modal-content h3 {
   margin: 0 0 12px 0; font-size: 16px; color: #c9d1d9;
@@ -83,8 +83,8 @@ body, html {
 .session-item:active { background: #30363d; }
 .session-item.active { border-color: #58a6ff; }
 .session-item .name { font-weight: 600; font-size: 18px; }
-.session-item .cwd { font-size: 14px; }
-.session-item .sid { font-size: 11px; color: #8b949e; font-family: monospace; margin-top: 2px; }
+.session-item .cwd { font-size: 14px; overflow-wrap: break-word; }
+.session-item .sid { font-size: 11px; color: #8b949e; font-family: monospace; margin-top: 2px; overflow-wrap: break-word; }
 .session-item .time { font-size: 13px; color: #8b949e; margin-top: 4px; }
 .session-kill {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
@@ -417,7 +417,6 @@ body, html {
 /* ── Responsive breakpoints ───────────────────── */
 @media (max-width: 480px) {
   #session-bar { padding: 0 8px; }
-  #session-list { width: 100vw; left: 0; }
   #dictate-text { font-size: 15px; padding: 10px 12px; }
 }
 @media (min-width: 768px) {
