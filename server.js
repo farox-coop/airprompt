@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 const qrcode = require('qrcode-terminal');
-const { tmuxExists, sessionToJSON, getSessionsDir } = require('./src/utils');
+const { tmuxExists, sessionToJSON, getSessionsDir, safeRmSync } = require('./src/utils');
 const { runStaleSweep } = require('./src/sweep');
 
 const PORT = process.env.AIRPROMPT_PORT || 3210;
@@ -47,6 +47,29 @@ function getLocalIp() {
     }
   }
   return 'localhost';
+}
+
+// ── WebSocket Origin check ──────────────────────────────────────────────────
+// Block cross-site WebSocket hijacking (CSWSH). The daemon serves its own page,
+// so a legitimate browser connection always has Origin host:port === the
+// request's Host header (public/client.js connects to window.location). Any
+// other Origin — a remote site, or a local page on a different port — is
+// rejected. This also keeps hostname (mDNS) and multi-NIC access working,
+// since it checks same-origin rather than a frozen IP list.
+function originAllowed(info) {
+  const origin = info.origin;
+  // Absent Origin: non-browser client (curl, native ws, some webviews).
+  // Browsers always send Origin on WS upgrades — no Origin = no CSWSH vector.
+  // (These clients stay unauthenticated until the shared-secret token lands.)
+  if (!origin) return true;
+  let originHost;
+  try {
+    originHost = new URL(origin).host.toLowerCase();
+  } catch (_) {
+    return false; // malformed Origin — reject
+  }
+  const hostHeader = String(info.req.headers.host || '').toLowerCase();
+  return !!hostHeader && originHost === hostHeader;
 }
 
 function createTmuxSession(sessionName, cwd) {
@@ -110,7 +133,7 @@ function recoverSessionsFromDisk() {
     let realTmux = '';
     try { realTmux = fs.readFileSync(path.join(dir, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
     if (!realTmux) {
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+      if (!safeRmSync(dir)) log('warn', 'recovery skipped unsafe rm target', { dir });
       continue;
     }
 
@@ -119,8 +142,8 @@ function recoverSessionsFromDisk() {
     // trigger data loss — same guard used in on.sh/off.sh sweep loops.
     const hasSession = spawnSync('tmux', ['has-session', '-t', realTmux], { timeout: 2000 });
     if (hasSession.status !== 0) {
-      if (hasSession.status === 1) {
-        try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+      if (hasSession.status === 1 && !safeRmSync(dir)) {
+        log('warn', 'recovery skipped unsafe rm target', { dir });
       }
       // status 2+ (tmux error) or signal — skip, don't delete
       continue;
@@ -355,7 +378,10 @@ function createApp() {
 
   const tlsOptions = TLS_ENABLED ? { key: fs.readFileSync(KEY_FILE), cert: fs.readFileSync(CERT_FILE) } : null;
   const httpServer = tlsOptions ? https.createServer(tlsOptions, app) : http.createServer(app);
-  const wss = new WebSocketServer({ server: httpServer });
+  const wss = new WebSocketServer({
+    server: httpServer,
+    verifyClient: originAllowed,
+  });
   wss.on('error', (err) => console.error('WebSocketServer error:', err.message));
 
   // Keepalive: ping all clients every 30s, terminate if no pong by next interval.

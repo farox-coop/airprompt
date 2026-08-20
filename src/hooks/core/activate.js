@@ -14,6 +14,7 @@ const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 
 const { resolveInstallDir, sessionsRootDir, sessionDir } = require('../../providers/provider');
+const { safeRmSync } = require('../../utils');
 const { post, put, get, detectTls, resolvePort, stateDir } = require('./shared');
 
 // ── TLS cert auto-generation ──────────────────────────────────────────────
@@ -158,7 +159,7 @@ async function sweepDeadSessions(sessionsDir, port, tls) {
           await post('/api/sessions/unregister', { sessionId: sid }, port, tls);
         }
       } catch (_) {}
-      try { fs.rmSync(full, { recursive: true, force: true }); } catch (_) {}
+      safeRmSync(full);
     }
   }
 }

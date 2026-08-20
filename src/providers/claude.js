@@ -17,6 +17,7 @@ const os = require('os');
 const { spawnSync } = require('child_process');
 
 const { resolveInstallDir } = require('./provider');
+const { safeRmSync } = require('../utils');
 
 // Lazy-loaded — only needed during install/uninstall, not hook execution
 let SETTINGS, H;
@@ -615,9 +616,7 @@ const ClaudeProvider = {
             // Only remove claude- prefixed session dirs — other providers live here too
             if (!entry.startsWith('claude-')) continue;
             const p = path.join(sessionsDir, entry);
-            if (fs.statSync(p).isDirectory()) {
-              fs.rmSync(p, { recursive: true, force: true });
-            }
+            if (fs.statSync(p).isDirectory()) safeRmSync(p);
           }
           fs.rmdirSync(sessionsDir);
         } catch (_) {}
@@ -632,7 +631,7 @@ const ClaudeProvider = {
         try {
           for (const entry of fs.readdirSync(targetDir)) {
             if (entry === 'state') continue;  // preserve user data
-            fs.rmSync(path.join(targetDir, entry), { recursive: true, force: true });
+            safeRmSync(path.join(targetDir, entry));
           }
         } catch (_) {}
       }

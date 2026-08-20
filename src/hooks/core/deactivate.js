@@ -12,6 +12,7 @@ const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
 const { sessionsRootDir } = require('../../providers/provider');
+const { safeRmSync } = require('../../utils');
 const { post, get, detectTls, resolvePort } = require('./shared');
 
 // ── Tmux resolution ──────────────────────────────────────────────────────
@@ -181,9 +182,7 @@ async function deactivateSession(ctx) {
   }
 
   // 4. Remove per-session directory
-  if (myDir) {
-    try { fs.rmSync(myDir, { recursive: true, force: true }); } catch (_) {}
-  }
+  if (myDir) safeRmSync(myDir);
 
   // 5. Stop daemon if zero sessions remain
   try {

@@ -436,6 +436,38 @@ test('WS receives session_list on connect', (t, done) => {
   ws.on('error', (e) => { assert.fail(`WS error: ${e.message}`); });
 });
 
+test('WS accepts same-origin (localhost) upgrade', (t, done) => {
+  const ws = new WebSocket(`ws://localhost:${port}`, { origin: `http://localhost:${port}` });
+  ws.on('open', () => { ws.close(); done(); });
+  ws.on('error', (e) => { assert.fail(`same-origin upgrade rejected: ${e.message}`); });
+});
+
+test('WS rejects cross-origin upgrade', () => {
+  const ws = new WebSocket(`ws://localhost:${port}`, { origin: 'https://evil.example' });
+  return new Promise((resolve, reject) => {
+    ws.on('open', () => { ws.close(); reject(new Error('cross-origin upgrade should have been rejected')); });
+    ws.on('error', () => resolve()); // expected: server aborts handshake (401)
+  });
+});
+
+test('WS rejects local content on a different port (CSWSH)', () => {
+  // A page served from http://localhost:9999 shares the allowlisted host but a
+  // different port; it must NOT be able to drive the terminal.
+  const ws = new WebSocket(`ws://localhost:${port}`, { origin: 'http://localhost:9999' });
+  return new Promise((resolve, reject) => {
+    ws.on('open', () => { ws.close(); reject(new Error('same-host different-port upgrade should have been rejected')); });
+    ws.on('error', () => resolve());
+  });
+});
+
+test('WS rejects malformed Origin header', () => {
+  const ws = new WebSocket(`ws://localhost:${port}`, { origin: 'not-a-url' });
+  return new Promise((resolve, reject) => {
+    ws.on('open', () => { ws.close(); reject(new Error('malformed origin should have been rejected')); });
+    ws.on('error', () => resolve());
+  });
+});
+
 test('WS list_sessions request returns session_list', { skip: !TMUX_AVAILABLE }, (t, done) => {
   createTmux('airprompt-test-wslist');
   post('/api/sessions/register', { sessionId: 'test-wslist', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
