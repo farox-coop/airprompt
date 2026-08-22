@@ -28,16 +28,7 @@
 
 ### Stage 1.1 — Security hardening
 
-- **Commit message:** `feat(security): auth token, WS origin check, node rm guard`
-
-Addresses report blockers #1 and #2. Must land before any coop member runs the daemon on a shared network.
-
-- Files: `src/server.js`, `src/utils.js` (new), `src/hooks/core/activate.js`, `src/hooks/core/deactivate.js` (+ tests).
-- Scope:
-  - Shared-secret auth token: generate a random token on first daemon start, store it in the state dir (`~/.airprompt/state/token`), print it in the console + QR URL as `https://<IP>:3210/#tok=<token>`; require it on every `/api/*` REST route (401 otherwise) and on the WebSocket (first message or `?tok=`, reject otherwise).
-  - WebSocket Origin check: validate `Origin` on upgrade against an allowlist (LAN IP + `localhost`) to block cross-site WebSocket hijacking.
-  - Node-side `rm -rf` guard: add `isSafeRmTarget()` (canonicalize, require containment under sessions/state dir, require `airprompt` in the path) and gate every `fs.rmSync(dir, { recursive: true })`.
-- Acceptance: unauthenticated REST → 401; WS without token → closed; QR URL carries the token; misconfigured `AIRPROMPT_SESSIONS_DIR=/home` cannot cause deletion; `make test-all` green.
+> **Implementation:** The auth-token piece is redesigned as SSH-style device pairing — detailed in [PLAN - Security hardening.md](<PLAN - Security hardening.md>).
 
 ### Stage 1.2 — Governance + identity
 
@@ -81,7 +72,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 #### Summary
 
-- add shared-secret auth token + WebSocket Origin check so the daemon is no longer an open terminal on the LAN
+- add SSH-style device pairing + WebSocket Origin check so the daemon is no longer an open terminal on the LAN
 - guard Node-side `fs.rmSync` with the same containment rule the shell already enforces
 - add MIT LICENSE and re-home repo identity from `diegomanuel` to `farox-coop`
 - fix the README so a fresh install actually works (installer-first Quick Start, troubleshooting, provider matrix)
@@ -89,8 +80,8 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 #### Tasks
 
-- [ ] auth token + WS origin check (REST 401, WS reject, QR carries token)
-- [ ] node `isSafeRmTarget()` guard on all `fs.rmSync`
+- [x] device pairing + WS origin check (unauthenticated WS closed, QR carries server fingerprint)
+- [x] node `isSafeRmTarget()` guard on all `fs.rmSync`
 - [ ] add LICENSE + re-home identity to `farox-coop`
 - [ ] README install / troubleshooting / env-var / provider matrix
 - [ ] de-advertise unimplemented providers
@@ -100,7 +91,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - no Codex/Cursor/Windsurf adapters yet (Phase 3)
 - no macOS portability work (Phase 3)
 - no CONTRIBUTING/templates (Phase 2)
-- token is a single shared secret printed to the QR; no multi-user auth model
+- no shared secret — the QR carries only a server fingerprint; no multi-user auth model
 
 ---
 
@@ -203,7 +194,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 #### Notes / Out of Scope
 
 - Codex/Cursor/Windsurf adapters are large — consider one PR per provider if needed
-- no multi-user auth model; token stays a single shared secret
+- no multi-user auth model; per-device keypairs, no shared secret
 
 ---
 
@@ -224,7 +215,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 ## Final checklist (one item per stage)
 
-- [ ] 1.1 Security hardening (auth token + WS origin + Node rm guard)
+- [x] 1.1 Security hardening (device pairing + WS origin + Node rm guard)
 - [ ] 1.2 Governance + identity (LICENSE + re-home)
 - [ ] 1.3 Docs + install path (README + statusline badge)
 - [ ] 1.4 Provider scope honesty

@@ -423,3 +423,38 @@ body, html {
   #notify-container { left: auto; width: 360px; }
   #session-list { max-width: 400px; left: auto; right: 0; }
 }
+
+/* ── Auth overlays (pairing + identity) ───────────────────────────── */
+#pairing-overlay, #identity-overlay {
+  display: none; position: fixed; inset: 0; z-index: 700;
+  background: rgba(0,0,0,0.85);
+  align-items: center; justify-content: center; flex-direction: column;
+  padding: 16px;
+}
+#pairing-overlay.open, #identity-overlay.open { display: flex; }
+.overlay-card {
+  background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+  padding: 24px; max-width: 440px; width: 100%;
+  color: #c9d1d9; text-align: center;
+}
+.overlay-card h3 { margin: 0 0 12px; font-size: 18px; color: #f0f6fc; }
+.overlay-card p { margin: 8px 0; font-size: 14px; line-height: 1.5; }
+.overlay-card code { color: #58a6ff; background: #21262d; padding: 2px 6px; border-radius: 4px; }
+.overlay-hint { color: #8b949e; font-size: 12px; }
+.overlay-actions { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+.overlay-actions button {
+  padding: 10px 16px; border-radius: 6px; border: 1px solid #30363d;
+  background: #21262d; color: #c9d1d9; font-size: 14px; cursor: pointer;
+}
+#identity-disconnect { color: #f85149; }
+#identity-repair { color: #58a6ff; }
+
+/* ── Pairing notice (auto-cleaned on allow/deny/expire) ────────────── */
+.pair-notice {
+  background: #161b22; border: 1px solid #d29922; border-radius: 10px;
+  padding: 10px 14px; pointer-events: auto;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  color: #c9d1d9; font-size: 14px;
+  max-width: 480px; margin-left: auto;
+  word-break: break-word;
+}

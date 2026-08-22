@@ -10,6 +10,7 @@ const { spawnSync } = require('child_process');
 const qrcode = require('qrcode-terminal');
 const { tmuxExists, sessionToJSON, getSessionsDir, safeRmSync } = require('./src/utils');
 const { runStaleSweep } = require('./src/sweep');
+const auth = require('./src/auth');
 
 const PORT = process.env.AIRPROMPT_PORT || 3210;
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
@@ -56,11 +57,17 @@ function getLocalIp() {
 // other Origin — a remote site, or a local page on a different port — is
 // rejected. This also keeps hostname (mDNS) and multi-NIC access working,
 // since it checks same-origin rather than a frozen IP list.
+// Loopback (host-internal) addresses. Host-side hooks/CLI reach the REST API
+// via localhost; anything else is a remote device that must be rejected.
+function isLoopback(ip) {
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
 function originAllowed(info) {
   const origin = info.origin;
   // Absent Origin: non-browser client (curl, native ws, some webviews).
   // Browsers always send Origin on WS upgrades — no Origin = no CSWSH vector.
-  // (These clients stay unauthenticated until the shared-secret token lands.)
+  // (These clients stay unauthenticated until the device handshake completes.)
   if (!origin) return true;
   let originHost;
   try {
@@ -79,18 +86,75 @@ function createTmuxSession(sessionName, cwd) {
   } catch (e) { return false; }
 }
 
+// Best-effort desktop notification that a device is awaiting pairing approval.
+// The daemon has no TTY, so this is the passive "popup" on the host. The CLI
+// (`airprompt auth allow <seq>`) remains the universal approval path.
+function notifyPairing(entry) {
+  try {
+    spawnSync('notify-send', [
+      'AirPrompt',
+      `New device "${entry.name}" (seq ${entry.seq}) wants to pair — airprompt auth allow ${entry.seq}`,
+    ], { timeout: 2000 });
+  } catch (_) { /* no desktop notification available — CLI still works */ }
+}
+
 function killTmuxSession(sessionName) {
   try { spawnSync('tmux', ['kill-session', '-t', sessionName], { timeout: 2000 }); } catch (e) { /* ok */ }
 }
 
-function broadcastSessionList(wss) {
-  const list = Array.from(sessions.values()).map(s => sessionToJSON(s));
-  const msg = JSON.stringify({ type: 'session_list', sessions: list });
+// Send a message to every authenticated WS client only (no pre-auth leak).
+function broadcastAuthed(wss, msg) {
   wss.clients.forEach((client) => {
-    if (client.readyState === 1) {
+    if (client.readyState === 1 && client._airpromptAuthed === true) {
       try { client.send(msg); } catch (e) { /* ok */ }
     }
   });
+}
+
+function broadcastSessionList(wss) {
+  const list = Array.from(sessions.values()).map(s => sessionToJSON(s));
+  broadcastAuthed(wss, JSON.stringify({ type: 'session_list', sessions: list }));
+}
+
+// Kill a session (graceful `/airprompt off` → wait → force). Shared by the
+// loopback-only REST route and the authenticated WS `kill_session` message.
+async function killSessionById(sessionId, wss) {
+  const entry = sessions.get(sessionId);
+  if (!entry) return { ok: false, error: 'Session not found' };
+  const tmux = entry.tmuxSession;
+  if (!tmux) {
+    sessions.delete(sessionId);
+    broadcastSessionList(wss);
+    return { ok: true, killed: false, reason: 'no tmux session' };
+  }
+  if (!tmuxExists(tmux)) {
+    sessions.delete(sessionId);
+    broadcastSessionList(wss);
+    return { ok: true, killed: false, reason: 'already dead' };
+  }
+
+  // Phase 1: Graceful — send `/airprompt off` into the tmux session.
+  spawnSync('tmux', ['send-keys', '-t', tmux, '/airprompt off', 'Enter'], { timeout: 2000 });
+
+  // Phase 2: Wait up to 5s for the session to die.
+  const deadline = Date.now() + 5000;
+  let died = false;
+  let wasGraceful = false;
+  while (Date.now() < deadline) {
+    await new Promise(function (r) { setTimeout(r, 300); });
+    if (!tmuxExists(tmux)) { died = true; wasGraceful = true; break; }
+  }
+
+  // Phase 3: If still alive, force kill (airprompt-* only). Non-airprompt
+  // sessions belong to real IDE instances — never kill them.
+  if (!died && tmuxExists(tmux) && tmux.startsWith('airprompt-')) {
+    spawnSync('tmux', ['kill-session', '-t', tmux], { timeout: 2000 });
+    died = true;
+  }
+
+  if (died) sessions.delete(sessionId);
+  broadcastSessionList(wss);
+  return { ok: true, killed: died, graceful: wasGraceful };
 }
 
 function writePid() {
@@ -186,6 +250,16 @@ function createApp() {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     },
   }));
+
+  // Host-internal REST endpoints (sessions + notify) are called only by the
+  // hooks/CLI running on the host via loopback. Restrict them so a rogue LAN
+  // device can't inject/kill sessions or spoof notifications. /api/pair is the
+  // one LAN-reachable surface (pairing requests — request-only, rate-limited).
+  app.use('/api', (req, res, next) => {
+    if (req.path === '/pair' || req.path.startsWith('/pair/')) return next();
+    if (isLoopback(req.socket.remoteAddress || '')) return next();
+    res.status(403).json({ error: 'Forbidden' });
+  });
 
   app.get('/api/sessions', (_req, res) => {
     res.json(Array.from(sessions.values()).map(s => sessionToJSON(s)));
@@ -293,11 +367,7 @@ function createApp() {
     // Broadcast to all connected web clients
     // auto_dismiss: false = user must swipe to dismiss
     const msg = JSON.stringify({ ...input, type: 'notification', auto_dismiss: input.auto_dismiss === true });
-    wss.clients.forEach((client) => {
-      if (client.readyState === 1) {
-        try { client.send(msg); } catch (e) { /* ok */ }
-      }
-    });
+    broadcastAuthed(wss, msg);
     res.json({ ok: true });
   });
 
@@ -305,51 +375,9 @@ function createApp() {
     try {
       const { sessionId } = req.body || {};
       if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
-      const entry = sessions.get(sessionId);
-      if (!entry) return res.status(404).json({ error: 'Session not found' });
-
-      const tmux = entry.tmuxSession;
-      if (!tmux) {
-        sessions.delete(sessionId);
-        broadcastSessionList(wss);
-        return res.json({ ok: true, killed: false, reason: 'no tmux session' });
-      }
-
-      if (!tmuxExists(tmux)) {
-        sessions.delete(sessionId);
-        broadcastSessionList(wss);
-        return res.json({ ok: true, killed: false, reason: 'already dead' });
-      }
-
-      // Phase 1: Graceful — send `/airprompt off` into the tmux session
-      spawnSync('tmux', ['send-keys', '-t', tmux, '/airprompt off', 'Enter'], { timeout: 2000 });
-
-      // Phase 2: Wait up to 5s for session to die
-      const deadline = Date.now() + 5000;
-      let died = false;
-      let wasGraceful = false;
-      while (Date.now() < deadline) {
-        await new Promise(function (r) { setTimeout(r, 300); });
-        if (!tmuxExists(tmux)) { died = true; wasGraceful = true; break; }
-      }
-
-      // Phase 3: If still alive, force kill (airprompt-* only)
-      if (!died && tmuxExists(tmux)) {
-        if (tmux.startsWith('airprompt-')) {
-          spawnSync('tmux', ['kill-session', '-t', tmux], { timeout: 2000 });
-          died = true;
-          // wasGraceful stays false — this was a force kill
-        }
-        // Non-airprompt sessions belong to real IDE instances — never kill them.
-        // Leave the entry intact; the stale interval will clean up when
-        // the IDE eventually exits.
-      }
-
-      if (died) {
-        sessions.delete(sessionId);
-      }
-      broadcastSessionList(wss);
-      res.json({ ok: true, killed: died, graceful: wasGraceful });
+      const result = await killSessionById(sessionId, wss);
+      if (!result.ok) return res.status(404).json(result);
+      res.json(result);
     } catch (err) {
       log('error', 'session kill failed', { sessionId: req.body && req.body.sessionId, error: err.message });
       res.status(500).json({ error: 'Internal server error' });
@@ -376,11 +404,52 @@ function createApp() {
     res.json({ ok: true, name: entry.name });
   });
 
+  // ── Device pairing ─────────────────────────────────────────────────────
+  // The ONLY LAN-reachable REST surface. A request here only ever ADDS to the
+  // pending list — approval happens on the trusted host filesystem via
+  // `airprompt auth allow <seq>`. Never grants directly (that would let a
+  // rogue device approve itself).
+  app.post('/api/pair', (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    if (!auth.checkPairRate(ip)) {
+      return res.status(429).json({ error: 'Too many pairing attempts' });
+    }
+    const { publicKey, name } = req.body || {};
+    if (typeof publicKey !== 'string' || !publicKey || publicKey.length > 2048) {
+      return res.status(400).json({ error: 'Invalid publicKey' });
+    }
+    if (!auth.isValidPublicKey(publicKey)) {
+      return res.status(400).json({ error: 'Invalid publicKey' });
+    }
+    if (auth.deviceByPublicKey(publicKey)) {
+      return res.json({ status: 'paired' });
+    }
+    // Only fire the desktop notification for a genuinely NEW request — a reload
+    // that re-POSTs the same key refreshes TTL and must not re-notify.
+    const wasPending = !!auth.pendingByPublicKey(publicKey);
+    const entry = auth.addPending(publicKey, name, ip); // addPending sanitizes the name
+    if (!entry) {
+      return res.status(429).json({ error: 'Too many pending pairing requests' });
+    }
+    if (!wasPending) {
+      log('info', 'pairing request', { seq: entry.seq, name: entry.name, fingerprint: entry.fingerprint });
+      notifyPairing(entry);
+    }
+    res.status(202).json({ status: 'pending', seq: entry.seq, requestId: entry.id });
+  });
+
+  app.get('/api/pair/:id', (req, res) => {
+    res.json({ status: auth.pendingStatus(req.params.id) });
+  });
+
   const tlsOptions = TLS_ENABLED ? { key: fs.readFileSync(KEY_FILE), cert: fs.readFileSync(CERT_FILE) } : null;
   const httpServer = tlsOptions ? https.createServer(tlsOptions, app) : http.createServer(app);
   const wss = new WebSocketServer({
     server: httpServer,
     verifyClient: originAllowed,
+    // Legit messages are tiny (input ≤64KiB, hello key ≤2KiB, auth sig ~96B) —
+    // cap the frame size so a rogue can't push a 100MiB (default) frame and OOM.
+    maxPayload: 1 << 20,
   });
   wss.on('error', (err) => console.error('WebSocketServer error:', err.message));
 
@@ -401,10 +470,36 @@ function createApp() {
     client.on('pong', () => { client._airprompt_alive = true; });
   });
   httpServer.on('close', () => clearInterval(keepaliveInterval));
+  keepaliveInterval.unref();  // server background timer — must not hold the process open
+
+  const _wsConnByIp = new Map(); // remoteAddress -> open connection count
 
   wss.on('connection', (ws) => {
+    // Cap concurrent sockets — a rogue can open unbounded connections (no auth
+    // needed), each holding buffers/fds until the handshake times out.
+    if (wss.clients.size > 32) {
+      // The rejected socket can still emit 'error' (malformed frame) before it
+      // fully closes; without a listener that throws and kills the daemon.
+      ws.on('error', () => {});
+      ws.terminate();  // not close(): a non-responsive peer would linger in CLOSING and defeat the cap
+      return;
+    }
+
+    // Per-IP connection cap — one device can't monopolize the global slots by
+    // reconnecting in a loop (a single LAN attacker could otherwise hold all 32).
+    const wsIp = (ws._socket && ws._socket.remoteAddress) || 'unknown';
+    if ((_wsConnByIp.get(wsIp) || 0) >= 8) {
+      ws.on('error', () => {});
+      ws.terminate();  // not close(): a non-responsive peer would linger in CLOSING and defeat the cap
+      return;
+    }
+    _wsConnByIp.set(wsIp, (_wsConnByIp.get(wsIp) || 0) + 1);
+
     let ptyProcess = null;
     let activeSessionId = null;
+    let authed = false;            // set true once the handshake verifies
+    let _authPublicKey = null;     // device pubkey awaiting `auth` reply
+    let _authNonce = null;         // server nonce the device must sign
     const clientId = Math.random().toString(36).slice(2, 8);
     let _inputQueue = [];       // buffer input arriving before PTY is spawned
     let _inputQueueBytes = 0;   // total bytes in _inputQueue
@@ -414,10 +509,20 @@ function createApp() {
 
     ws.on('error', (e) => { log('warn', 'ws client error', { clientId, error: e.message }); });
 
-    ws.send(JSON.stringify({
-      type: 'session_list',
-      sessions: Array.from(sessions.values()).map(s => sessionToJSON(s)),
-    }));
+    // Close silent sockets that never complete the handshake. Acceptance:
+    // unauthenticated WS → closed. The browser client reconnects + handshakes
+    // in well under this window.
+    const authTimeout = setTimeout(() => {
+      if (!authed) {
+        try { ws.send(JSON.stringify({ type: 'auth_error', reason: 'timeout' })); } catch (_) {}
+        // terminate() not close(): a non-responsive peer never completes a
+        // graceful close, so close() would leave the slot stuck in CLOSING.
+        ws.terminate();
+      }
+    }, 5000);
+    authTimeout.unref();  // per-connection timeout — must not hold the process open
+
+    // No session_list on connect — the handshake must complete first.
 
     function spawnPty(sessionId) {
       // Capture old pty reference before killing — its onExit/onData
@@ -514,7 +619,78 @@ function createApp() {
         return;
       }
 
+      // Only the handshake messages are accepted before authentication.
+      // Anything else from an unauthenticated socket is rejected + closed.
+      if (!authed && msg.type !== 'hello' && msg.type !== 'auth') {
+        ws.send(JSON.stringify({ type: 'auth_error', reason: 'unauthorized' }));
+        ws.close();
+        return;
+      }
+
       switch (msg.type) {
+        case 'hello': {
+          // Mutual challenge-response, step 1: the device presents its public
+          // key; if whitelisted, the server replies with its own key + a
+          // signature over BOTH nonces (server identity, bound to this
+          // connection — not a free signing oracle over arbitrary input).
+          if (authed || typeof msg.publicKey !== 'string' || msg.publicKey.length > 2048
+            || typeof msg.nonce !== 'string' || msg.nonce.length > 256) {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'bad_hello' }));
+            ws.close();
+            break;
+          }
+          if (!auth.deviceByPublicKey(msg.publicKey)) {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'unauthorized' }));
+            ws.close();
+            break;
+          }
+          const serverKey = auth.loadOrCreateServerKey();
+          const serverNonce = auth.generateNonce();
+          _authPublicKey = msg.publicKey;
+          _authNonce = serverNonce;
+          ws.send(JSON.stringify({
+            type: 'challenge',
+            serverPublicKey: serverKey.publicKeyDer.toString('base64'),
+            nonce: serverNonce,
+            signature: auth.signNonce(serverNonce + msg.nonce, serverKey.privateKey),
+          }));
+          break;
+        }
+        case 'auth': {
+          // Step 2: the device signs the server's nonce; verify and grant.
+          if (authed || typeof msg.signature !== 'string' || msg.signature.length > 512
+            || !_authNonce || !_authPublicKey) {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'bad_auth' }));
+            ws.close();
+            break;
+          }
+          // Re-check the whitelist — the device may have been revoked in the
+          // brief window between `hello` and `auth`. Capture the canonical key
+          // so revoke detection compares canonical-to-canonical.
+          const dev = auth.deviceByPublicKey(_authPublicKey);
+          if (!dev) {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'unauthorized' }));
+            ws.close();
+            break;
+          }
+          if (auth.verifyNonce(_authNonce, msg.signature, _authPublicKey)) {
+            authed = true;
+            ws._airpromptAuthed = true;  // unlock broadcasts (session_list/notify)
+            ws._airpromptPublicKey = dev.publicKey;  // canonical — so revoke can close this socket
+            clearTimeout(authTimeout);
+            auth.markDeviceSeen(_authPublicKey);
+            ws.send(JSON.stringify({ type: 'auth_ok' }));
+            ws.send(JSON.stringify({
+              type: 'session_list',
+              sessions: Array.from(sessions.values()).map(s => sessionToJSON(s)),
+            }));
+            log('info', 'ws client authenticated', { clientId });
+          } else {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'bad_auth' }));
+            ws.close();
+          }
+          break;
+        }
         case 'ping': break;  // keepalive ack — no action needed
         case 'debug':
           log('debug', '[client] ' + (msg.msg || ''), { level: msg.level, extra: msg.extra });
@@ -556,6 +732,16 @@ function createApp() {
           if (msg.sessionId && sessions.has(msg.sessionId)) spawnPty(msg.sessionId);
           else ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
           break;
+        case 'kill_session':
+          // The browser kills over the authenticated WS (REST is loopback-only).
+          if (typeof msg.sessionId === 'string') {
+            killSessionById(msg.sessionId, wss).then((result) => {
+              if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'kill_result', sessionId: msg.sessionId, ...result }));
+            }).catch((err) => {
+              if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'kill_result', sessionId: msg.sessionId, ok: false, error: err.message }));
+            });
+          }
+          break;
         case 'resize':
           if (ptyProcess && typeof msg.cols === 'number' && typeof msg.rows === 'number'
             && msg.cols > 0 && msg.cols <= 500 && msg.rows > 0 && msg.rows <= 200) {
@@ -566,7 +752,9 @@ function createApp() {
           break;
         case 'list_sessions': broadcastSessionList(wss); break;
         case 'copy_buffer':
-          if (msg.data) {
+          // Cap the string (mirrors the client's 128KiB cap) — a rogue paired
+          // client shouldn't drive a 1MiB tmux load-buffer either.
+          if (typeof msg.data === 'string' && msg.data.length > 0 && msg.data.length <= 128 * 1024) {
             try {
               spawnSync('tmux', ['load-buffer', '-'], { input: msg.data, encoding: 'utf8', timeout: 2000 });
             } catch (e) { /* ok */ }
@@ -586,6 +774,9 @@ function createApp() {
     });
 
     ws.on('close', () => {
+      const n = (_wsConnByIp.get(wsIp) || 0) - 1;
+      if (n <= 0) _wsConnByIp.delete(wsIp); else _wsConnByIp.set(wsIp, n);
+      clearTimeout(authTimeout);
       log('info', 'ws client disconnected', { clientId, activeSessionId });
       _inputQueue = []; _inputQueueBytes = 0;  // discard queued input
       if (ptyProcess) {
@@ -606,10 +797,49 @@ function createApp() {
   httpServer.on('close', () => clearInterval(staleInterval));
   staleInterval.unref();
 
+  // Push pairing-request lifecycle to authenticated web clients so their
+  // "wants to pair" notices appear (pair_request) and auto-clean on
+  // allow/deny/expire (pair_resolved). The CLI resolves on the filesystem
+  // (disk is the source of truth), so we poll for both appearance and removal.
+  const PAIR_POLL_MS = parseInt(process.env.AIRPROMPT_PAIR_POLL_MS || '2000', 10);
+  let _knownPendingIds = new Set(auth.listPending().map((p) => p.id));
+  const pairInterval = setInterval(() => {
+    const pending = auth.listPending(); // evicts expired
+    const current = new Map(pending.map((p) => [p.id, p]));
+    const currentIds = new Set(current.keys());
+    const devices = auth.listDevices();
+    for (const [id, p] of current) {
+      if (!_knownPendingIds.has(id)) {
+        broadcastAuthed(wss, JSON.stringify({
+          type: 'pair_request', id, seq: p.seq, name: p.name, fingerprint: p.fingerprint,
+        }));
+      }
+    }
+    for (const id of _knownPendingIds) {
+      if (!currentIds.has(id)) {
+        const status = devices.some((d) => d.id === id) ? 'allowed' : 'closed';
+        broadcastAuthed(wss, JSON.stringify({ type: 'pair_resolved', id, status }));
+      }
+    }
+    _knownPendingIds = currentIds;
+
+    // Revoked devices: drop their live sockets so `auth revoke` takes effect
+    // immediately. Direct per-socket check (not a delta over prior snapshots),
+    // so a device added+revoked within one poll window is still caught.
+    const deviceKeys = new Set(devices.map((d) => d.publicKey));
+    for (const client of wss.clients) {
+      if (client._airpromptAuthed && client._airpromptPublicKey && !deviceKeys.has(client._airpromptPublicKey)) {
+        try { client.close(4001, 'device revoked'); } catch (_) {}
+      }
+    }
+  }, PAIR_POLL_MS);
+  httpServer.on('close', () => clearInterval(pairInterval));
+  pairInterval.unref();
+
   return { app, httpServer, wss, tlsOptions };
 }
 
-module.exports = { createApp, sessions };
+module.exports = { createApp, sessions, isLoopback };
 
 if (require.main === module) {
   try {
@@ -631,9 +861,11 @@ if (require.main === module) {
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     const lanIp = getLocalIp();
-    const url = `${tls ? 'https' : 'http'}://${lanIp}:${PORT}`;
+    const serverKey = auth.loadOrCreateServerKey();
+    const url = `${tls ? 'https' : 'http'}://${lanIp}:${PORT}/#fp=${serverKey.fingerprint}`;
     console.log('\n' + '='.repeat(50));
     console.log(`AirPrompt Server running at: ${url}`);
+    console.log(`Server fingerprint: ${serverKey.fingerprint}`);
     if (tls) console.log('TLS: self-signed (accept warning on first connect)');
     console.log('='.repeat(50) + '\n');
     qrcode.generate(url, { small: true });

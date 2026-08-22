@@ -3,12 +3,17 @@ process.env.AIRPROMPT_NO_TLS = '1';
 
 const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert');
+const crypto = require('crypto');
 const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { execSync, spawnSync } = require('child_process');
 const WebSocket = require('ws');
 
-const { createApp, sessions } = require('../../server');
+const { createApp, sessions, isLoopback } = require('../../server');
 const { runStaleSweep } = require('../../src/sweep');
+const auth = require('../../src/auth');
 
 const TEST_PROVIDER = "test-prov";
 
@@ -17,6 +22,7 @@ const TMUX_AVAILABLE = (() => {
 })();
 
 let server;
+let wss;
 let port;
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -66,15 +72,69 @@ function killTmux(name) {
 
 // ── Setup / Teardown ────────────────────────────────────────────────
 
+let TEST_STATE_DIR;
+let TEST_DEVICE; // pre-authorized device { publicKeyB64, privateKey, seq }
+
+// Generate + whitelist a device keypair (simulates host `airprompt auth allow`).
+function makeDevice(name) {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const publicKeyB64 = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  const entry = auth.addPending(publicKeyB64, name);
+  auth.allowBySeq(entry.seq);
+  return { publicKeyB64, privateKey, seq: entry.seq };
+}
+
+// Connect + authenticate. Resolves with { ws, sessions } after the handshake
+// completes and the first session_list arrives (i.e. the client is authed).
+function connectAuthed() {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    const clientNonce = crypto.randomBytes(32).toString('base64');
+    ws.on('message', (raw) => {
+      let msg; try { msg = JSON.parse(raw.toString()); } catch (_) { return; }
+      if (msg.type === 'challenge') {
+        // Verify the server's mutual-auth signature over serverNonce + clientNonce.
+        const serverKey = crypto.createPublicKey({ key: Buffer.from(msg.serverPublicKey, 'base64'), format: 'der', type: 'spki' });
+        const serverOk = crypto.verify('sha256', Buffer.from(msg.nonce + clientNonce, 'utf8'), {
+          key: serverKey, dsaEncoding: 'ieee-p1363',
+        }, Buffer.from(msg.signature, 'base64'));
+        if (!serverOk) { reject(new Error('server signature invalid')); ws.close(); return; }
+        const sig = crypto.sign('sha256', Buffer.from(msg.nonce, 'utf8'), {
+          key: TEST_DEVICE.privateKey, dsaEncoding: 'ieee-p1363',
+        });
+        ws.send(JSON.stringify({ type: 'auth', signature: sig.toString('base64') }));
+      } else if (msg.type === 'auth_error') {
+        reject(new Error('auth_error: ' + msg.reason));
+      } else if (msg.type === 'session_list') {
+        resolve({ ws, sessions: msg.sessions });
+      }
+    });
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ type: 'hello', publicKey: TEST_DEVICE.publicKeyB64, nonce: clientNonce }));
+    });
+  });
+}
+
 before(async () => {
-  const { httpServer } = createApp();
+  TEST_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-auth-test-'));
+  process.env.AIRPROMPT_STATE_DIR = TEST_STATE_DIR;
+  process.env.AIRPROMPT_PAIR_POLL_MS = '100'; // fast pairing-resolution poll in tests
+  const { httpServer, wss: wssRef } = createApp();
   server = httpServer;
+  wss = wssRef;
   await new Promise((resolve) => server.listen(0, resolve));
   port = server.address().port;
+  TEST_DEVICE = makeDevice('test-device');
 });
 
 after(() => {
+  // Force-close any lingering WS clients so server.close() can complete —
+  // otherwise a non-drained socket holds the node --test process open.
+  for (const client of wss.clients) { try { client.terminate(); } catch (_) {} }
   server.close();
+  delete process.env.AIRPROMPT_STATE_DIR;
+  delete process.env.AIRPROMPT_PAIR_POLL_MS;
+  try { fs.rmSync(TEST_STATE_DIR, { recursive: true, force: true }); } catch (_) {}
 });
 
 beforeEach(() => {
@@ -82,6 +142,16 @@ beforeEach(() => {
 });
 
 // ── REST API tests ──────────────────────────────────────────────────
+
+test('isLoopback accepts loopback and rejects LAN/public IPs', () => {
+  assert.strictEqual(isLoopback('127.0.0.1'), true);
+  assert.strictEqual(isLoopback('::1'), true);
+  assert.strictEqual(isLoopback('::ffff:127.0.0.1'), true);
+  assert.strictEqual(isLoopback('192.168.0.5'), false);
+  assert.strictEqual(isLoopback('10.0.0.1'), false);
+  assert.strictEqual(isLoopback('8.8.8.8'), false);
+  assert.strictEqual(isLoopback(''), false);
+});
 
 test('POST /api/sessions/register creates session', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-reg1');
@@ -424,16 +494,120 @@ test('GET /api/sessions returns name field', { skip: !TMUX_AVAILABLE }, async ()
 
 // ── WebSocket tests ─────────────────────────────────────────────────
 
-test('WS receives session_list on connect', (t, done) => {
-  const ws = new WebSocket(`ws://localhost:${port}`);
+test('WS receives session_list after auth', async () => {
+  const { ws, sessions } = await connectAuthed();
+  assert.ok(Array.isArray(sessions));
+  ws.close();
+});
+
+test('WS rejects unauthenticated clients (no session_list, no PTY)', () => {
+  // A raw client that never completes the handshake must receive nothing
+  // usable and be closed by the server.
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    let sawList = false;
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'session_list') sawList = true;
+    });
+    ws.on('open', () => {
+      // Send a non-handshake message immediately — server should ignore it.
+      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'whatever' }));
+      setTimeout(() => { ws.close(); resolve(); }, 300);
+    });
+    ws.on('error', reject);
+    ws.on('close', () => { assert.strictEqual(sawList, false, 'no session_list before auth'); });
+  });
+});
+
+test('daemon survives a malformed frame on a cap-rejected socket', async () => {
+  // Open sockets until the connection caps reject one (per-IP cap of 8, since
+  // all sockets share localhost's remoteAddress). A malformed frame on that
+  // rejected socket must NOT crash the daemon.
+  const sockets = [];
+  for (let i = 0; i < 32; i++) {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    sockets.push(ws);
+    await new Promise((r) => ws.once('open', r));
+  }
+  const ws33 = new WebSocket(`ws://localhost:${port}`);
+  await new Promise((r) => ws33.once('open', r));
+  sockets.push(ws33);
+  try { ws33._socket.write(Buffer.from([0x81, 0x01, 0x41])); } catch (_) {} // FIN+text, no MASK bit
+  await new Promise((r) => setTimeout(r, 300));
+  const res = await get('/api/sessions');
+  assert.strictEqual(res.status, 200, 'daemon should still respond after the malformed frame');
+  for (const ws of sockets) { try { ws.close(); } catch (_) {} }
+});
+
+test('unauthenticated WS does not receive session_list broadcasts', { skip: !TMUX_AVAILABLE }, async () => {
+  // A raw (unauth) client must not get session_list pushed when a session is
+  // registered by another actor — no pre-auth leak.
+  createTmux('airprompt-test-broadcast');
+  const rawWs = new WebSocket(`ws://localhost:${port}`);
+  let leaked = false;
+  rawWs.on('message', (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type === 'session_list') leaked = true;
+  });
+  await new Promise((r) => rawWs.on('open', r));
+  await post('/api/sessions/register', { sessionId: 'test-broadcast', cwd: '/tmp', providerId: TEST_PROVIDER });
+  await new Promise((r) => setTimeout(r, 300));
+  rawWs.close();
+  killTmux('airprompt-test-broadcast');
+  assert.strictEqual(leaked, false, 'session_list must not leak to unauthenticated sockets');
+});
+
+// ── Device pairing API ────────────────────────────────────────────────
+
+function pairKey() {
+  const { publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  return publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+}
+
+test('POST /api/pair accepts a valid P-256 key → 202 pending', async () => {
+  const res = await post('/api/pair', { publicKey: pairKey(), name: 'test-phone' });
+  assert.strictEqual(res.status, 202);
+  assert.strictEqual(res.body.status, 'pending');
+  assert.ok(res.body.seq >= 1);
+  assert.ok(res.body.requestId);
+  auth.denyBySeq(res.body.seq); // clean up so later pair tests aren't capped per-IP
+});
+
+test('POST /api/pair rejects a junk publicKey → 400', async () => {
+  const res = await post('/api/pair', { publicKey: 'not-a-key' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('GET /api/pair/:id reports pending status', async () => {
+  const res = await post('/api/pair', { publicKey: pairKey(), name: 'status-test' });
+  const statusRes = await get(`/api/pair/${res.body.requestId}`);
+  assert.strictEqual(statusRes.status, 200);
+  assert.strictEqual(statusRes.body.status, 'pending');
+  auth.denyBySeq(res.body.seq); // clean up so later pair tests aren't capped per-IP
+});
+
+test('WS receives pair_request, then pair_resolved after allow', async () => {
+  const { ws } = await connectAuthed();
+  const received = [];
   ws.on('message', (raw) => {
     const msg = JSON.parse(raw.toString());
-    assert.strictEqual(msg.type, 'session_list');
-    assert.ok(Array.isArray(msg.sessions));
-    ws.close();
-    done();
+    if (msg.type === 'pair_request' || msg.type === 'pair_resolved') received.push(msg);
   });
-  ws.on('error', (e) => { assert.fail(`WS error: ${e.message}`); });
+  const res = await post('/api/pair', { publicKey: pairKey(), name: 'test-pair' });
+  assert.strictEqual(res.status, 202);
+  await new Promise((r) => setTimeout(r, 200));
+  const req = received.find((m) => m.type === 'pair_request' && m.id === res.body.requestId);
+  assert.ok(req, 'pair_request should be broadcast to authenticated clients');
+  assert.strictEqual(req.seq, res.body.seq);
+  // Resolve on the filesystem (simulating `airprompt auth allow`).
+  auth.allowBySeq(res.body.seq);
+  await new Promise((r) => setTimeout(r, 300));
+  const resolved = received.find((m) => m.type === 'pair_resolved' && m.id === res.body.requestId);
+  assert.ok(resolved, 'pair_resolved should be broadcast after allow');
+  assert.strictEqual(resolved.id, res.body.requestId);
+  assert.strictEqual(resolved.status, 'allowed');
+  ws.close();
 });
 
 test('WS accepts same-origin (localhost) upgrade', (t, done) => {
@@ -468,217 +642,137 @@ test('WS rejects malformed Origin header', () => {
   });
 });
 
-test('WS list_sessions request returns session_list', { skip: !TMUX_AVAILABLE }, (t, done) => {
+test('WS list_sessions request returns session_list', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-wslist');
-  post('/api/sessions/register', { sessionId: 'test-wslist', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
-    const ws = new WebSocket(`ws://localhost:${port}`);
+  await post('/api/sessions/register', { sessionId: 'test-wslist', cwd: '/tmp', providerId: TEST_PROVIDER });
+  const { ws } = await connectAuthed();
+  const found = await new Promise((resolve) => {
+    const to = setTimeout(() => resolve(false), 2000);
     ws.on('message', (raw) => {
       const msg = JSON.parse(raw.toString());
-      // First message is auto-sent on connect
-      // After sending list_sessions, we get another one
-      if (msg.type === 'session_list') {
-        if (msg.sessions.some((s) => s.id === 'test-wslist')) {
-          ws.close();
-          killTmux('airprompt-test-wslist');
-          done();
-        }
+      if (msg.type === 'session_list' && msg.sessions.some((s) => s.id === 'test-wslist')) {
+        clearTimeout(to); resolve(true);
       }
     });
-    ws.on('open', () => ws.send(JSON.stringify({ type: 'list_sessions' })));
+    ws.send(JSON.stringify({ type: 'list_sessions' }));
   });
+  ws.close(); killTmux('airprompt-test-wslist');
+  assert.ok(found, 'list_sessions should return the registered session');
 });
 
-test('WS input echoes back via pty', { skip: !TMUX_AVAILABLE }, (t, done) => {
+test('WS input echoes back via pty', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-wsinput');
-  post('/api/sessions/register', { sessionId: 'test-wsinput', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
-    const ws = new WebSocket(`ws://localhost:${port}`);
-    ws.on('open', () => ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-wsinput' })));
-    // Send input after switching
-    setTimeout(() => {
-      ws.send(JSON.stringify({ type: 'input', data: 'echo hello\r' }));
-      // Check we get output back
-      let gotOutput = false;
-      ws.on('message', (raw) => {
-        const msg = JSON.parse(raw.toString());
-        if (msg.type === 'output') {
-          gotOutput = true;
-        }
-      });
-      setTimeout(() => {
-        ws.close();
-        killTmux('airprompt-test-wsinput');
-        assert.ok(gotOutput);
-        done();
-      }, 500);
-    }, 200);
-  });
-});
-
-test('WS switch_session for unknown id returns error', (t, done) => {
-  const ws = new WebSocket(`ws://localhost:${port}`);
-  ws.on('open', () => {
-    ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'nonexistent' }));
-  });
+  await post('/api/sessions/register', { sessionId: 'test-wsinput', cwd: '/tmp', providerId: TEST_PROVIDER });
+  const { ws } = await connectAuthed();
+  let gotOutput = false;
   ws.on('message', (raw) => {
     const msg = JSON.parse(raw.toString());
-    if (msg.type === 'session_list') return; // skip auto-sent
-    if (msg.type === 'error') {
-      assert.ok(msg.message);
-      ws.close();
-      done();
-    }
+    if (msg.type === 'output') gotOutput = true;
   });
+  ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-wsinput' }));
+  await new Promise((r) => setTimeout(r, 300));
+  ws.send(JSON.stringify({ type: 'input', data: 'echo hello\r' }));
+  await new Promise((r) => setTimeout(r, 500));
+  ws.close(); killTmux('airprompt-test-wsinput');
+  assert.ok(gotOutput, 'pty should echo back input');
+});
+
+test('WS switch_session for unknown id returns error', async () => {
+  const { ws } = await connectAuthed();
+  const err = await new Promise((resolve) => {
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'error') resolve(msg.message);
+    });
+    ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'nonexistent' }));
+  });
+  ws.close();
+  assert.ok(err, 'should get an error for unknown session');
 });
 
 // ── Server-side input queue tests ────────────────────────────────────
 // Input messages arriving before PTY is spawned are buffered in a
 // per-connection _inputQueue and flushed after spawnPty() succeeds.
 
-test('input sent before switch_session is queued and flushed after PTY spawn', { skip: !TMUX_AVAILABLE }, (t, done) => {
+test('input sent before switch_session is queued and flushed after PTY spawn', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-q1');
-  post('/api/sessions/register', { sessionId: 'test-q1', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
-    const ws = new WebSocket(`ws://localhost:${port}`);
-    let gotOutput = false;
-
-    ws.on('open', () => {
-      // Send input BEFORE switch_session — should be queued server-side.
-      // WS frames are ordered by TCP; the input arrives before switch_session.
-      ws.send(JSON.stringify({ type: 'input', data: 'echo q1_before\r' }));
-      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-q1' }));
-    });
-
-    ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === 'session_list') return;
-      if (msg.type === 'output' && msg.data.indexOf('q1_before') !== -1) {
-        gotOutput = true;
-      }
-    });
-
-    setTimeout(() => {
-      ws.close();
-      killTmux('airprompt-test-q1');
-      assert.ok(gotOutput, 'queued input should be flushed and echoed back');
-      done();
-    }, 1500);
+  await post('/api/sessions/register', { sessionId: 'test-q1', cwd: '/tmp', providerId: TEST_PROVIDER });
+  const { ws } = await connectAuthed();
+  let gotOutput = false;
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type === 'output' && msg.data.indexOf('q1_before') !== -1) gotOutput = true;
   });
+  // Input BEFORE switch_session — queued server-side, flushed after PTY spawn.
+  ws.send(JSON.stringify({ type: 'input', data: 'echo q1_before\r' }));
+  ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-q1' }));
+  await new Promise((r) => setTimeout(r, 1500));
+  ws.close(); killTmux('airprompt-test-q1');
+  assert.ok(gotOutput, 'queued input should be flushed and echoed back');
 });
 
-test('input sent after pty_spawned is written directly (not queued)', { skip: !TMUX_AVAILABLE }, (t, done) => {
+test('input sent after pty_spawned is written directly (not queued)', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-q2');
-  post('/api/sessions/register', { sessionId: 'test-q2', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
-    const ws = new WebSocket(`ws://localhost:${port}`);
-    let gotOutput = false;
-
-    ws.on('open', () => {
-      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-q2' }));
-    });
-
-    ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === 'session_list') return;
-      // Wait for pty_spawned confirmation, then send input — deterministic.
-      if (msg.type === 'pty_spawned') {
-        ws.send(JSON.stringify({ type: 'input', data: 'echo q2_direct\r' }));
-      }
-      if (msg.type === 'output' && msg.data.indexOf('q2_direct') !== -1) {
-        gotOutput = true;
-      }
-    });
-
-    setTimeout(() => {
-      ws.close();
-      killTmux('airprompt-test-q2');
-      assert.ok(gotOutput, 'direct input after PTY spawn should be echoed back');
-      done();
-    }, 1500);
+  await post('/api/sessions/register', { sessionId: 'test-q2', cwd: '/tmp', providerId: TEST_PROVIDER });
+  const { ws } = await connectAuthed();
+  let gotOutput = false;
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type === 'pty_spawned') ws.send(JSON.stringify({ type: 'input', data: 'echo q2_direct\r' }));
+    if (msg.type === 'output' && msg.data.indexOf('q2_direct') !== -1) gotOutput = true;
   });
+  ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-q2' }));
+  await new Promise((r) => setTimeout(r, 1500));
+  ws.close(); killTmux('airprompt-test-q2');
+  assert.ok(gotOutput, 'direct input after PTY spawn should be echoed back');
 });
 
-test('input queue capped at 200 messages — excess dropped', { skip: !TMUX_AVAILABLE }, (t, done) => {
+test('input queue capped at 200 messages — excess dropped', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-qcap');
-  post('/api/sessions/register', { sessionId: 'test-qcap', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
-    const ws = new WebSocket(`ws://localhost:${port}`);
-    // Send 250 echo commands BEFORE spawn. Each `echo CAP_NN\r` is a self-
-    // identifying input that echoes its index back. Only 200 should be queued.
-    // After spawn+flush, we check that CAP_199 is echoed but CAP_220 (beyond
-    // cap) never appears.
-    let maxSeen = -1;
-    let seen220 = false;
-
-    ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === 'session_list' || msg.type === 'pty_spawned') return;
-      if (msg.type === 'output') {
-        const m = msg.data.match(/CAP_(\d+)/g);
-        if (m) {
-          m.forEach(function (s) {
-            const n = parseInt(s.slice(4), 10);
-            if (n > maxSeen) maxSeen = n;
-            if (n >= 220) seen220 = true;
-          });
-        }
-      }
-    });
-
-    ws.on('open', () => {
-      // Send 250 inputs; only 200 queued (server cap).
-      for (let i = 0; i < 250; i++) {
-        ws.send(JSON.stringify({ type: 'input', data: 'echo CAP_' + i + '\r' }));
-      }
-      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-qcap' }));
-    });
-
-    setTimeout(() => {
-      assert.ok(maxSeen >= 190, 'at least 190 of 200 queued items should echo back (got max=' + maxSeen + ')');
-      assert.ok(!seen220, 'items beyond cap 200 must be dropped (got CAP_220+)');
-      ws.close();
-      killTmux('airprompt-test-qcap');
-      done();
-    }, 2000);
+  await post('/api/sessions/register', { sessionId: 'test-qcap', cwd: '/tmp', providerId: TEST_PROVIDER });
+  const { ws } = await connectAuthed();
+  let maxSeen = -1;
+  let seen220 = false;
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type !== 'output') return;
+    const m = msg.data.match(/CAP_(\d+)/g);
+    if (m) m.forEach((s) => { const n = parseInt(s.slice(4), 10); if (n > maxSeen) maxSeen = n; if (n >= 220) seen220 = true; });
   });
+  for (let i = 0; i < 250; i++) {
+    ws.send(JSON.stringify({ type: 'input', data: 'echo CAP_' + i + '\r' }));
+  }
+  ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-qcap' }));
+  await new Promise((r) => setTimeout(r, 2000));
+  assert.ok(maxSeen >= 190, 'at least 190 of 200 queued items should echo back (got max=' + maxSeen + ')');
+  assert.ok(!seen220, 'items beyond cap 200 must be dropped (got CAP_220+)');
+  ws.close(); killTmux('airprompt-test-qcap');
 });
 
-test('non-string input data is rejected', { skip: !TMUX_AVAILABLE }, (t, done) => {
+test('non-string input data is rejected', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-qtval');
-  post('/api/sessions/register', { sessionId: 'test-qtval', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
-    const ws = new WebSocket(`ws://localhost:${port}`);
-    ws.on('open', () => {
-      // Should not crash the server
-      ws.send(JSON.stringify({ type: 'input', data: 12345 }));
-      ws.send(JSON.stringify({ type: 'input', data: true }));
-      ws.send(JSON.stringify({ type: 'input', data: null }));
-      // Valid string should still work after non-string rejects
-      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-qtval' }));
-    });
-    setTimeout(() => {
-      assert.ok(ws.readyState === WebSocket.OPEN);  // server didn't crash
-      ws.close();
-      killTmux('airprompt-test-qtval');
-      done();
-    }, 500);
-  });
+  await post('/api/sessions/register', { sessionId: 'test-qtval', cwd: '/tmp', providerId: TEST_PROVIDER });
+  const { ws } = await connectAuthed();
+  ws.send(JSON.stringify({ type: 'input', data: 12345 }));
+  ws.send(JSON.stringify({ type: 'input', data: true }));
+  ws.send(JSON.stringify({ type: 'input', data: null }));
+  ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'test-qtval' }));
+  await new Promise((r) => setTimeout(r, 500));
+  assert.strictEqual(ws.readyState, WebSocket.OPEN);  // server didn't crash
+  ws.close(); killTmux('airprompt-test-qtval');
 });
 
-test('input queue cleared on WS close', { skip: !TMUX_AVAILABLE }, (t, done) => {
+test('input queue cleared on WS close', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-qclose');
-  post('/api/sessions/register', { sessionId: 'test-qclose', cwd: '/tmp' , providerId: TEST_PROVIDER}).then(() => {
-    const ws = new WebSocket(`ws://localhost:${port}`);
-    ws.on('open', () => {
-      ws.send(JSON.stringify({ type: 'input', data: 'orphan input\r' }));
-      setTimeout(() => {
-        // Verify server didn't crash from queued-then-abandoned input.
-        // The queue was in _inputQueue; after close, GC frees it.
-        ws.close();
-      }, 50);
-    });
-    ws.on('close', () => {
-      killTmux('airprompt-test-qclose');
-      // Second connection should work fine — server alive
-      const ws2 = new WebSocket(`ws://localhost:${port}`);
-      ws2.on('open', () => { ws2.close(); done(); });
-    });
-  });
+  await post('/api/sessions/register', { sessionId: 'test-qclose', cwd: '/tmp', providerId: TEST_PROVIDER });
+  const { ws } = await connectAuthed();
+  ws.send(JSON.stringify({ type: 'input', data: 'orphan input\r' }));
+  await new Promise((r) => setTimeout(r, 50));
+  ws.close();
+  killTmux('airprompt-test-qclose');
+  // Second connection should work fine — server alive.
+  const { ws: ws2 } = await connectAuthed();
+  ws2.close();
 });
 
 // ── Deactivate hook guard tests ─────────────────────────────────────
@@ -928,50 +1022,46 @@ test('POST /api/notify returns ok with full payload', async () => {
   assert.strictEqual(res.body.ok, true);
 });
 
-test('WS receives notification broadcast when POST /api/notify is called', (t, done) => {
-  const ws = new WebSocket(`ws://localhost:${port}`);
-  ws.on('message', (raw) => {
-    const msg = JSON.parse(raw.toString());
-    if (msg.type === 'session_list') {
-      post('/api/notify', {
-        notification_type: 'agent_completed',
-        session_id: 'test-notify',
-        cwd: '/tmp',
-        permission_mode: 'default',
-        effort: { level: 'medium' },
-      });
-    } else if (msg.type === 'notification') {
-      assert.strictEqual(msg.notification_type, 'agent_completed');
-      assert.strictEqual(msg.session_id, 'test-notify');
-      assert.strictEqual(msg.cwd, '/tmp');
-      assert.strictEqual(msg.permission_mode, 'default');
-      assert.deepStrictEqual(msg.effort, { level: 'medium' });
-      assert.strictEqual(msg.auto_dismiss, false);  // default: false when not explicitly true
-      ws.close();
-      done();
-    }
+test('WS receives notification broadcast when POST /api/notify is called', async () => {
+  const { ws } = await connectAuthed();
+  const got = await new Promise((resolve) => {
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'notification') resolve(msg);
+    });
+    post('/api/notify', {
+      notification_type: 'agent_completed',
+      session_id: 'test-notify',
+      cwd: '/tmp',
+      permission_mode: 'default',
+      effort: { level: 'medium' },
+    });
   });
-  ws.on('error', (e) => { assert.fail('WS error: ' + e.message); });
+  assert.strictEqual(got.notification_type, 'agent_completed');
+  assert.strictEqual(got.session_id, 'test-notify');
+  assert.strictEqual(got.cwd, '/tmp');
+  assert.strictEqual(got.permission_mode, 'default');
+  assert.deepStrictEqual(got.effort, { level: 'medium' });
+  assert.strictEqual(got.auto_dismiss, false);  // default: false when not explicitly true
+  ws.close();
 });
 
-test('WS receives notification with auto_dismiss:true', (t, done) => {
-  const ws = new WebSocket(`ws://localhost:${port}`);
-  ws.on('message', (raw) => {
-    const msg = JSON.parse(raw.toString());
-    if (msg.type === 'session_list') {
-      post('/api/notify', {
-        notification_type: 'idle_prompt',
-        session_id: 'test-notify2',
-        cwd: '/tmp',
-        auto_dismiss: true,
-      });
-    } else if (msg.type === 'notification') {
-      assert.strictEqual(msg.auto_dismiss, true);
-      ws.close();
-      done();
-    }
+test('WS receives notification with auto_dismiss:true', async () => {
+  const { ws } = await connectAuthed();
+  const got = await new Promise((resolve) => {
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'notification') resolve(msg);
+    });
+    post('/api/notify', {
+      notification_type: 'idle_prompt',
+      session_id: 'test-notify2',
+      cwd: '/tmp',
+      auto_dismiss: true,
+    });
   });
-  ws.on('error', (e) => { assert.fail('WS error: ' + e.message); });
+  assert.strictEqual(got.auto_dismiss, true);
+  ws.close();
 });
 
 // ── Session kill tests ──────────────────────────────────────────────

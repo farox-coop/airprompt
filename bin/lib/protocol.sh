@@ -95,15 +95,19 @@ PROVIDEREOF
 }
 
 # ── Safe rm -rf ─────────────────────────────────────────────────────────
-# Canonicalize path then verify it lives under $HOME/.airprompt/ before
-# allowing rm -rf. Prevents disaster on misconfigured env vars and blocks
-# the trivial `*airprompt*` substring bypass via `..` traversal.
+# Canonicalize path then verify it lives under an AirPrompt-owned root before
+# allowing rm -rf. Prevents disaster on misconfigured env vars and blocks the
+# trivial `*airprompt*` substring bypass via `..` traversal.
+#
+# Roots: $HOME/.airprompt (default install/state/sessions), plus custom
+# AIRPROMPT_INSTALL_DIR / AIRPROMPT_STATE_DIR / AIRPROMPT_SESSIONS_DIR when
+# set — each must contain "airprompt" in its path (blocks /, /home, /tmp).
 #
 # Usage: _safe_rm_rf "/path/to/dir" && echo "ok"
 # Returns 0 (safe, caller should rm -rf) or 1 (blocked, already printed).
 _safe_rm_rf() {
   local path="$1"
-  local canonical
+  local canonical root
 
   # Resolve .. first, then canonicalize. `readlink -f` works on nonexistent
   # paths on GNU; on macOS readlink -f fails on nonexistent, so resolve
@@ -118,17 +122,21 @@ _safe_rm_rf() {
   }
   canonical="${canonical%/}/$(basename "$path")"
 
-  local sessions_dir="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
-  case "$canonical" in
-    "$HOME/.airprompt"|"$HOME/.airprompt/"*) return 0 ;;
-  esac
-  # Custom sessions dir — only allow if path contains "airprompt" AND
-  # is under the configured dir. Prevents catastrophic rm -rf when
-  # AIRPROMPT_SESSIONS_DIR is misconfigured to /, /tmp, or /home.
-  case "$canonical" in
-    "$sessions_dir"|"$sessions_dir/"*) ;;
-    *) echo "  SAFETY: refusing to rm -rf ${path} (canonical: ${canonical})" >&2; return 1 ;;
-  esac
-  case "$sessions_dir" in *airprompt*) return 0 ;; esac
-  echo "  SAFETY: AIRPROMPT_SESSIONS_DIR missing 'airprompt' in path — refusing rm -rf" >&2; return 1
+  # Allowed roots, in priority order. Every root must be clearly
+  # airprompt-owned ("airprompt" in the path) — blocks misconfigured
+  # AIRPROMPT_*_DIR=/ , /home , /tmp from ever passing the guard.
+  for root in \
+    "$HOME/.airprompt" \
+    "${AIRPROMPT_INSTALL_DIR:-}" \
+    "${AIRPROMPT_STATE_DIR:-}" \
+    "${AIRPROMPT_SESSIONS_DIR:-}"; do
+    [ -n "$root" ] || continue
+    case "$root" in *airprompt*) ;; *) continue ;; esac
+    case "$canonical" in
+      "$root"|"$root/"*) return 0 ;;
+    esac
+  done
+
+  echo "  SAFETY: refusing to rm -rf ${path} (canonical: ${canonical})" >&2
+  return 1
 }
