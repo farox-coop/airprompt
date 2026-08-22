@@ -28,16 +28,7 @@
 
 ### Stage 1.1 — Security hardening
 
-- **Commit message:** `feat(security): auth token, WS origin check, node rm guard`
-
-Addresses report blockers #1 and #2. Must land before any coop member runs the daemon on a shared network.
-
-- Files: `src/server.js`, `src/utils.js` (new), `src/hooks/core/activate.js`, `src/hooks/core/deactivate.js` (+ tests).
-- Scope:
-  - Shared-secret auth token: generate a random token on first daemon start, store it in the state dir (`~/.airprompt/state/token`), print it in the console + QR URL as `https://<IP>:3210/#tok=<token>`; require it on every `/api/*` REST route (401 otherwise) and on the WebSocket (first message or `?tok=`, reject otherwise).
-  - WebSocket Origin check: validate `Origin` on upgrade against an allowlist (LAN IP + `localhost`) to block cross-site WebSocket hijacking.
-  - Node-side `rm -rf` guard: add `isSafeRmTarget()` (canonicalize, require containment under sessions/state dir, require `airprompt` in the path) and gate every `fs.rmSync(dir, { recursive: true })`.
-- Acceptance: unauthenticated REST → 401; WS without token → closed; QR URL carries the token; misconfigured `AIRPROMPT_SESSIONS_DIR=/home` cannot cause deletion; `make test-all` green.
+> **Implementation:** The auth-token piece is redesigned as SSH-style device pairing — detailed in [PLAN - Security hardening.md](<PLAN - Security hardening.md>).
 
 ### Stage 1.2 — Governance + identity
 

@@ -59,6 +59,7 @@ if [ -z "$CMD" ]; then
   echo "  on [<name>]         Start daemon + register session (optional name)"
   echo "  on --name <name>    Same, explicit flag form"
   echo "  off                 Unregister session + hide statusline badge"
+  echo "  auth list|allow|deny|revoke  Manage paired devices (device pairing)"
   echo "  status              Show daemon status and active sessions"
   echo "  clean               Full teardown — kill all sessions, remove markers"
   echo "  restart             Restart daemon — sessions survive via disk recovery"
@@ -77,6 +78,7 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
   case "$CMD" in
     on)        SUB="$d/bin/airprompt-on.sh";;
     off)       SUB="$d/bin/airprompt-off.sh";;
+    auth)      SUB="$d/bin/airprompt-auth.sh";;
     status)    SUB="$d/bin/airprompt-status.sh";;
     clean)     SUB="$d/bin/airprompt-clean.sh";;
     restart)   SUB="$d/bin/airprompt-restart.sh";;
@@ -93,6 +95,7 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
       echo "  on [<name>]         Start daemon + register session (optional name)"
       echo "  on --name <name>    Same, explicit flag form"
       echo "  off                 Unregister session + hide statusline badge"
+      echo "  auth list|allow|deny|revoke  Manage paired devices (device pairing)"
       echo "  status              Show daemon status and active sessions"
       echo "  clean               Full teardown — kill all sessions, remove markers"
       echo "  restart             Restart daemon — sessions survive via disk recovery"
@@ -103,7 +106,7 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
       echo "Entrypoint: always use 'airprompt <command>' — never call bin/airprompt-*.sh directly."
       exit 0
       ;;
-    *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, restart, name, autostart, help" >&2; exit 1 ;;
+    *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, restart, name, autostart, auth, help" >&2; exit 1 ;;
   esac
   if [ -x "$SUB" ]; then
     # --help delegation never needs a provider — run it first
@@ -126,6 +129,9 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
         exec bash "$SUB" "$@"
         ;;
       autostart)
+        exec bash "$SUB" "$@"
+        ;;
+      auth)
         exec bash "$SUB" "$@"
         ;;
       *)

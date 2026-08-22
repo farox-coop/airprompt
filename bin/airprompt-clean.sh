@@ -51,9 +51,14 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 # Also kill daemon tmux session (airprompt-on.sh starts it this way)
-rm -f "${AIRPROMPT_DIR}/daemon.json" && echo "  daemon.json removed" || true
+_safe_rm_rf "${AIRPROMPT_DIR}/daemon.json" && { rm -rf "${AIRPROMPT_DIR}/daemon.json" 2>/dev/null || true; }
+# Device auth: wipe server keypair + whitelist + pending requests (full re-pair)
+for _authfile in server-key.json devices.json pending.json; do
+  _safe_rm_rf "${AIRPROMPT_DIR}/${_authfile}" && { rm -rf "${AIRPROMPT_DIR}/${_authfile}" 2>/dev/null || true; }
+done
+echo "  state files removed (daemon.json + auth — devices must re-pair)"
 _safe_rm_rf "${SESSIONS_DIR}" && { rm -rf "${SESSIONS_DIR}" 2>/dev/null || true; }
-rmdir "${AIRPROMPT_DIR}" 2>/dev/null || true
+_safe_rm_rf "${AIRPROMPT_DIR}" && { rm -rf "${AIRPROMPT_DIR}" 2>/dev/null || true; }
 tmux kill-session -t airprompt-daemon 2>/dev/null && echo "  daemon tmux session killed" || true
 
 # 2. Kill all airprompt tmux sessions

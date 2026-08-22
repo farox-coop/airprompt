@@ -10,6 +10,7 @@ const { spawnSync } = require('child_process');
 const qrcode = require('qrcode-terminal');
 const { tmuxExists, sessionToJSON, getSessionsDir, safeRmSync } = require('./src/utils');
 const { runStaleSweep } = require('./src/sweep');
+const auth = require('./src/auth');
 
 const PORT = process.env.AIRPROMPT_PORT || 3210;
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
@@ -79,6 +80,18 @@ function createTmuxSession(sessionName, cwd) {
   } catch (e) { return false; }
 }
 
+// Best-effort desktop notification that a device is awaiting pairing approval.
+// The daemon has no TTY, so this is the passive "popup" on the host. The CLI
+// (`airprompt auth allow <seq>`) remains the universal approval path.
+function notifyPairing(entry) {
+  try {
+    spawnSync('notify-send', [
+      'AirPrompt',
+      `New device "${entry.name}" (seq ${entry.seq}) wants to pair — airprompt auth allow ${entry.seq}`,
+    ], { timeout: 2000 });
+  } catch (_) { /* no desktop notification available — CLI still works */ }
+}
+
 function killTmuxSession(sessionName) {
   try { spawnSync('tmux', ['kill-session', '-t', sessionName], { timeout: 2000 }); } catch (e) { /* ok */ }
 }
@@ -87,7 +100,8 @@ function broadcastSessionList(wss) {
   const list = Array.from(sessions.values()).map(s => sessionToJSON(s));
   const msg = JSON.stringify({ type: 'session_list', sessions: list });
   wss.clients.forEach((client) => {
-    if (client.readyState === 1) {
+    // Only authenticated clients see the session list (no pre-auth leak).
+    if (client.readyState === 1 && client._airpromptAuthed === true) {
       try { client.send(msg); } catch (e) { /* ok */ }
     }
   });
@@ -294,7 +308,7 @@ function createApp() {
     // auto_dismiss: false = user must swipe to dismiss
     const msg = JSON.stringify({ ...input, type: 'notification', auto_dismiss: input.auto_dismiss === true });
     wss.clients.forEach((client) => {
-      if (client.readyState === 1) {
+      if (client.readyState === 1 && client._airpromptAuthed === true) {
         try { client.send(msg); } catch (e) { /* ok */ }
       }
     });
@@ -376,6 +390,39 @@ function createApp() {
     res.json({ ok: true, name: entry.name });
   });
 
+  // ── Device pairing ─────────────────────────────────────────────────────
+  // The ONLY LAN-reachable REST surface. A request here only ever ADDS to the
+  // pending list — approval happens on the trusted host filesystem via
+  // `airprompt auth allow <seq>`. Never grants directly (that would let a
+  // rogue device approve itself).
+  app.post('/api/pair', (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    if (!auth.checkPairRate(ip)) {
+      return res.status(429).json({ error: 'Too many pairing attempts' });
+    }
+    const { publicKey, name } = req.body || {};
+    if (typeof publicKey !== 'string' || !publicKey || publicKey.length > 2048) {
+      return res.status(400).json({ error: 'Invalid publicKey' });
+    }
+    if (!auth.isValidPublicKey(publicKey)) {
+      return res.status(400).json({ error: 'Invalid publicKey' });
+    }
+    if (auth.deviceByPublicKey(publicKey)) {
+      return res.json({ status: 'paired' });
+    }
+    const entry = auth.addPending(publicKey, name); // addPending sanitizes the name
+    if (!entry) {
+      return res.status(429).json({ error: 'Too many pending pairing requests' });
+    }
+    log('info', 'pairing request', { seq: entry.seq, name: entry.name, fingerprint: entry.fingerprint });
+    notifyPairing(entry);
+    res.status(202).json({ status: 'pending', seq: entry.seq, requestId: entry.id });
+  });
+
+  app.get('/api/pair/:id', (req, res) => {
+    res.json({ status: auth.pendingStatus(req.params.id) });
+  });
+
   const tlsOptions = TLS_ENABLED ? { key: fs.readFileSync(KEY_FILE), cert: fs.readFileSync(CERT_FILE) } : null;
   const httpServer = tlsOptions ? https.createServer(tlsOptions, app) : http.createServer(app);
   const wss = new WebSocketServer({
@@ -405,6 +452,9 @@ function createApp() {
   wss.on('connection', (ws) => {
     let ptyProcess = null;
     let activeSessionId = null;
+    let authed = false;            // set true once the handshake verifies
+    let _authPublicKey = null;     // device pubkey awaiting `auth` reply
+    let _authNonce = null;         // server nonce the device must sign
     const clientId = Math.random().toString(36).slice(2, 8);
     let _inputQueue = [];       // buffer input arriving before PTY is spawned
     let _inputQueueBytes = 0;   // total bytes in _inputQueue
@@ -414,10 +464,17 @@ function createApp() {
 
     ws.on('error', (e) => { log('warn', 'ws client error', { clientId, error: e.message }); });
 
-    ws.send(JSON.stringify({
-      type: 'session_list',
-      sessions: Array.from(sessions.values()).map(s => sessionToJSON(s)),
-    }));
+    // Close silent sockets that never complete the handshake. Acceptance:
+    // unauthenticated WS → closed. The browser client reconnects + handshakes
+    // in well under this window.
+    const authTimeout = setTimeout(() => {
+      if (!authed) {
+        try { ws.send(JSON.stringify({ type: 'auth_error', reason: 'timeout' })); } catch (_) {}
+        ws.close();
+      }
+    }, 5000);
+
+    // No session_list on connect — the handshake must complete first.
 
     function spawnPty(sessionId) {
       // Capture old pty reference before killing — its onExit/onData
@@ -514,7 +571,67 @@ function createApp() {
         return;
       }
 
+      // Only the handshake messages are accepted before authentication.
+      // Anything else from an unauthenticated socket is rejected + closed.
+      if (!authed && msg.type !== 'hello' && msg.type !== 'auth') {
+        ws.send(JSON.stringify({ type: 'auth_error', reason: 'unauthorized' }));
+        ws.close();
+        return;
+      }
+
       switch (msg.type) {
+        case 'hello': {
+          // Mutual challenge-response, step 1: the device presents its public
+          // key; if whitelisted, the server replies with its own key + a
+          // signature over BOTH nonces (server identity, bound to this
+          // connection — not a free signing oracle over arbitrary input).
+          if (authed || typeof msg.publicKey !== 'string' || msg.publicKey.length > 2048
+            || typeof msg.nonce !== 'string' || msg.nonce.length > 256) {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'bad_hello' }));
+            ws.close();
+            break;
+          }
+          if (!auth.deviceByPublicKey(msg.publicKey)) {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'unauthorized' }));
+            ws.close();
+            break;
+          }
+          const serverKey = auth.loadOrCreateServerKey();
+          const serverNonce = auth.generateNonce();
+          _authPublicKey = msg.publicKey;
+          _authNonce = serverNonce;
+          ws.send(JSON.stringify({
+            type: 'challenge',
+            serverPublicKey: serverKey.publicKeyDer.toString('base64'),
+            nonce: serverNonce,
+            signature: auth.signNonce(serverNonce + msg.nonce, serverKey.privateKey),
+          }));
+          break;
+        }
+        case 'auth': {
+          // Step 2: the device signs the server's nonce; verify and grant.
+          if (authed || typeof msg.signature !== 'string' || !_authNonce || !_authPublicKey) {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'bad_auth' }));
+            ws.close();
+            break;
+          }
+          if (auth.verifyNonce(_authNonce, msg.signature, _authPublicKey)) {
+            authed = true;
+            ws._airpromptAuthed = true;  // unlock broadcasts (session_list/notify)
+            clearTimeout(authTimeout);
+            auth.markDeviceSeen(_authPublicKey);
+            ws.send(JSON.stringify({ type: 'auth_ok' }));
+            ws.send(JSON.stringify({
+              type: 'session_list',
+              sessions: Array.from(sessions.values()).map(s => sessionToJSON(s)),
+            }));
+            log('info', 'ws client authenticated', { clientId });
+          } else {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'bad_auth' }));
+            ws.close();
+          }
+          break;
+        }
         case 'ping': break;  // keepalive ack — no action needed
         case 'debug':
           log('debug', '[client] ' + (msg.msg || ''), { level: msg.level, extra: msg.extra });
@@ -586,6 +703,7 @@ function createApp() {
     });
 
     ws.on('close', () => {
+      clearTimeout(authTimeout);
       log('info', 'ws client disconnected', { clientId, activeSessionId });
       _inputQueue = []; _inputQueueBytes = 0;  // discard queued input
       if (ptyProcess) {
@@ -631,9 +749,11 @@ if (require.main === module) {
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     const lanIp = getLocalIp();
-    const url = `${tls ? 'https' : 'http'}://${lanIp}:${PORT}`;
+    const serverKey = auth.loadOrCreateServerKey();
+    const url = `${tls ? 'https' : 'http'}://${lanIp}:${PORT}/#fp=${serverKey.fingerprint}`;
     console.log('\n' + '='.repeat(50));
     console.log(`AirPrompt Server running at: ${url}`);
+    console.log(`Server fingerprint: ${serverKey.fingerprint}`);
     if (tls) console.log('TLS: self-signed (accept warning on first connect)');
     console.log('='.repeat(50) + '\n');
     qrcode.generate(url, { small: true });
