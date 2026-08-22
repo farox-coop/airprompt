@@ -1,6 +1,6 @@
 # AirPrompt — Security Hardening Plan (Device Auth)
 
-> Expands [PLAN - open readiness.md](<PLAN - open readiness.md>) Stage 1.1 "Security hardening". The WS Origin check and Node-side `rm -rf` guard already shipped (`746c48d`); this plan is the remaining third item — the auth token, redesigned as SSH-style device pairing. **Stages 1 (server) + 2 (browser client) implemented; Stage 3 (docs/help) pending.**
+> Expands [PLAN - open readiness.md](<PLAN - open readiness.md>) Stage 1.1 "Security hardening".
 
 ## Goal
 
@@ -205,36 +205,30 @@ Each stage is one commit.
 - **Scope:** `bin/airprompt` help text, `commands/airprompt.md`, `README.md`, docs cross-links.
 - **What lands:** `airprompt auth` subcommands in help; command reference; README pairing section; `NO_TLS` unencrypted caveat; cross-link to this plan.
 
+## Acceptance checklist
+
+- [x] 1.1 Server auth + host CLI (WS handshake, `/api/pair` rate-limited, `auth` CLI, clean)
+- [x] 1.2 Browser client (pairing, handshake, identity overlay)
+- [x] 1.3 Docs + help
+
 ## Proposed PR description
 
-#### Summary
+### Summary
 
 - add SSH-style device pairing: per-device ECDSA P-256 keypairs, host whitelist, mutual challenge-response on every WS connect
 - host approval via local `airprompt auth allow/deny/revoke` (filesystem, stable ordinals) + desktop notification + paired-browser banner
 - `/api/pair` is the only LAN-reachable REST endpoint — request-only, rate-limited, capped, deduped
 - friendly "server identity changed" overlay; `clean` resets all auth state
 
-#### Tasks
+### Tasks
 
-- [ ] server auth engine + WS handshake + `/api/pair` + QR fingerprint
-- [ ] host CLI `auth list|allow|deny|revoke` + notification + clean
-- [ ] browser keygen/sign/IndexedDB + pairing UI + handshake + identity overlay
-- [ ] help + command reference + README + docs
+- [x] server auth engine + WS handshake + `/api/pair` + QR fingerprint
+- [x] host CLI `auth list|allow|deny|revoke` + notification + clean
+- [x] browser keygen/sign/IndexedDB + pairing UI + handshake + identity overlay
+- [x] help + command reference + README + docs
 
-#### Notes / Out of Scope
+### Notes / Out of Scope
 
-- REST hooks endpoints stay unauthenticated (separate follow-up)
-- `NO_TLS` mode: authenticated but not encrypted
+- REST hooks endpoints restricted to loopback (implemented) — `/api/pair` is the only LAN surface
+- `NO_TLS` mode: browser pairing requires TLS (WebCrypto secure-context) — effectively CLI-only
 - no user accounts — device-level auth only
-
-## Open questions
-
-1. ~~**REST hooks endpoints**~~ **Resolved** — restricted to loopback (middleware exempts only `/api/pair`).
-2. ~~**Browser banner**~~ **Shipped** — the `pair_request`/`pair_resolved` webUI notice (auto-cleaning on allow/deny/expire) is implemented.
-3. **`NO_TLS`** — confirm "their problem" (document only, no ECDH).
-
-## Acceptance checklist
-
-- [x] 1.1 Server auth + host CLI (WS handshake, `/api/pair` rate-limited, `auth` CLI, clean)
-- [x] 1.2 Browser client (pairing, handshake, identity overlay)
-- [ ] 1.3 Docs + help
