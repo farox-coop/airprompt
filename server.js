@@ -67,7 +67,7 @@ function originAllowed(info) {
   const origin = info.origin;
   // Absent Origin: non-browser client (curl, native ws, some webviews).
   // Browsers always send Origin on WS upgrades — no Origin = no CSWSH vector.
-  // (These clients stay unauthenticated until the shared-secret token lands.)
+  // (These clients stay unauthenticated until the device handshake completes.)
   if (!origin) return true;
   let originHost;
   try {
@@ -424,12 +424,17 @@ function createApp() {
     if (auth.deviceByPublicKey(publicKey)) {
       return res.json({ status: 'paired' });
     }
-    const entry = auth.addPending(publicKey, name); // addPending sanitizes the name
+    // Only fire the desktop notification for a genuinely NEW request — a reload
+    // that re-POSTs the same key refreshes TTL and must not re-notify.
+    const wasPending = !!auth.pendingByPublicKey(publicKey);
+    const entry = auth.addPending(publicKey, name, ip); // addPending sanitizes the name
     if (!entry) {
       return res.status(429).json({ error: 'Too many pending pairing requests' });
     }
-    log('info', 'pairing request', { seq: entry.seq, name: entry.name, fingerprint: entry.fingerprint });
-    notifyPairing(entry);
+    if (!wasPending) {
+      log('info', 'pairing request', { seq: entry.seq, name: entry.name, fingerprint: entry.fingerprint });
+      notifyPairing(entry);
+    }
     res.status(202).json({ status: 'pending', seq: entry.seq, requestId: entry.id });
   });
 
@@ -442,6 +447,9 @@ function createApp() {
   const wss = new WebSocketServer({
     server: httpServer,
     verifyClient: originAllowed,
+    // Legit messages are tiny (input ≤64KiB, hello key ≤2KiB, auth sig ~96B) —
+    // cap the frame size so a rogue can't push a 100MiB (default) frame and OOM.
+    maxPayload: 1 << 20,
   });
   wss.on('error', (err) => console.error('WebSocketServer error:', err.message));
 
@@ -462,8 +470,31 @@ function createApp() {
     client.on('pong', () => { client._airprompt_alive = true; });
   });
   httpServer.on('close', () => clearInterval(keepaliveInterval));
+  keepaliveInterval.unref();  // server background timer — must not hold the process open
+
+  const _wsConnByIp = new Map(); // remoteAddress -> open connection count
 
   wss.on('connection', (ws) => {
+    // Cap concurrent sockets — a rogue can open unbounded connections (no auth
+    // needed), each holding buffers/fds until the handshake times out.
+    if (wss.clients.size > 32) {
+      // The rejected socket can still emit 'error' (malformed frame) before it
+      // fully closes; without a listener that throws and kills the daemon.
+      ws.on('error', () => {});
+      ws.terminate();  // not close(): a non-responsive peer would linger in CLOSING and defeat the cap
+      return;
+    }
+
+    // Per-IP connection cap — one device can't monopolize the global slots by
+    // reconnecting in a loop (a single LAN attacker could otherwise hold all 32).
+    const wsIp = (ws._socket && ws._socket.remoteAddress) || 'unknown';
+    if ((_wsConnByIp.get(wsIp) || 0) >= 8) {
+      ws.on('error', () => {});
+      ws.terminate();  // not close(): a non-responsive peer would linger in CLOSING and defeat the cap
+      return;
+    }
+    _wsConnByIp.set(wsIp, (_wsConnByIp.get(wsIp) || 0) + 1);
+
     let ptyProcess = null;
     let activeSessionId = null;
     let authed = false;            // set true once the handshake verifies
@@ -484,9 +515,12 @@ function createApp() {
     const authTimeout = setTimeout(() => {
       if (!authed) {
         try { ws.send(JSON.stringify({ type: 'auth_error', reason: 'timeout' })); } catch (_) {}
-        ws.close();
+        // terminate() not close(): a non-responsive peer never completes a
+        // graceful close, so close() would leave the slot stuck in CLOSING.
+        ws.terminate();
       }
     }, 5000);
+    authTimeout.unref();  // per-connection timeout — must not hold the process open
 
     // No session_list on connect — the handshake must complete first.
 
@@ -624,14 +658,25 @@ function createApp() {
         }
         case 'auth': {
           // Step 2: the device signs the server's nonce; verify and grant.
-          if (authed || typeof msg.signature !== 'string' || !_authNonce || !_authPublicKey) {
+          if (authed || typeof msg.signature !== 'string' || msg.signature.length > 512
+            || !_authNonce || !_authPublicKey) {
             ws.send(JSON.stringify({ type: 'auth_error', reason: 'bad_auth' }));
+            ws.close();
+            break;
+          }
+          // Re-check the whitelist — the device may have been revoked in the
+          // brief window between `hello` and `auth`. Capture the canonical key
+          // so revoke detection compares canonical-to-canonical.
+          const dev = auth.deviceByPublicKey(_authPublicKey);
+          if (!dev) {
+            ws.send(JSON.stringify({ type: 'auth_error', reason: 'unauthorized' }));
             ws.close();
             break;
           }
           if (auth.verifyNonce(_authNonce, msg.signature, _authPublicKey)) {
             authed = true;
             ws._airpromptAuthed = true;  // unlock broadcasts (session_list/notify)
+            ws._airpromptPublicKey = dev.publicKey;  // canonical — so revoke can close this socket
             clearTimeout(authTimeout);
             auth.markDeviceSeen(_authPublicKey);
             ws.send(JSON.stringify({ type: 'auth_ok' }));
@@ -707,7 +752,9 @@ function createApp() {
           break;
         case 'list_sessions': broadcastSessionList(wss); break;
         case 'copy_buffer':
-          if (msg.data) {
+          // Cap the string (mirrors the client's 128KiB cap) — a rogue paired
+          // client shouldn't drive a 1MiB tmux load-buffer either.
+          if (typeof msg.data === 'string' && msg.data.length > 0 && msg.data.length <= 128 * 1024) {
             try {
               spawnSync('tmux', ['load-buffer', '-'], { input: msg.data, encoding: 'utf8', timeout: 2000 });
             } catch (e) { /* ok */ }
@@ -727,6 +774,8 @@ function createApp() {
     });
 
     ws.on('close', () => {
+      const n = (_wsConnByIp.get(wsIp) || 0) - 1;
+      if (n <= 0) _wsConnByIp.delete(wsIp); else _wsConnByIp.set(wsIp, n);
       clearTimeout(authTimeout);
       log('info', 'ws client disconnected', { clientId, activeSessionId });
       _inputQueue = []; _inputQueueBytes = 0;  // discard queued input
@@ -773,6 +822,16 @@ function createApp() {
       }
     }
     _knownPendingIds = currentIds;
+
+    // Revoked devices: drop their live sockets so `auth revoke` takes effect
+    // immediately. Direct per-socket check (not a delta over prior snapshots),
+    // so a device added+revoked within one poll window is still caught.
+    const deviceKeys = new Set(devices.map((d) => d.publicKey));
+    for (const client of wss.clients) {
+      if (client._airpromptAuthed && client._airpromptPublicKey && !deviceKeys.has(client._airpromptPublicKey)) {
+        try { client.close(4001, 'device revoked'); } catch (_) {}
+      }
+    }
   }, PAIR_POLL_MS);
   httpServer.on('close', () => clearInterval(pairInterval));
   pairInterval.unref();

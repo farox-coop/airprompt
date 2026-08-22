@@ -133,4 +133,23 @@ test('addPending returns null when the pending list is full (cap)', () => {
   assert.strictEqual(auth.listPending().length, auth.PENDING_MAX);
   const { publicKeyB64 } = genKeyPair();
   assert.strictEqual(auth.addPending(publicKeyB64, 'overflow'), null, 'cap should refuse the next request');
+  for (const p of auth.listPending()) auth.denyBySeq(p.seq); // cleanup shared state
+});
+
+test('addPending respects the per-IP pending cap', () => {
+  const ip = '192.0.2.50'; // TEST-NET-1
+  assert.ok(auth.addPending(genKeyPair().publicKeyB64, 'a', ip), 'first from IP accepted');
+  assert.ok(auth.addPending(genKeyPair().publicKeyB64, 'b', ip), 'second from IP accepted');
+  assert.strictEqual(auth.addPending(genKeyPair().publicKeyB64, 'c', ip), null, 'third from same IP rejected');
+  for (const p of auth.listPending()) auth.denyBySeq(p.seq); // cleanup
+});
+
+test('nameBySeq renames a paired device; missing seq returns null', () => {
+  const e = auth.addPending(genKeyPair().publicKeyB64, 'old-name');
+  auth.allowBySeq(e.seq);
+  const d = auth.nameBySeq(e.seq, 'My Phone');
+  assert.strictEqual(d.name, 'My Phone');
+  assert.strictEqual(auth.listDevices().find((x) => x.seq === e.seq).name, 'My Phone');
+  assert.strictEqual(auth.nameBySeq(999999, 'nope'), null);
+  auth.revokeBySeq(e.seq); // cleanup
 });

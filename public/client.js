@@ -159,13 +159,16 @@ let _authed = false;      // true once the WS handshake verifies
 let _clientNonce = null;  // per-connection nonce the server signs over
 let _pairing = false;     // suppress reconnect while the pairing flow runs
 let _identityBlocked = false; // stop reconnect loop after an identity mismatch
+let _pendingFp = null;    // live server fingerprint from the last challenge (for Re-pair)
 
 function showOverlay(id) { const el = document.getElementById(id); if (el) el.classList.add('open'); }
 function hideOverlay(id) { const el = document.getElementById(id); if (el) el.classList.remove('open'); }
 
-function showPairingOverlay(seq) {
+function showPairingOverlay(seq, fp) {
   const el = document.getElementById('pairing-seq');
   if (el && seq) el.textContent = String(seq);
+  const fpel = document.getElementById('pairing-fp');
+  if (fpel) fpel.textContent = fp || '';
   showOverlay('pairing-overlay');
 }
 
@@ -173,6 +176,8 @@ function showIdentityOverlay(msg) {
   _identityBlocked = true;  // dead-end: don't auto-reconnect into the mismatch
   const el = document.getElementById('identity-msg');
   if (el && msg) el.textContent = msg;
+  const fpel = document.getElementById('identity-fp');
+  if (fpel) fpel.textContent = _pendingFp || '';
   showOverlay('identity-overlay');
 }
 
@@ -180,10 +185,20 @@ function showIdentityOverlay(msg) {
 (() => {
   const disc = document.getElementById('identity-disconnect');
   const repair = document.getElementById('identity-repair');
-  if (disc) disc.addEventListener('click', () => { if (ws) ws.close(); hideOverlay('identity-overlay'); });
+  if (disc) disc.addEventListener('click', () => { _pendingFp = null; if (ws) ws.close(); hideOverlay('identity-overlay'); });
   if (repair) repair.addEventListener('click', async () => {
-    await window.AirPromptAuth.clearFingerprint();  // drop the stale pin, re-pair fresh
-    window.location.reload();
+    if (!_pendingFp) return;  // overlay is only shown on a key mismatch, which always sets _pendingFp
+    // "Re-pair" = accept the current server key (SSH "accept new host key").
+    // Force the fingerprint in front of the user — a blind one-click accept
+    // is exactly the MITM weakness SSH's known_hosts prompt guards against.
+    if (!window.confirm('Accept new server key ' + _pendingFp + '?\nOnly if it matches the fingerprint shown on the host screen.')) return;
+    await window.AirPromptAuth.persistFingerprint(_pendingFp);
+    // Strip the stale #fp= from the URL, else it disagrees with the accepted key.
+    try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (_) {}
+    _pendingFp = null;
+    _identityBlocked = false;
+    hideOverlay('identity-overlay');
+    connect();  // reconnect — the handshake now pins + verifies against the accepted key
   });
 })();
 
@@ -230,7 +245,8 @@ async function doPairing() {
   try {
     const res = await window.AirPromptAuth.pair(_device.publicKeyB64);
     if (res.paired) { _pairing = false; connect(); return; }  // already whitelisted
-    showPairingOverlay(res.seq);
+    const fp = await window.AirPromptAuth.fingerprintOf(_device.publicKeyB64);
+    showPairingOverlay(res.seq, fp);
     const status = await window.AirPromptAuth.waitForApproval(res.requestId);
     hideOverlay('pairing-overlay');
     _pairing = false;
@@ -245,6 +261,9 @@ async function doPairing() {
 
 function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  // Detach handlers from the old socket so its late onclose can't clobber the
+  // new connection's state (the handlers read the global `ws`).
+  if (ws) { ws.onopen = null; ws.onmessage = null; ws.onclose = null; ws.onerror = null; }
   ws = new WebSocket(wsUrl());
   log('info', 'ws connecting', { url: wsUrl() });
 
@@ -328,7 +347,12 @@ function scheduleReconnect() {
 
 function send(msg) {
   // Tag input messages with monotonic seq — debug tracing + future ack.
-  if (msg.type === 'input') msg.seq = ++_inputSeq;
+  if (msg.type === 'input') {
+    msg.seq = ++_inputSeq;
+    // Cap input at 64KiB (matches the server's own guard) so a huge paste can't
+    // exceed the 1MiB WS maxPayload and drop the connection.
+    if (typeof msg.data === 'string' && msg.data.length > 65536) msg.data = msg.data.slice(0, 65536);
+  }
   // Always enqueue so messages survive transient WS states and reconnects.
   _pendingMessages.push(msg);
   if (_pendingMessages.length > MAX_PENDING) _pendingMessages.shift();
@@ -369,25 +393,22 @@ async function wsMessageHandler(event) {
       const { stored, qr } = await window.AirPromptAuth.getPinned();
 
       if (stored && qr && stored !== qr) {
+        _pendingFp = fp;  // allow Re-pair to accept the current key
         showIdentityOverlay('The QR fingerprint differs from the one already pinned. Server identity may have changed.');
         ws.close(); break;
       }
       const expected = stored || qr;
-      if (!expected) {
-        // No pin and no QR fingerprint — refuse rather than trust blindly.
-        showIdentityOverlay('No server fingerprint is pinned. Scan the QR from the host screen to pair this device.');
-        ws.close(); break;
-      }
-      if (fp !== expected) {
+      if (expected && fp !== expected) {
+        _pendingFp = fp;  // allow Re-pair to accept the current key
         showIdentityOverlay('The server is presenting a different key than the one pinned. If you reinstalled or rotated the server key, re-pair; otherwise, someone may be impersonating the daemon.');
         ws.close(); break;
       }
-      // First-use via QR — persist only now that it matched the live key.
-      if (qr && !stored) await window.AirPromptAuth.persistFingerprint(fp);
-
       const ok = await window.AirPromptAuth.verifyServerSignature(
         msg.serverPublicKey, msg.nonce + _clientNonce, msg.signature);
       if (!ok) { ws.close(); break; }
+      // First pin (no stored pin, with or without a QR) — trust-on-first-use,
+      // persisted only after the server signature verified.
+      if (!stored) await window.AirPromptAuth.persistFingerprint(fp);
       const sig = await window.AirPromptAuth.signNonce(msg.nonce, _device.privateKey);
       ws.send(JSON.stringify({ type: 'auth', signature: sig }));
       break;
@@ -622,7 +643,7 @@ term.onData((data) => {
     if (data === 'c') {
       // Copy: grab xterm.js selection, send to server → tmux load-buffer
       const sel = term.getSelection();
-      if (sel) send({ type: 'copy_buffer', data: sel });
+      if (sel) send({ type: 'copy_buffer', data: sel.slice(0, 128 * 1024) });  // cap: worst-case JSON/UTF-8 expansion (~6x) stays < 1MiB maxPayload
     } else if (data === 'v') {
       // Paste: server reads tmux save-buffer → writes to PTY
       send({ type: 'paste_buffer' });
@@ -805,7 +826,7 @@ function tr(key) { return Dictation.tr(key); }
     if (kb && kb.isCopyPasteCombo && kb.isCopyPasteCombo(data)) {
       if (data === 'c') {
         const sel = term.getSelection();
-        if (sel) send({ type: 'copy_buffer', data: sel });
+        if (sel) send({ type: 'copy_buffer', data: sel.slice(0, 128 * 1024) });  // cap: worst-case JSON/UTF-8 expansion (~6x) stays < 1MiB maxPayload
       } else if (data === 'v') {
         send({ type: 'paste_buffer' });
       }

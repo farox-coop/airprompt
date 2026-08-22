@@ -22,6 +22,7 @@ const { stateDir } = require('./providers/provider');
 // Auto-reject pairing requests not approved within this window.
 const PENDING_TTL_MS = 60_000; // 1 minute
 const PENDING_MAX = 8;          // cap the pending list (anti-flood)
+const PENDING_PER_IP_MAX = 2;   // cap distinct pending requests per source IP
 const PAIR_RATE_MAX = 5;        // per-IP pair attempts
 const PAIR_RATE_WINDOW_MS = 60_000;
 
@@ -44,7 +45,12 @@ function readJSON(file, fallback) {
 
 function writeJSON(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+  // Atomic: write a temp file then rename, so a concurrent reader (the daemon's
+  // pairing poll) never sees a truncated/partial file — which it would otherwise
+  // parse as empty and could misread as "every device revoked".
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, file);
 }
 
 // ── Fingerprint ────────────────────────────────────────────────────────────
@@ -138,9 +144,15 @@ function deviceByPublicKey(publicKeyB64) {
   return listDevices().find((d) => d.publicKey === canonical) || null;
 }
 
+// Look up an existing pending request by (canonicalized) public key.
+function pendingByPublicKey(publicKeyB64) {
+  const canonical = canonicalPublicKey(publicKeyB64);
+  return listPending().find((p) => p.publicKey === canonical) || null;
+}
+
 // Add (or refresh) a pending pairing request. Returns the entry, or null if
 // the list is full. Duplicate publicKey refreshes TTL (no new seq).
-function addPending(publicKeyB64, name) {
+function addPending(publicKeyB64, name, ip) {
   const canonical = canonicalPublicKey(publicKeyB64);
   const pending = listPending();
   const existing = pending.find((p) => p.publicKey === canonical);
@@ -150,6 +162,9 @@ function addPending(publicKeyB64, name) {
     writeJSON(stateFile(PENDING_FILE), { pending });
     return existing;
   }
+  // Per-IP cap: one source can't monopolize the global pending list by
+  // submitting many distinct keys and refreshing them each minute.
+  if (ip && pending.filter((p) => p.ip === ip).length >= PENDING_PER_IP_MAX) return null;
   if (pending.length >= PENDING_MAX) return null;
 
   const entry = {
@@ -158,6 +173,7 @@ function addPending(publicKeyB64, name) {
     publicKey: canonical,
     name: sanitizeName(name),
     fingerprint: fingerprintOf(Buffer.from(canonical, 'base64')),
+    ip: ip || null,
     createdAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + PENDING_TTL_MS).toISOString(),
   };
@@ -212,10 +228,21 @@ function revokeBySeq(seq) {
   return entry;
 }
 
+// Rename a paired device (shown in `auth list`).
+function nameBySeq(seq, name) {
+  const devices = listDevices();
+  const d = devices.find((x) => x.seq === seq);
+  if (!d) return null;
+  d.name = sanitizeName(name);
+  writeJSON(stateFile(DEVICES_FILE), { devices });
+  return d;
+}
+
 // Update lastSeen (throttled to avoid a write on every reconnect).
 function markDeviceSeen(publicKeyB64) {
+  const canonical = canonicalPublicKey(publicKeyB64);
   const devices = listDevices();
-  const d = devices.find((x) => x.publicKey === publicKeyB64);
+  const d = devices.find((x) => x.publicKey === canonical);
   if (!d) return;
   const last = d.lastSeen ? new Date(d.lastSeen).getTime() : 0;
   if (Date.now() - last < 60_000) return;
@@ -276,18 +303,27 @@ const _pairAttempts = new Map(); // ip -> [timestamps]
 function checkPairRate(ip) {
   const now = Date.now();
   const arr = (_pairAttempts.get(ip) || []).filter((t) => now - t < PAIR_RATE_WINDOW_MS);
+  if (arr.length === 0) _pairAttempts.delete(ip);
   if (arr.length >= PAIR_RATE_MAX) {
     _pairAttempts.set(ip, arr);
     return false;
   }
   arr.push(now);
   _pairAttempts.set(ip, arr);
+  // Bound memory on a busy LAN (IPv6 privacy addresses rotate): drop
+  // fully-expired entries once the map grows large.
+  if (_pairAttempts.size > 1024) {
+    for (const [k, times] of _pairAttempts) {
+      if (times.every((t) => now - t >= PAIR_RATE_WINDOW_MS)) _pairAttempts.delete(k);
+    }
+  }
   return true;
 }
 
 module.exports = {
   PENDING_TTL_MS,
   PENDING_MAX,
+  PENDING_PER_IP_MAX,
   loadOrCreateServerKey,
   fingerprintOf,
   listDevices,
@@ -297,7 +333,9 @@ module.exports = {
   allowBySeq,
   denyBySeq,
   revokeBySeq,
+  nameBySeq,
   deviceByPublicKey,
+  pendingByPublicKey,
   markDeviceSeen,
   generateNonce,
   signNonce,

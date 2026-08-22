@@ -19,7 +19,7 @@ AirPrompt lets you view and interact with remote IDE/CLI sessions running on you
 
 - **Daemon**: Single `server.js` instance on port 3210 managing multiple IDE sessions
 - **Sessions**: One tmux session per IDE/CLI instance
-- **Mobile UI**: Web-based terminal with session selector, xterm.js, adaptive touch scrolling, push-to-talk voice dictation, keyboard input fallback, and dictation-macro preferences
+- **Mobile UI**: Web-based terminal with session selector, xterm.js, adaptive touch scrolling, tap-to-dictate voice dictation, keyboard input fallback, and dictation-macro preferences
 - **Statusline**: Integrated badge `[AirPrompt: https://<IP>:3210]` in IDE terminal
 
 ### tmux feature usage
@@ -75,7 +75,7 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | `clean` | Full teardown — kill daemon, remove all sessions/config. Preserves install files (~/.airprompt/server.js) so autostart hook target survives |
 | `restart` | Restart daemon — sessions survive via disk recovery |
 | `autostart on|off` | Auto-start AirPrompt on IDE session start |
-| `auth <cmd>` | Manage paired devices: `list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>` |
+| `auth <cmd>` | Manage paired devices: `list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>`, `name <seq> <name>` |
 | `help` | Print usage |
 
 **`/airprompt` with no arguments** runs `status` + `help` — shows daemon status followed by the command reference.
@@ -89,7 +89,7 @@ The daemon requires SSH-style device pairing: each browser holds an ECDSA P-256 
 - On first connect, scan the QR on the host screen — its URL carries the server fingerprint (`#fp=…`). The phone generates a device key and requests pairing.
 - Approve on the host: `airprompt auth list` → `airprompt auth allow <seq>` (or watch for the desktop notification, or the webUI notice on an already-paired browser).
 - A pairing request auto-expires after 1 minute if not approved.
-- Manage devices: `airprompt auth list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>`. Ordinals are stable — ordered by creation, never renumbered.
+- Manage devices: `airprompt auth list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>`, `name <seq> <name>`. Ordinals are stable — ordered by creation, never renumbered.
 - `airprompt clean` wipes all auth state — every device re-pairs.
 - If the daemon's key changes (reinstall/rotation), paired browsers show a "server identity changed" warning — use **Re-pair**.
 
@@ -114,7 +114,7 @@ The daemon requires SSH-style device pairing: each browser holds an ECDSA P-256 
 
 ## TLS & Voice Dictation
 
-Chrome/Android block `SpeechRecognition` over plain HTTP to LAN IPs. AirPrompt auto-detects TLS certs in `~/.airprompt/state/` and serves HTTPS. On first connect, accept the self-signed certificate warning. After that, push-to-talk voice dictation works.
+Chrome/Android block `SpeechRecognition` over plain HTTP to LAN IPs. AirPrompt auto-detects TLS certs in `~/.airprompt/state/` and serves HTTPS. On first connect, accept the self-signed certificate warning. After that, tap-to-dictate voice dictation works.
 
 **Device pairing also requires HTTPS.** Browser WebCrypto (`crypto.subtle`) is only available in secure contexts (HTTPS or `localhost`), so a phone reaching `http://<LAN-IP>:3210` cannot generate or sign keys at all. Running with `AIRPROMPT_NO_TLS=1` disables browser pairing — use TLS.
 

@@ -22,6 +22,7 @@ const TMUX_AVAILABLE = (() => {
 })();
 
 let server;
+let wss;
 let port;
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -118,14 +119,18 @@ before(async () => {
   TEST_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-auth-test-'));
   process.env.AIRPROMPT_STATE_DIR = TEST_STATE_DIR;
   process.env.AIRPROMPT_PAIR_POLL_MS = '100'; // fast pairing-resolution poll in tests
-  const { httpServer } = createApp();
+  const { httpServer, wss: wssRef } = createApp();
   server = httpServer;
+  wss = wssRef;
   await new Promise((resolve) => server.listen(0, resolve));
   port = server.address().port;
   TEST_DEVICE = makeDevice('test-device');
 });
 
 after(() => {
+  // Force-close any lingering WS clients so server.close() can complete —
+  // otherwise a non-drained socket holds the node --test process open.
+  for (const client of wss.clients) { try { client.terminate(); } catch (_) {} }
   server.close();
   delete process.env.AIRPROMPT_STATE_DIR;
   delete process.env.AIRPROMPT_PAIR_POLL_MS;
@@ -515,6 +520,26 @@ test('WS rejects unauthenticated clients (no session_list, no PTY)', () => {
   });
 });
 
+test('daemon survives a malformed frame on a cap-rejected socket', async () => {
+  // Open sockets until the connection caps reject one (per-IP cap of 8, since
+  // all sockets share localhost's remoteAddress). A malformed frame on that
+  // rejected socket must NOT crash the daemon.
+  const sockets = [];
+  for (let i = 0; i < 32; i++) {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    sockets.push(ws);
+    await new Promise((r) => ws.once('open', r));
+  }
+  const ws33 = new WebSocket(`ws://localhost:${port}`);
+  await new Promise((r) => ws33.once('open', r));
+  sockets.push(ws33);
+  try { ws33._socket.write(Buffer.from([0x81, 0x01, 0x41])); } catch (_) {} // FIN+text, no MASK bit
+  await new Promise((r) => setTimeout(r, 300));
+  const res = await get('/api/sessions');
+  assert.strictEqual(res.status, 200, 'daemon should still respond after the malformed frame');
+  for (const ws of sockets) { try { ws.close(); } catch (_) {} }
+});
+
 test('unauthenticated WS does not receive session_list broadcasts', { skip: !TMUX_AVAILABLE }, async () => {
   // A raw (unauth) client must not get session_list pushed when a session is
   // registered by another actor — no pre-auth leak.
@@ -546,6 +571,7 @@ test('POST /api/pair accepts a valid P-256 key → 202 pending', async () => {
   assert.strictEqual(res.body.status, 'pending');
   assert.ok(res.body.seq >= 1);
   assert.ok(res.body.requestId);
+  auth.denyBySeq(res.body.seq); // clean up so later pair tests aren't capped per-IP
 });
 
 test('POST /api/pair rejects a junk publicKey → 400', async () => {
@@ -558,6 +584,7 @@ test('GET /api/pair/:id reports pending status', async () => {
   const statusRes = await get(`/api/pair/${res.body.requestId}`);
   assert.strictEqual(statusRes.status, 200);
   assert.strictEqual(statusRes.body.status, 'pending');
+  auth.denyBySeq(res.body.seq); // clean up so later pair tests aren't capped per-IP
 });
 
 test('WS receives pair_request, then pair_resolved after allow', async () => {
@@ -570,13 +597,13 @@ test('WS receives pair_request, then pair_resolved after allow', async () => {
   const res = await post('/api/pair', { publicKey: pairKey(), name: 'test-pair' });
   assert.strictEqual(res.status, 202);
   await new Promise((r) => setTimeout(r, 200));
-  const req = received.find((m) => m.type === 'pair_request');
+  const req = received.find((m) => m.type === 'pair_request' && m.id === res.body.requestId);
   assert.ok(req, 'pair_request should be broadcast to authenticated clients');
   assert.strictEqual(req.seq, res.body.seq);
   // Resolve on the filesystem (simulating `airprompt auth allow`).
   auth.allowBySeq(res.body.seq);
   await new Promise((r) => setTimeout(r, 300));
-  const resolved = received.find((m) => m.type === 'pair_resolved');
+  const resolved = received.find((m) => m.type === 'pair_resolved' && m.id === res.body.requestId);
   assert.ok(resolved, 'pair_resolved should be broadcast after allow');
   assert.strictEqual(resolved.id, res.body.requestId);
   assert.strictEqual(resolved.status, 'allowed');

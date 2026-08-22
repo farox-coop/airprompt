@@ -124,7 +124,7 @@ Only after `auth_ok` does the daemon send `session_list` / allow `switch_session
 
 The daemon has no TTY (`nohup … > /tmp/airprompt.log`). Approval rides existing channels, all local/trusted:
 
-1. **Desktop notification** (primary popup) — `notify-send` invoked inline from the daemon (no separate `notify.sh`). Body: `New device "iPhone" (seq 3) wants to pair — airprompt auth allow 3`. Where the DE supports action buttons, add `Allow`/`Deny` that invoke the CLI; where not, the command is in the body.
+1. **Desktop notification** (primary popup) — `notify-send` invoked inline from the daemon (no separate `notify.sh`). Body: `New device "iPhone" (seq 3) wants to pair — airprompt auth allow 3`. (Action buttons are not implemented — the command is in the body.)
 2. **CLI** (universal, always works) — `airprompt auth list` → `airprompt auth allow <seq>`.
 3. **Browser banner** (only for **already-authenticated** browsers, for approving *additional* devices) — pushed over the WS to paired sessions only. **Never** pushed to unauthenticated sockets, or a rogue device's own browser could approve itself. First device is always approved via (1) or (2).
 
@@ -133,7 +133,7 @@ The approval *always* executes as a local filesystem write (the CLI, or the daem
 ## Anti-flood (`/api/pair`)
 
 - Per-IP rate limit: max 5 `/api/pair` per 60s → 429.
-- Pending list cap: 8 entries. At cap → 429 with a "approve or deny existing requests" hint (no silent eviction).
+- Pending list cap: 8 entries (global) + 2 per source IP. At cap → 429 (no silent eviction).
 - Duplicate `publicKey` → refresh the existing pending entry's `createdAt`/`expiresAt` (no new `seq`).
 - Pending TTL: **1 minute** (`PENDING_TTL_MS = 60_000`, defined in `src/auth.js`); expired entries auto-rejected and removed on read/write, so the pending list self-cleans if the host user never acts on a request.
 

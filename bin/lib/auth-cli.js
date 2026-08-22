@@ -82,7 +82,16 @@ switch (cmd) {
     break;
   }
 
+  case 'name': {
+    const seq = seqArg();
+    const name = process.argv.slice(4).join(' ');
+    const entry = auth.nameBySeq(seq, name);
+    if (!entry) { process.stderr.write('Error: no paired device with that seq\n'); process.exit(1); }
+    console.log(`Named device (seq ${seq}) "${entry.name}"`);
+    break;
+  }
+
   default:
-    process.stderr.write('Usage: node auth-cli.js <list|allow|deny|revoke> [seq]\n');
+    process.stderr.write('Usage: node auth-cli.js <list|allow|deny|revoke|name> [seq] [name]\n');
     process.exit(1);
 }
