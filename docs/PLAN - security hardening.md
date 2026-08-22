@@ -1,6 +1,6 @@
 # AirPrompt — Security Hardening Plan (Device Auth)
 
-> Expands [PLAN - open readiness.md](<PLAN - open readiness.md>) Stage 1.1 "Security hardening". The WS Origin check and Node-side `rm -rf` guard already shipped (`746c48d`); this plan is the remaining third item — the auth token, redesigned as SSH-style device pairing. **Stage 1 (server auth + host CLI) is implemented; Stage 2 (browser client) + Stage 3 (docs) pending.**
+> Expands [PLAN - open readiness.md](<PLAN - open readiness.md>) Stage 1.1 "Security hardening". The WS Origin check and Node-side `rm -rf` guard already shipped (`746c48d`); this plan is the remaining third item — the auth token, redesigned as SSH-style device pairing. **Stages 1 (server) + 2 (browser client) implemented; Stage 3 (docs/help) pending.**
 
 ## Goal
 
@@ -28,8 +28,8 @@ Covers:
 - Per-device revocation → drop one phone without touching others.
 
 Does NOT cover (documented, out of scope):
-- REST hooks endpoints (`/api/sessions/register|kill|notify|name`, …) are host-internal and stay unauthenticated. Separate follow-up.
-- `NO_TLS` mode: auth proves identity, the stream is not encrypted.
+- REST hooks endpoints (`/api/sessions/register|kill|notify|name`, …) are host-internal; they are now **restricted to loopback** (a middleware rejects non-loopback requests, exempting only `/api/pair`). No shared secret needed since the hooks already call `localhost`.
+- `NO_TLS` mode: browser pairing **requires TLS** — WebCrypto `crypto.subtle` is secure-context-only (HTTPS or `localhost`), so a phone reaching `http://<LAN-IP>:3210` cannot generate/sign keys at all. `NO_TLS` is effectively CLI-only now.
 - Device auth ≠ user accounts (one keypair = one device).
 
 ## Architecture
@@ -229,12 +229,12 @@ Each stage is one commit.
 
 ## Open questions
 
-1. **REST hooks endpoints** (`register/kill/notify/name`) are host-internal and still unauthenticated — restrict to loopback or add a host-side secret later? (Separate decision; verify hook call origin first.)
-2. **Browser banner** for already-paired devices — ship now or defer? (Lean: defer to keep Stage 2 focused; desktop notification + CLI cover all cases.)
+1. ~~**REST hooks endpoints**~~ **Resolved** — restricted to loopback (middleware exempts only `/api/pair`).
+2. ~~**Browser banner**~~ **Shipped** — the `pair_request`/`pair_resolved` webUI notice (auto-cleaning on allow/deny/expire) is implemented.
 3. **`NO_TLS`** — confirm "their problem" (document only, no ECDH).
 
 ## Acceptance checklist
 
 - [x] 1.1 Server auth + host CLI (WS handshake, `/api/pair` rate-limited, `auth` CLI, clean)
-- [ ] 1.2 Browser client (pairing, handshake, identity overlay)
+- [x] 1.2 Browser client (pairing, handshake, identity overlay)
 - [ ] 1.3 Docs + help

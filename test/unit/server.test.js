@@ -11,7 +11,7 @@ const path = require('path');
 const { execSync, spawnSync } = require('child_process');
 const WebSocket = require('ws');
 
-const { createApp, sessions } = require('../../server');
+const { createApp, sessions, isLoopback } = require('../../server');
 const { runStaleSweep } = require('../../src/sweep');
 const auth = require('../../src/auth');
 
@@ -117,6 +117,7 @@ function connectAuthed() {
 before(async () => {
   TEST_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-auth-test-'));
   process.env.AIRPROMPT_STATE_DIR = TEST_STATE_DIR;
+  process.env.AIRPROMPT_PAIR_POLL_MS = '100'; // fast pairing-resolution poll in tests
   const { httpServer } = createApp();
   server = httpServer;
   await new Promise((resolve) => server.listen(0, resolve));
@@ -127,6 +128,7 @@ before(async () => {
 after(() => {
   server.close();
   delete process.env.AIRPROMPT_STATE_DIR;
+  delete process.env.AIRPROMPT_PAIR_POLL_MS;
   try { fs.rmSync(TEST_STATE_DIR, { recursive: true, force: true }); } catch (_) {}
 });
 
@@ -135,6 +137,16 @@ beforeEach(() => {
 });
 
 // ── REST API tests ──────────────────────────────────────────────────
+
+test('isLoopback accepts loopback and rejects LAN/public IPs', () => {
+  assert.strictEqual(isLoopback('127.0.0.1'), true);
+  assert.strictEqual(isLoopback('::1'), true);
+  assert.strictEqual(isLoopback('::ffff:127.0.0.1'), true);
+  assert.strictEqual(isLoopback('192.168.0.5'), false);
+  assert.strictEqual(isLoopback('10.0.0.1'), false);
+  assert.strictEqual(isLoopback('8.8.8.8'), false);
+  assert.strictEqual(isLoopback(''), false);
+});
 
 test('POST /api/sessions/register creates session', { skip: !TMUX_AVAILABLE }, async () => {
   createTmux('airprompt-test-reg1');
@@ -546,6 +558,29 @@ test('GET /api/pair/:id reports pending status', async () => {
   const statusRes = await get(`/api/pair/${res.body.requestId}`);
   assert.strictEqual(statusRes.status, 200);
   assert.strictEqual(statusRes.body.status, 'pending');
+});
+
+test('WS receives pair_request, then pair_resolved after allow', async () => {
+  const { ws } = await connectAuthed();
+  const received = [];
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type === 'pair_request' || msg.type === 'pair_resolved') received.push(msg);
+  });
+  const res = await post('/api/pair', { publicKey: pairKey(), name: 'test-pair' });
+  assert.strictEqual(res.status, 202);
+  await new Promise((r) => setTimeout(r, 200));
+  const req = received.find((m) => m.type === 'pair_request');
+  assert.ok(req, 'pair_request should be broadcast to authenticated clients');
+  assert.strictEqual(req.seq, res.body.seq);
+  // Resolve on the filesystem (simulating `airprompt auth allow`).
+  auth.allowBySeq(res.body.seq);
+  await new Promise((r) => setTimeout(r, 300));
+  const resolved = received.find((m) => m.type === 'pair_resolved');
+  assert.ok(resolved, 'pair_resolved should be broadcast after allow');
+  assert.strictEqual(resolved.id, res.body.requestId);
+  assert.strictEqual(resolved.status, 'allowed');
+  ws.close();
 });
 
 test('WS accepts same-origin (localhost) upgrade', (t, done) => {

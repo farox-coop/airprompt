@@ -71,10 +71,31 @@
   </div>
   <div id="mic-error"></div>
 
+  <div id="pairing-overlay">
+    <div class="overlay-card">
+      <h3>Pair this device</h3>
+      <p>Waiting for approval on the host…</p>
+      <p>On the host, run: <code>airprompt auth allow <span id="pairing-seq"></span></code></p>
+      <p class="overlay-hint">Requests auto-expire after 1 minute.</p>
+    </div>
+  </div>
+
+  <div id="identity-overlay">
+    <div class="overlay-card">
+      <h3>Server identity changed</h3>
+      <p id="identity-msg">The daemon is presenting a different key than when you first paired. If you reinstalled or rotated the server key, re-pair this device. Otherwise, someone may be impersonating the daemon — do not continue.</p>
+      <div class="overlay-actions">
+        <button id="identity-disconnect">Disconnect</button>
+        <button id="identity-repair">Re-pair</button>
+      </div>
+    </div>
+  </div>
+
   <script src="utils.js"></script>
   <script src="dictation-macros.js"></script>
   <script src="dictation.js"></script>
   <script src="preferences.js"></script>
+  <script src="auth.js"></script>
   <script src="client.js"></script>
   <script src="scroll.js"></script>
   <script src="keybar.js"></script>

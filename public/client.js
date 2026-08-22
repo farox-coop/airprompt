@@ -153,6 +153,96 @@ const MAX_RECONNECT_MS = 30_000;
 
 function wsUrl() { return `${protocol}//${window.location.host}`; }
 
+// ── Device auth (pairing + handshake) ────────────────────────────────
+let _device = null;       // { publicKeyB64, privateKey } — loaded on init
+let _authed = false;      // true once the WS handshake verifies
+let _clientNonce = null;  // per-connection nonce the server signs over
+let _pairing = false;     // suppress reconnect while the pairing flow runs
+let _identityBlocked = false; // stop reconnect loop after an identity mismatch
+
+function showOverlay(id) { const el = document.getElementById(id); if (el) el.classList.add('open'); }
+function hideOverlay(id) { const el = document.getElementById(id); if (el) el.classList.remove('open'); }
+
+function showPairingOverlay(seq) {
+  const el = document.getElementById('pairing-seq');
+  if (el && seq) el.textContent = String(seq);
+  showOverlay('pairing-overlay');
+}
+
+function showIdentityOverlay(msg) {
+  _identityBlocked = true;  // dead-end: don't auto-reconnect into the mismatch
+  const el = document.getElementById('identity-msg');
+  if (el && msg) el.textContent = msg;
+  showOverlay('identity-overlay');
+}
+
+// Identity-overlay buttons (DOM is ready — script runs at end of <body>).
+(() => {
+  const disc = document.getElementById('identity-disconnect');
+  const repair = document.getElementById('identity-repair');
+  if (disc) disc.addEventListener('click', () => { if (ws) ws.close(); hideOverlay('identity-overlay'); });
+  if (repair) repair.addEventListener('click', async () => {
+    await window.AirPromptAuth.clearFingerprint();  // drop the stale pin, re-pair fresh
+    window.location.reload();
+  });
+})();
+
+// ── Pairing notices (webUI) ───────────────────────────────────────────
+// A "device wants to pair" toast on already-paired browsers; auto-cleaned when
+// the daemon broadcasts pair_resolved (allow/deny/expire).
+const _pairNotices = new Map(); // requestId -> element
+
+function showPairNotice(id, seq, name) {
+  if (_pairNotices.has(id)) return;
+  const el = document.createElement('div');
+  el.className = 'pair-notice';
+  el.textContent = `Device "${name}" (seq ${seq}) wants to pair — airprompt auth allow ${seq}`;
+  // notify.js owns the lazily-created container; reuse it so the toast renders
+  // even before the first notification has ever arrived.
+  const container = (typeof getNotifyContainer === 'function' ? getNotifyContainer() : null)
+    || document.getElementById('notify-container');
+  if (container) container.appendChild(el);
+  _pairNotices.set(id, el);
+}
+
+function dismissPairNotice(id) {
+  const el = _pairNotices.get(id);
+  if (el) { if (el.parentNode) el.remove(); _pairNotices.delete(id); }
+}
+
+// Runs once the WS handshake completes — the old ws.onopen body.
+function onAuthed() {
+  _authed = true;
+  _needPtySpawn = true;  // new connection — PTY must be re-spawned
+  scheduleResize();
+  _flushPending();
+  pingTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
+    }
+  }, PING_INTERVAL_MS);
+}
+
+// Pair this device: POST /api/pair, show "waiting", poll until the host allows.
+async function doPairing() {
+  if (_pairing) return;  // already pairing — avoid duplicate /api/pair POSTs
+  _pairing = true;
+  try {
+    const res = await window.AirPromptAuth.pair(_device.publicKeyB64);
+    if (res.paired) { _pairing = false; connect(); return; }  // already whitelisted
+    showPairingOverlay(res.seq);
+    const status = await window.AirPromptAuth.waitForApproval(res.requestId);
+    hideOverlay('pairing-overlay');
+    _pairing = false;
+    if (status === 'allowed') connect();  // now whitelisted — retry handshake
+    else term.write('\r\n\x1b[31m[AirPrompt: pairing denied or expired]\x1b[0m\r\n');
+  } catch (_) {
+    hideOverlay('pairing-overlay');
+    _pairing = false;
+    term.write('\r\n\x1b[31m[AirPrompt: pairing failed — is the daemon reachable?]\x1b[0m\r\n');
+  }
+}
+
 function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
   ws = new WebSocket(wsUrl());
@@ -161,7 +251,6 @@ function connect() {
   ws.onopen = () => {
     log('info', 'ws connected');
     reconnectAttempts = 0;
-    _needPtySpawn = true;  // new connection — PTY must be re-spawned
     // Dismiss disconnect banner on reconnect
     if (window._airpromptDiscBanner) {
       if (window._airpromptDiscBanner.parentNode) {
@@ -169,21 +258,18 @@ function connect() {
       }
       window._airpromptDiscBanner = null;
     }
-    // Re-send resize so server re-spawns pty with correct dimensions
-    scheduleResize();
-    // Flush any input queued during disconnect/reconnect window
-    _flushPending();
-    // Keepalive — ws library auto-responds to ping frames
-    pingTimer = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try { ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
-      }
-    }, PING_INTERVAL_MS);
+    // Start the auth handshake — the terminal is usable only after auth_ok.
+    const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
+    let nonceBin = '';
+    for (const b of nonceBytes) nonceBin += String.fromCharCode(b);
+    _clientNonce = btoa(nonceBin);
+    ws.send(JSON.stringify({ type: 'hello', publicKey: _device.publicKeyB64, nonce: _clientNonce }));
   };
 
   ws.onmessage = wsMessageHandler;
 
   ws.onclose = () => {
+    _authed = false;  // reset for the next handshake
     log('warn', 'ws disconnected');
     hideLoadSpinner();  // spinner blocks banner at z-index 500 — must hide
     term.write('\r\n\x1b[31m[AirPrompt: disconnected]\x1b[0m\r\n');
@@ -206,7 +292,7 @@ function connect() {
       document.body.appendChild(banner);
       window._airpromptDiscBanner = banner;
     }
-    scheduleReconnect();
+    if (!_pairing && !_identityBlocked) scheduleReconnect();  // pairing/identity drive their own flow
   };
 
   ws.onerror = () => { /* onclose fires next; reconnect handled there */ };
@@ -223,8 +309,22 @@ function scheduleReconnect() {
   }, delay);
 }
 
-// Kick off first connection
-connect();
+// Kick off: load/generate the device key, then connect (handshake on open).
+(async function init() {
+  // WebCrypto (crypto.subtle) is only available in secure contexts — HTTPS or
+  // localhost. Over plain HTTP to a LAN IP, pairing simply cannot work.
+  if (!window.isSecureContext) {
+    term.write('\r\n\x1b[31m[AirPrompt: device pairing requires HTTPS — crypto.subtle is unavailable over plain HTTP]\x1b[0m\r\n');
+    return;
+  }
+  try {
+    _device = await window.AirPromptAuth.loadOrCreateDeviceKey();
+  } catch (_) {
+    term.write('\r\n\x1b[31m[AirPrompt: this browser does not support device pairing]\x1b[0m\r\n');
+    return;
+  }
+  connect();
+})();
 
 function send(msg) {
   // Tag input messages with monotonic seq — debug tracing + future ack.
@@ -236,7 +336,9 @@ function send(msg) {
 }
 
 function _flushPending() {
-  if (!ws || ws.readyState !== WebSocket.OPEN || _pendingMessages.length === 0) return;
+  // Never flush queued messages pre-auth — the server force-closes on any
+  // non-handshake message from an unauthenticated socket.
+  if (!_authed || !ws || ws.readyState !== WebSocket.OPEN || _pendingMessages.length === 0) return;
   // Drain queue in order. If a send throws (unlikely for WS), stop —
   // remaining messages stay in queue for next flush attempt.
   let sent = 0;
@@ -251,16 +353,72 @@ function _flushPending() {
 window._airpromptSend = send;
 
 // ── Message handler (detached for reconnect) ─────────────────────────
-function wsMessageHandler(event) {
+async function wsMessageHandler(event) {
   let msg;
   try { msg = JSON.parse(event.data); } catch (e) { return; }
 
+  // Before auth, only handshake messages are meaningful.
+  if (!_authed && msg.type !== 'challenge' && msg.type !== 'auth_ok' && msg.type !== 'auth_error') return;
+
   switch (msg.type) {
+    case 'challenge': {
+      // Mutual challenge-response, step 2: verify the server's identity (pinned
+      // fingerprint) + its signature over serverNonce + clientNonce, then sign
+      // the server's nonce with the device key to prove possession.
+      const fp = await window.AirPromptAuth.fingerprintOf(msg.serverPublicKey);
+      const { stored, qr } = await window.AirPromptAuth.getPinned();
+
+      if (stored && qr && stored !== qr) {
+        showIdentityOverlay('The QR fingerprint differs from the one already pinned. Server identity may have changed.');
+        ws.close(); break;
+      }
+      const expected = stored || qr;
+      if (!expected) {
+        // No pin and no QR fingerprint — refuse rather than trust blindly.
+        showIdentityOverlay('No server fingerprint is pinned. Scan the QR from the host screen to pair this device.');
+        ws.close(); break;
+      }
+      if (fp !== expected) {
+        showIdentityOverlay('The server is presenting a different key than the one pinned. If you reinstalled or rotated the server key, re-pair; otherwise, someone may be impersonating the daemon.');
+        ws.close(); break;
+      }
+      // First-use via QR — persist only now that it matched the live key.
+      if (qr && !stored) await window.AirPromptAuth.persistFingerprint(fp);
+
+      const ok = await window.AirPromptAuth.verifyServerSignature(
+        msg.serverPublicKey, msg.nonce + _clientNonce, msg.signature);
+      if (!ok) { ws.close(); break; }
+      const sig = await window.AirPromptAuth.signNonce(msg.nonce, _device.privateKey);
+      ws.send(JSON.stringify({ type: 'auth', signature: sig }));
+      break;
+    }
+    case 'auth_ok':
+      onAuthed();
+      break;
+    case 'auth_error':
+      _authed = false;
+      if (msg.reason === 'unauthorized') doPairing();  // not whitelisted — pair
+      else ws.close();  // bad_auth / timeout — reconnect + retry
+      break;
     case 'output':
       term.write(msg.data);
       break;
     case 'notification':
       if (typeof showNotification === 'function') showNotification(msg);
+      break;
+    case 'pair_request':
+      showPairNotice(msg.id, msg.seq, msg.name);
+      break;
+    case 'pair_resolved':
+      dismissPairNotice(msg.id);
+      break;
+    case 'kill_result':
+      if (!msg.ok) {
+        try {
+          const btn = document.querySelector('.session-kill[data-id="' + CSS.escape(msg.sessionId) + '"]');
+          if (btn) { btn.classList.remove('killing'); btn.textContent = '🗑️'; }
+        } catch (_) {}
+      }
       break;
     case 'session_list':
       sessions = msg.sessions || [];
@@ -354,38 +512,17 @@ function updateUI() {
   }
 }
 
-async function killSession(sessionId) {
+function killSession(sessionId) {
   let btn;
   try { btn = document.querySelector('.session-kill[data-id="' + CSS.escape(sessionId) + '"]'); }
   catch (e) { return; }  // invalid sessionId chars → bail
   if (!btn) return;
   btn.classList.add('killing');
   btn.textContent = '⏳';
-  try {
-    const resp = await fetch('/api/sessions/kill', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: sessionId }),
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      // session_list broadcast will refresh UI automatically.
-      // If it was the active session, deselect.
-      if (activeSessionId === sessionId) {
-        activeSessionId = null;
-        localStorage.removeItem(SESSION_STORAGE_KEY);
-      }
-      // session_list broadcast will rebuild the list, removing this button
-    } else {
-      log('warn', 'kill session rejected', { sessionId: sessionId, status: resp.status, error: data.error });
-      btn.classList.remove('killing');
-      btn.textContent = '🗑️';
-    }
-  } catch (err) {
-    log('error', 'kill session failed', { sessionId: sessionId, error: err.message });
-    btn.classList.remove('killing');
-    btn.textContent = '🗑️';
-  }
+  // Kill over the authenticated WS — REST /api/sessions/kill is loopback-only.
+  // On success the session_list broadcast rebuilds the list; on failure the
+  // kill_result handler reverts the button.
+  send({ type: 'kill_session', sessionId });
 }
 
 function selectSession(id) {

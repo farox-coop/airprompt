@@ -57,6 +57,12 @@ function getLocalIp() {
 // other Origin — a remote site, or a local page on a different port — is
 // rejected. This also keeps hostname (mDNS) and multi-NIC access working,
 // since it checks same-origin rather than a frozen IP list.
+// Loopback (host-internal) addresses. Host-side hooks/CLI reach the REST API
+// via localhost; anything else is a remote device that must be rejected.
+function isLoopback(ip) {
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
 function originAllowed(info) {
   const origin = info.origin;
   // Absent Origin: non-browser client (curl, native ws, some webviews).
@@ -96,15 +102,59 @@ function killTmuxSession(sessionName) {
   try { spawnSync('tmux', ['kill-session', '-t', sessionName], { timeout: 2000 }); } catch (e) { /* ok */ }
 }
 
-function broadcastSessionList(wss) {
-  const list = Array.from(sessions.values()).map(s => sessionToJSON(s));
-  const msg = JSON.stringify({ type: 'session_list', sessions: list });
+// Send a message to every authenticated WS client only (no pre-auth leak).
+function broadcastAuthed(wss, msg) {
   wss.clients.forEach((client) => {
-    // Only authenticated clients see the session list (no pre-auth leak).
     if (client.readyState === 1 && client._airpromptAuthed === true) {
       try { client.send(msg); } catch (e) { /* ok */ }
     }
   });
+}
+
+function broadcastSessionList(wss) {
+  const list = Array.from(sessions.values()).map(s => sessionToJSON(s));
+  broadcastAuthed(wss, JSON.stringify({ type: 'session_list', sessions: list }));
+}
+
+// Kill a session (graceful `/airprompt off` → wait → force). Shared by the
+// loopback-only REST route and the authenticated WS `kill_session` message.
+async function killSessionById(sessionId, wss) {
+  const entry = sessions.get(sessionId);
+  if (!entry) return { ok: false, error: 'Session not found' };
+  const tmux = entry.tmuxSession;
+  if (!tmux) {
+    sessions.delete(sessionId);
+    broadcastSessionList(wss);
+    return { ok: true, killed: false, reason: 'no tmux session' };
+  }
+  if (!tmuxExists(tmux)) {
+    sessions.delete(sessionId);
+    broadcastSessionList(wss);
+    return { ok: true, killed: false, reason: 'already dead' };
+  }
+
+  // Phase 1: Graceful — send `/airprompt off` into the tmux session.
+  spawnSync('tmux', ['send-keys', '-t', tmux, '/airprompt off', 'Enter'], { timeout: 2000 });
+
+  // Phase 2: Wait up to 5s for the session to die.
+  const deadline = Date.now() + 5000;
+  let died = false;
+  let wasGraceful = false;
+  while (Date.now() < deadline) {
+    await new Promise(function (r) { setTimeout(r, 300); });
+    if (!tmuxExists(tmux)) { died = true; wasGraceful = true; break; }
+  }
+
+  // Phase 3: If still alive, force kill (airprompt-* only). Non-airprompt
+  // sessions belong to real IDE instances — never kill them.
+  if (!died && tmuxExists(tmux) && tmux.startsWith('airprompt-')) {
+    spawnSync('tmux', ['kill-session', '-t', tmux], { timeout: 2000 });
+    died = true;
+  }
+
+  if (died) sessions.delete(sessionId);
+  broadcastSessionList(wss);
+  return { ok: true, killed: died, graceful: wasGraceful };
 }
 
 function writePid() {
@@ -200,6 +250,16 @@ function createApp() {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     },
   }));
+
+  // Host-internal REST endpoints (sessions + notify) are called only by the
+  // hooks/CLI running on the host via loopback. Restrict them so a rogue LAN
+  // device can't inject/kill sessions or spoof notifications. /api/pair is the
+  // one LAN-reachable surface (pairing requests — request-only, rate-limited).
+  app.use('/api', (req, res, next) => {
+    if (req.path === '/pair' || req.path.startsWith('/pair/')) return next();
+    if (isLoopback(req.socket.remoteAddress || '')) return next();
+    res.status(403).json({ error: 'Forbidden' });
+  });
 
   app.get('/api/sessions', (_req, res) => {
     res.json(Array.from(sessions.values()).map(s => sessionToJSON(s)));
@@ -307,11 +367,7 @@ function createApp() {
     // Broadcast to all connected web clients
     // auto_dismiss: false = user must swipe to dismiss
     const msg = JSON.stringify({ ...input, type: 'notification', auto_dismiss: input.auto_dismiss === true });
-    wss.clients.forEach((client) => {
-      if (client.readyState === 1 && client._airpromptAuthed === true) {
-        try { client.send(msg); } catch (e) { /* ok */ }
-      }
-    });
+    broadcastAuthed(wss, msg);
     res.json({ ok: true });
   });
 
@@ -319,51 +375,9 @@ function createApp() {
     try {
       const { sessionId } = req.body || {};
       if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
-      const entry = sessions.get(sessionId);
-      if (!entry) return res.status(404).json({ error: 'Session not found' });
-
-      const tmux = entry.tmuxSession;
-      if (!tmux) {
-        sessions.delete(sessionId);
-        broadcastSessionList(wss);
-        return res.json({ ok: true, killed: false, reason: 'no tmux session' });
-      }
-
-      if (!tmuxExists(tmux)) {
-        sessions.delete(sessionId);
-        broadcastSessionList(wss);
-        return res.json({ ok: true, killed: false, reason: 'already dead' });
-      }
-
-      // Phase 1: Graceful — send `/airprompt off` into the tmux session
-      spawnSync('tmux', ['send-keys', '-t', tmux, '/airprompt off', 'Enter'], { timeout: 2000 });
-
-      // Phase 2: Wait up to 5s for session to die
-      const deadline = Date.now() + 5000;
-      let died = false;
-      let wasGraceful = false;
-      while (Date.now() < deadline) {
-        await new Promise(function (r) { setTimeout(r, 300); });
-        if (!tmuxExists(tmux)) { died = true; wasGraceful = true; break; }
-      }
-
-      // Phase 3: If still alive, force kill (airprompt-* only)
-      if (!died && tmuxExists(tmux)) {
-        if (tmux.startsWith('airprompt-')) {
-          spawnSync('tmux', ['kill-session', '-t', tmux], { timeout: 2000 });
-          died = true;
-          // wasGraceful stays false — this was a force kill
-        }
-        // Non-airprompt sessions belong to real IDE instances — never kill them.
-        // Leave the entry intact; the stale interval will clean up when
-        // the IDE eventually exits.
-      }
-
-      if (died) {
-        sessions.delete(sessionId);
-      }
-      broadcastSessionList(wss);
-      res.json({ ok: true, killed: died, graceful: wasGraceful });
+      const result = await killSessionById(sessionId, wss);
+      if (!result.ok) return res.status(404).json(result);
+      res.json(result);
     } catch (err) {
       log('error', 'session kill failed', { sessionId: req.body && req.body.sessionId, error: err.message });
       res.status(500).json({ error: 'Internal server error' });
@@ -673,6 +687,16 @@ function createApp() {
           if (msg.sessionId && sessions.has(msg.sessionId)) spawnPty(msg.sessionId);
           else ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
           break;
+        case 'kill_session':
+          // The browser kills over the authenticated WS (REST is loopback-only).
+          if (typeof msg.sessionId === 'string') {
+            killSessionById(msg.sessionId, wss).then((result) => {
+              if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'kill_result', sessionId: msg.sessionId, ...result }));
+            }).catch((err) => {
+              if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'kill_result', sessionId: msg.sessionId, ok: false, error: err.message }));
+            });
+          }
+          break;
         case 'resize':
           if (ptyProcess && typeof msg.cols === 'number' && typeof msg.rows === 'number'
             && msg.cols > 0 && msg.cols <= 500 && msg.rows > 0 && msg.rows <= 200) {
@@ -724,10 +748,39 @@ function createApp() {
   httpServer.on('close', () => clearInterval(staleInterval));
   staleInterval.unref();
 
+  // Push pairing-request lifecycle to authenticated web clients so their
+  // "wants to pair" notices appear (pair_request) and auto-clean on
+  // allow/deny/expire (pair_resolved). The CLI resolves on the filesystem
+  // (disk is the source of truth), so we poll for both appearance and removal.
+  const PAIR_POLL_MS = parseInt(process.env.AIRPROMPT_PAIR_POLL_MS || '2000', 10);
+  let _knownPendingIds = new Set(auth.listPending().map((p) => p.id));
+  const pairInterval = setInterval(() => {
+    const pending = auth.listPending(); // evicts expired
+    const current = new Map(pending.map((p) => [p.id, p]));
+    const currentIds = new Set(current.keys());
+    const devices = auth.listDevices();
+    for (const [id, p] of current) {
+      if (!_knownPendingIds.has(id)) {
+        broadcastAuthed(wss, JSON.stringify({
+          type: 'pair_request', id, seq: p.seq, name: p.name, fingerprint: p.fingerprint,
+        }));
+      }
+    }
+    for (const id of _knownPendingIds) {
+      if (!currentIds.has(id)) {
+        const status = devices.some((d) => d.id === id) ? 'allowed' : 'closed';
+        broadcastAuthed(wss, JSON.stringify({ type: 'pair_resolved', id, status }));
+      }
+    }
+    _knownPendingIds = currentIds;
+  }, PAIR_POLL_MS);
+  httpServer.on('close', () => clearInterval(pairInterval));
+  pairInterval.unref();
+
   return { app, httpServer, wss, tlsOptions };
 }
 
-module.exports = { createApp, sessions };
+module.exports = { createApp, sessions, isLoopback };
 
 if (require.main === module) {
   try {
