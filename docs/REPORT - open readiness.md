@@ -4,6 +4,8 @@ Snapshot: 2026-08-18. Deep audit across 7 dimensions (architecture, providers, d
 
 > Implementation plan (stages + commits): [PLAN - open readiness.md](<PLAN - open readiness.md>)
 
+> **Status (2026-08-23): Phase 1 complete** — all 5 blockers resolved (device pairing + WS origin check, Node `rm -rf` guard, MIT LICENSE, identity re-home to `farox-coop`, provider scope honesty). Phase 2 and 3 remain.
+
 ## Verdict
 
 Solid single-user PoC, ~70% ready for a trusted coop. Not yet for the coop's non-Claude users, not yet for public. 5 hard blockers, ~12 should-fix, rest polish.
@@ -85,7 +87,7 @@ High-level summary only. The full staged/commit breakdown lives in [PLAN - open 
 - [x] Add `LICENSE` (MIT, Farox Software Cooperative).
 - [x] Re-home identity: `diegomanuel/airprompt` → `farox-coop/airprompt` in code + manifest URLs (git remote set-url deferred to post-commit repo transfer).
 - [x] Fix README: working Quick Start, Install section (one-liners), Troubleshooting, provider matrix ("Claude only today"), env-var reference.
-- [ ] Either ship or de-advertise codex/cursor/windsurf (clean the 7 hardcoded detection loops + installer `--only` message).
+- [x] Either ship or de-advertise codex/cursor/windsurf (clarify "not yet implemented — coming soon" in `--only` + provider hints; detection loops left as-is).
 
 ### Phase 2 — contributor-ready (before accepting PRs)
 

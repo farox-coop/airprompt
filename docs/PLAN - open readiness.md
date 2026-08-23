@@ -2,6 +2,8 @@
 
 > Derived from the audit in [REPORT - open readiness.md](<REPORT - open readiness.md>). Read the report for the full findings (blockers, should-fix, provider matrix); this plan sequences those fixes into stages.
 
+> **Status (2026-08-23): Phase 1 complete** — Stages 1.1–1.4 done, all blockers resolved. Phase 2 and 3 remain.
+
 ## How to use this plan
 
 - Work top-down: Phase 1 → Phase 2 → Phase 3.
@@ -63,9 +65,9 @@ Addresses the biggest onboarding friction (report "Onboarding / docs" section). 
 
 Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are advertised but stubbed.
 
-- Files: `bin/airprompt`, `bin/airprompt-attach.sh`, `src/hooks/airprompt-statusline.sh`, `bin/lib/protocol.sh`, `.claude/skills/sync-claude/sync.sh`, `bin/airprompt-clean.sh`, `src/providers/claude.js` (the hardcoded detection loops), `bin/install.js` (`--only` validation message).
-- Scope: restrict provider detection/listing to implemented providers only (derive from the registry where possible); replace the `error: unknown agent: codex` path with a clear "provider not yet implemented" message.
-- Acceptance: a machine with only `codex` on PATH no longer silently selects `codex`; `--only codex` prints an honest message instead of a bare error.
+- Files: `bin/install.js` (`--only` validation message), `bin/airprompt`, `bin/airprompt-attach.sh` (provider hint messages).
+- Scope: keep the providers and the detection loops as-is; clarify that codex/cursor/windsurf are not yet implemented (coming soon) in the `--only` error and the "install a provider" hints.
+- Acceptance: `--only codex` prints "not yet implemented — coming soon" with the available providers, instead of a bare "unknown agent" error.
 - Alternative (bigger): ship the three adapters now — defer to Stage 3.3.
 
 ### Proposed PR description — Phase 1
@@ -84,7 +86,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] node `isSafeRmTarget()` guard on all `fs.rmSync`
 - [x] add LICENSE + re-home identity to `farox-coop`
 - [x] README install / troubleshooting / env-var / provider matrix
-- [ ] de-advertise unimplemented providers
+- [x] de-advertise unimplemented providers
 
 #### Notes / Out of Scope
 
@@ -218,7 +220,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] 1.1 Security hardening (device pairing + WS origin + Node rm guard)
 - [x] 1.2 Governance + identity (LICENSE + re-home)
 - [x] 1.3 Docs + install path (README + statusline badge)
-- [ ] 1.4 Provider scope honesty
+- [x] 1.4 Provider scope honesty
 - [ ] 2.1 Contributing + repo governance
 - [ ] 2.2 Test/CI integrity
 - [ ] 3.1 macOS portability

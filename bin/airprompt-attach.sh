@@ -50,7 +50,7 @@ if [ -z "${AIRPROMPT_PROVIDER:-}" ]; then
 fi
 if [ -z "${AIRPROMPT_PROVIDER:-}" ]; then
   echo "AirPrompt: no provider detected and AIRPROMPT_PROVIDER not set." >&2
-  echo "  Install one of: claude, codex, cursor, windsurf" >&2
+  echo "  Install claude (codex, cursor, windsurf coming soon)" >&2
   echo "  Or set AIRPROMPT_PROVIDER manually." >&2
   exit 1
 fi
