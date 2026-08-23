@@ -57,7 +57,7 @@ async function installHooks(ctx, targetDir) {
   if (opts.dryRun) {
     note(`  would mkdir -p ${hooksDir}`);
     for (const f of HOOK_FILES) note(`  would install ${path.join(hooksDir, f)}`);
-    note(`  would merge SessionStart + Stop + statusline into ${settingsPath}`);
+    note(`  would merge SessionStart + Stop into ${settingsPath}`);
     return 'ok';
   }
 
@@ -108,7 +108,6 @@ async function installHooks(ctx, targetDir) {
   const node = H.absoluteNodePath();
   const activate = path.join(hooksDir, 'airprompt-activate.js');
   const deactivate = path.join(hooksDir, 'airprompt-deactivate.js');
-  const statusline = path.join(hooksDir, 'airprompt-statusline.sh');
 
   SETTINGS.rewriteManagedHookCommands(settings, node);
 
@@ -126,23 +125,65 @@ async function installHooks(ctx, targetDir) {
     statusMessage: 'Unregistering AirPrompt session...',
   });
 
-  if (!settings.statusLine) {
-    settings.statusLine = { type: 'command', command: `bash "${statusline}"` };
-    process.stdout.write('  statusline badge configured.\n');
-  } else {
+  SETTINGS.validateHookFields(settings);
+  SETTINGS.writeSettings(settingsPath, settings);
+  process.stdout.write(`  hooks wired in ${settingsPath}\n`);
+  return 'ok';
+}
+
+// ── Statusline badge (always wired — plugin manifests cannot declare statusLine) ──
+
+async function installStatusline(ctx, targetDir) {
+  const { SETTINGS } = loadInstallDeps();
+  const { note, warn, opts } = ctx;
+  const configDir = ctx.configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const hooksDir = path.join(configDir, 'hooks');
+  const settingsPath = path.join(configDir, 'settings.json');
+  const src = path.join(targetDir, 'src', 'hooks', 'airprompt-statusline.sh');
+  const dest = path.join(hooksDir, 'airprompt-statusline.sh');
+
+  if (opts.dryRun) {
+    note(`  would install ${dest} + wire statusLine into ${settingsPath}`);
+    return 'ok';
+  }
+
+  if (!fs.existsSync(src)) return 'source hook not found: airprompt-statusline.sh';
+
+  const settings = SETTINGS.readSettings(settingsPath);
+  if (settings === null) {
+    warn('  settings.json unparseable; statusline not wired. Edit manually then re-run.');
+    return 'settings.json unparseable';
+  }
+
+  // Never clobber an existing statusline — a user may have their own, or a
+  // prior install already wired the badge. Report, don't rewrite.
+  if (settings.statusLine !== undefined) {
     const existing = typeof settings.statusLine === 'string'
       ? settings.statusLine
-      : (settings.statusLine.command || '');
-    if (existing.includes(statusline) || existing.includes('airprompt-statusline')) {
+      : (settings.statusLine && typeof settings.statusLine.command === 'string'
+        ? settings.statusLine.command
+        : '');
+    if (existing.includes('airprompt-statusline')) {
       process.stdout.write('  statusline badge already configured.\n');
     } else {
       process.stdout.write('  NOTE: existing statusline detected — airprompt badge NOT added.\n');
     }
+    return 'skip';
   }
 
-  SETTINGS.validateHookFields(settings);
+  fs.mkdirSync(hooksDir, { recursive: true });
+  fs.copyFileSync(src, dest);
+  try { fs.chmodSync(dest, 0o755); } catch (_) {}
+  process.stdout.write(`  installed: ${dest}\n`);
+
+  const bak = settingsPath + '.bak';
+  if (fs.existsSync(settingsPath) && !fs.existsSync(bak)) {
+    try { fs.copyFileSync(settingsPath, bak); } catch (_) {}
+  }
+
+  settings.statusLine = { type: 'command', command: `bash "${dest}"` };
   SETTINGS.writeSettings(settingsPath, settings);
-  process.stdout.write(`  hooks wired in ${settingsPath}\n`);
+  process.stdout.write('  statusline badge configured.\n');
   return 'ok';
 }
 
@@ -497,6 +538,16 @@ const ClaudeProvider = {
       if (r === 'ok') results.installed.push('claude-hooks');
       else if (r === 'skip') results.skipped.push(['claude-hooks', 'already wired']);
       else results.failed.push(['claude-hooks', r]);
+    }
+
+    // 6b. Statusline badge — the plugin manifest cannot declare statusLine
+    // (Claude Code limitation), so wire it directly in settings.json on every
+    // install. Skipped only under --no-hooks, which opts out of settings.json edits.
+    if (opts.withHooks !== false) {
+      const r = await installStatusline(ctx, targetDir);
+      if (r === 'ok') results.installed.push('claude-statusline');
+      else if (r === 'skip') results.skipped.push(['claude-statusline', 'statusline already configured or preserved']);
+      else results.failed.push(['claude-statusline', r]);
     }
 
     // 7. Copy command files for non-plugin installs

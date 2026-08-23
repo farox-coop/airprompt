@@ -83,7 +83,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] device pairing + WS origin check (unauthenticated WS closed, QR carries server fingerprint)
 - [x] node `isSafeRmTarget()` guard on all `fs.rmSync`
 - [x] add LICENSE + re-home identity to `farox-coop`
-- [ ] README install / troubleshooting / env-var / provider matrix
+- [x] README install / troubleshooting / env-var / provider matrix
 - [ ] de-advertise unimplemented providers
 
 #### Notes / Out of Scope
@@ -217,7 +217,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 - [x] 1.1 Security hardening (device pairing + WS origin + Node rm guard)
 - [x] 1.2 Governance + identity (LICENSE + re-home)
-- [ ] 1.3 Docs + install path (README + statusline badge)
+- [x] 1.3 Docs + install path (README + statusline badge)
 - [ ] 1.4 Provider scope honesty
 - [ ] 2.1 Contributing + repo governance
 - [ ] 2.2 Test/CI integrity

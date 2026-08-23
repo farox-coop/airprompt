@@ -84,7 +84,7 @@ High-level summary only. The full staged/commit breakdown lives in [PLAN - open 
 - [x] Node-side `isSafeRmTarget()` guard for all `fs.rmSync`.
 - [x] Add `LICENSE` (MIT, Farox Software Cooperative).
 - [x] Re-home identity: `diegomanuel/airprompt` → `farox-coop/airprompt` in code + manifest URLs (git remote set-url deferred to post-commit repo transfer).
-- [ ] Fix README: working Quick Start, Install section (one-liners), Troubleshooting, provider matrix ("Claude only today"), env-var reference.
+- [x] Fix README: working Quick Start, Install section (one-liners), Troubleshooting, provider matrix ("Claude only today"), env-var reference.
 - [ ] Either ship or de-advertise codex/cursor/windsurf (clean the 7 hardcoded detection loops + installer `--only` message).
 
 ### Phase 2 — contributor-ready (before accepting PRs)

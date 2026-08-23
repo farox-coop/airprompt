@@ -43,23 +43,129 @@ Every tmux feature AirPrompt depends on, where it's used, and why:
 
 ## Quick Start
 
+Install AirPrompt and wire it into Claude Code with one command:
+
 ```bash
-make setup          # install deps + generate TLS cert
+curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/main/install.sh | bash
+```
 
-# Start Claude inside tmux
+This clones the repo to `~/.airprompt/`, installs dependencies, generates a TLS certificate, symlinks `airprompt` into `~/bin/`, installs the Claude Code plugin, and wires the hooks + statusline badge.
+
+Then run Claude Code inside tmux and turn the session on:
+
+```bash
 tmux new-session -s claude && claude
+```
 
-# Inside Claude: /airprompt on
+Inside Claude Code, run `/airprompt on`. Open the QR/URL shown on the host (`https://<LAN-IP>:3210/#fp=…`) on your phone — the phone generates a device key and requests pairing. Approve it on the host:
 
-# Open the QR/URL shown on the host (https://<LAN-IP>:3210/#fp=…) on your phone.
-# The phone generates a device key and requests pairing.
-
-# On the host, approve the device:
+```bash
 airprompt auth list          # find the pending seq (e.g. 1)
 airprompt auth allow 1
-
-# Accept the self-signed cert warning on the phone — voice dictation works.
 ```
+
+Accept the self-signed certificate warning on the phone and voice dictation works from there.
+
+## Install
+
+### One-liners
+
+```bash
+# Linux / macOS / WSL
+curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/main/install.sh | bash
+
+# PowerShell (Windows — daemon needs tmux, so CLI install only)
+irm https://raw.githubusercontent.com/farox-coop/airprompt/main/install.ps1 | iex
+
+# From a local clone
+node bin/install.js
+```
+
+### Installer flags
+
+`node bin/install.js` accepts the following (each is also forwarded through `install.sh`):
+
+| Flag | Action |
+|---|---|
+| `--dry-run` | Print what would run, change nothing |
+| `--force` | Re-run even if already installed |
+| `--only <agent>` | Install only for the named agent (repeatable) |
+| `--with-hooks` | Wire standalone hooks alongside the plugin manifest |
+| `--no-hooks` | Skip settings.json hook wiring (plugin manifest handles hooks) |
+| `--uninstall, -u` | Remove AirPrompt from this machine |
+| `--config-dir <path>` | IDE config dir (default `~/.claude`) |
+| `--target-dir <path>` | Install dir (default `~/.airprompt/`) |
+| `--port <n>` | Daemon port (default 3210) |
+| `--non-interactive` | Never prompt; use defaults |
+| `--list` | Print supported agents and exit |
+
+### What gets created
+
+- `~/.airprompt/` — repo clone + runtime (server.js, src/, node_modules)
+- `~/.airprompt/state/` — daemon.json, TLS cert/key, project names
+- `~/.airprompt/sessions/` — per-session markers (url, name)
+- `~/bin/airprompt` — symlink to the dispatcher (add `~/bin` to your PATH)
+- `~/.claude/hooks/` + `settings.json` — SessionStart, Stop, and statusline wiring
+- `/tmp/airprompt-server.pid` — daemon PID file
+- `/tmp/airprompt.log` — daemon log
+
+### Uninstall
+
+```bash
+node bin/install.js --uninstall
+# or, full teardown (kills daemon, removes sessions + config):
+airprompt clean
+```
+
+## Configuration
+
+Environment variables (all optional):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AIRPROMPT_PORT` | `3210` | Daemon port |
+| `AIRPROMPT_STATE_DIR` | `~/.airprompt/state` | daemon.json, TLS cert/key, project names |
+| `AIRPROMPT_SESSIONS_DIR` | `~/.airprompt/sessions` | Per-session markers |
+| `AIRPROMPT_PID_FILE` | `/tmp/airprompt-server.pid` | Daemon PID file |
+| `AIRPROMPT_NO_TLS` | unset | `1` disables HTTPS (breaks pairing + voice dictation) |
+| `AIRPROMPT_DEBUG` | unset | `1` enables verbose logging |
+
+### TLS certificate
+
+A self-signed certificate is generated to `~/.airprompt/state/` on install. To regenerate:
+
+```bash
+bin/generate-cert.sh        # or: make cert
+airprompt restart
+```
+
+### Logs
+
+Daemon output goes to `/tmp/airprompt.log`. Tail it with `make logs` or `tail -f /tmp/airprompt.log`.
+
+## Provider status
+
+| Provider | Status | Notes |
+|---|---|---|
+| Claude Code (tmux) | ✅ Functional | Full install, hooks, badge, lifecycle |
+| Claude Code (VS Code) | ⚠️ Partial | Registers, but no `$TMUX` — phone shows an empty shell, not the live UI |
+| Codex | 🚧 Planned | Adapter not shipped yet |
+| Cursor | 🚧 Planned | Adapter not shipped yet |
+| Windsurf | 🚧 Planned | Adapter not shipped yet |
+
+## Troubleshooting
+
+**`/airprompt` is an unknown command** — the install didn't complete, or `~/bin` isn't on your PATH. Re-run the installer and add `export PATH="$HOME/bin:$PATH"` to your shell profile.
+
+**Self-signed certificate warning** — expected. Accept it once. It's the local TLS cert required for HTTPS (mic + pairing). If it keeps re-prompting, regenerate the cert (see Configuration).
+
+**Voice dictation (mic) doesn't work** — HTTPS is required. Chrome/Android block `SpeechRecognition` over plain HTTP. Don't set `AIRPROMPT_NO_TLS=1` if you need the mic.
+
+**"no provider detected" / badge missing** — only Claude Code is implemented today. Install `claude` and re-run the installer. The badge shows only in the registered session.
+
+**Missing tmux / jq / openssl** — `sudo apt install tmux jq openssl` (macOS: `brew install tmux jq openssl`). tmux is required for mirroring; jq for protocol detection; openssl for the TLS cert.
+
+**HTTP fallback (TLS unavailable)** — if cert generation fails the daemon falls back to HTTP; pairing and voice dictation won't work. Run `bin/generate-cert.sh` and `airprompt restart`.
 
 ## Commands
 
@@ -143,6 +249,8 @@ AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter 
 - `/airprompt clean` — Full teardown: kill daemon, remove all sessions and markers
 - `/airprompt restart` — Restart daemon — active sessions survive via disk recovery
 - `/airprompt help` — Print usage
+
+**Manual launch / resume:** `airprompt-launch --provider claude` starts Claude inside a managed tmux session so AirPrompt can mirror it. Resume a previous session with `airprompt-launch --resume <session_id>` or `airprompt-launch --continue`. Handy in VS Code where there's no `$TMUX` — the launch script creates the tmux session itself.
 
 **Adding new IDEs** (Codex, Cursor, Windsurf): create one provider file + thin hook wrappers. Provider auto-discovered by registry. Zero changes to core.
 
