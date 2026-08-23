@@ -77,7 +77,7 @@ Each IDE is classified by effort level:
 
 ### 4.1 Codex CLI — Feasible, MEDIUM effort
 
-**Install path**: `npx skills add diegomanuel/airprompt -a codex`
+**Install path**: `npx skills add farox-coop/airprompt -a codex`
 
 **Hook system**: `.codex/hooks.json` + `~/.codex/config.toml` (`[features] hooks = true`).
 Events: `SessionStart`, `Stop`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`,
@@ -102,7 +102,7 @@ whether to proceed.
 
 ### 4.2 Cursor — Feasible, MEDIUM effort
 
-**Install path**: `npx skills add diegomanuel/airprompt -a cursor`
+**Install path**: `npx skills add farox-coop/airprompt -a cursor`
 
 **Hook system**: `.cursor/hooks.json` — 15+ events including `sessionStart`, `beforeShellExecution`,
 `afterFileEdit`, `beforeSubmitPrompt`, `Stop`, `sessionIdle`. Broader than Claude Code's events.
@@ -128,7 +128,7 @@ case-by-case decision whether to proceed.
 
 ### 4.3 Windsurf — Feasible, MEDIUM-LOW effort
 
-**Install path**: `npx skills add diegomanuel/airprompt -a windsurf`
+**Install path**: `npx skills add farox-coop/airprompt -a windsurf`
 
 **Hook system**: Local/project-level hooks. `.windsurfrules` for project rules.
 `.windsurf/skills/` for skills.
@@ -152,7 +152,7 @@ smaller user base. **Will evaluate at implementation time.**
 
 ### 4.4 Gemini CLI — Feasible, MEDIUM effort (needs further investigation)
 
-**Install path**: `gemini extensions install https://github.com/diegomanuel/airprompt`
+**Install path**: `gemini extensions install https://github.com/farox-coop/airprompt`
 
 **Hook system**: `.gemini/settings.json` — `BeforeTool`/`AfterTool` events with matchers. May need
 `"experimental": { "hooks": true }`. Different from Claude Code — hooks are tool-interception

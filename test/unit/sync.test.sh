@@ -24,11 +24,11 @@ else
   ok "no /home/diego hardcoded"
 fi
 
-# ── Test 3: no hardcoded diegomanuel publisher ──────────────────────
-echo "[3/7] No hardcoded diegomanuel in CACHE_BASE"
-# The CACHE_BASE line must use glob discovery, not hardcode diegomanuel
-if grep -n 'CACHE_BASE=' "$SYNC_SH" | grep -q 'diegomanuel'; then
-  not_ok "CACHE_BASE hardcodes diegomanuel"
+# ── Test 3: no hardcoded farox-coop publisher ──────────────────────
+echo "[3/7] No hardcoded farox-coop in CACHE_BASE"
+# The CACHE_BASE line must use glob discovery, not hardcode farox-coop
+if grep -n 'CACHE_BASE=' "$SYNC_SH" | grep -q 'farox-coop'; then
+  not_ok "CACHE_BASE hardcodes farox-coop"
 else
   ok "CACHE_BASE is dynamic (glob-based)"
 fi

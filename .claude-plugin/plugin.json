@@ -1,7 +1,7 @@
 {
   "name": "airprompt",
   "description": "Remote control and voice dictation for Claude Code via web terminal",
-  "author": { "name": "Farox", "url": "https://github.com/diegomanuel" },
+  "author": { "name": "Farox", "url": "https://farox.coop" },
   "hooks": {
     "SessionStart": [{
       "hooks": [{

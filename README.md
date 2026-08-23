@@ -148,4 +148,4 @@ AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter 
 
 ## License
 
-Farox Software Cooperative - https://farox.coop
+MIT — see [LICENSE](LICENSE). © Farox Software Cooperative — https://farox.coop

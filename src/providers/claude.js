@@ -27,7 +27,7 @@ function loadInstallDeps() {
   return { SETTINGS, H };
 }
 
-const REPO = 'diegomanuel/airprompt';
+const REPO = 'farox-coop/airprompt';
 
 const HOOK_FILES = [
   'airprompt-activate.js',

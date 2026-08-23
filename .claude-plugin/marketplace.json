@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "airprompt",
   "description": "Remote control and voice dictation for IDE/CLI sessions. Control sessions from your phone.",
-  "owner": { "name": "Farox", "url": "https://github.com/diegomanuel" },
+  "owner": { "name": "Farox", "url": "https://farox.coop" },
   "plugins": [{
     "name": "airprompt",
     "description": "Watch and control IDE/CLI sessions from mobile with voice dictation",

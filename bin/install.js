@@ -21,8 +21,7 @@ const path = require('path');
 const registry = require('../src/providers/registry');
 const { expandHome } = require('../src/install-helpers');
 
-const REPO = 'diegomanuel/airprompt';
-const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/main`;
+const REPO = 'farox-coop/airprompt';
 
 // ── Argv ───────────────────────────────────────────────────────────────────
 function parseArgs(argv) {

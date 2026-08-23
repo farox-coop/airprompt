@@ -36,12 +36,12 @@
 
 Addresses report blockers #3 and #4.
 
-- Files: `LICENSE` (new), `install.sh:19`, `bin/install.js:24-25,151`, `src/providers/claude.js:29`, `.claude-plugin/marketplace.json:5`, `.claude-plugin/plugin.json:4`.
+- Files: `LICENSE` (new), `install.sh:8,19`, `install.ps1:7,29`, `bin/install.js:24`, `src/providers/claude.js:30`, `.claude-plugin/marketplace.json:5`, `.claude-plugin/plugin.json:4`, `test/unit/sync.test.sh:27-34`, `README.md:151`.
 - Scope:
   - Add `LICENSE` (MIT text, © Farox Software Cooperative).
-  - Re-home identity: replace `diegomanuel/airprompt` and the personal owner URL with the coop org across the 5 files; `git remote set-url origin` to the coop repo.
+  - Re-home identity: replace `diegomanuel/airprompt` → `farox-coop/airprompt` and the personal owner URL → `https://farox.coop` across the files; `git remote set-url origin` to the coop repo (deferred to post-commit repo transfer).
 - Acceptance: `package.json` `"license": "MIT"` is backed by real text and linked from README; `curl|bash install.sh` clones from the coop org; plugin marketplace URL points at the coop.
-- Note: the identity re-home is gated on the coop-org/repo-move decision. If the initial private test stays on `diegomanuel/airprompt` (friends with repo access), defer the re-home to Phase 2; LICENSE itself is always required.
+- Note: identity re-home is done in code; repo transfer (`git remote set-url origin` to the coop repo) is deferred until after this commit is pushed.
 
 ### Stage 1.3 — Docs + install path
 
@@ -82,7 +82,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 - [x] device pairing + WS origin check (unauthenticated WS closed, QR carries server fingerprint)
 - [x] node `isSafeRmTarget()` guard on all `fs.rmSync`
-- [ ] add LICENSE + re-home identity to `farox-coop`
+- [x] add LICENSE + re-home identity to `farox-coop`
 - [ ] README install / troubleshooting / env-var / provider matrix
 - [ ] de-advertise unimplemented providers
 
@@ -216,7 +216,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 ## Final checklist (one item per stage)
 
 - [x] 1.1 Security hardening (device pairing + WS origin + Node rm guard)
-- [ ] 1.2 Governance + identity (LICENSE + re-home)
+- [x] 1.2 Governance + identity (LICENSE + re-home)
 - [ ] 1.3 Docs + install path (README + statusline badge)
 - [ ] 1.4 Provider scope honesty
 - [ ] 2.1 Contributing + repo governance
