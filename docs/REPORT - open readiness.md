@@ -4,7 +4,7 @@ Snapshot: 2026-08-18. Deep audit across 7 dimensions (architecture, providers, d
 
 > Implementation plan (stages + commits): [PLAN - open readiness.md](<PLAN - open readiness.md>)
 
-> **Status (2026-08-23): Phase 1 complete** — all 5 blockers resolved (device pairing + WS origin check, Node `rm -rf` guard, MIT LICENSE, identity re-home to `farox-coop`, provider scope honesty). Phase 2 and 3 remain.
+> **Status (2026-08-23): Phase 1 complete, Phase 2 in progress** — all 5 blockers resolved (device pairing + WS origin check, Node `rm -rf` guard, MIT LICENSE, identity re-home to `farox-coop`, provider scope honesty), plus contributor governance (CONTRIBUTING, PR/issue templates, CODEOWNERS, editorconfig, gitattributes). Stage 2.2 (test/CI integrity) and Phase 3 remain.
 
 ## Verdict
 
@@ -50,14 +50,14 @@ Bottom line: Linux/WSL ready, macOS not ready, native Windows unsupported (despi
 
 ### Contributor/PR readiness
 
-- No `CONTRIBUTING.md`, no PR/issue templates, no `CODEOWNERS`, no `.editorconfig`/`.gitattributes` (CRLF risk for shell scripts).
+- ~~No `CONTRIBUTING.md`, no PR/issue templates, no `CODEOWNERS`, no `.editorconfig`/`.gitattributes` (CRLF risk for shell scripts).~~ — resolved in Stage 2.1.
 - Two shell tests silently skip on a fresh clone: `statusline.test.sh:5-7`, `status-formatter.test.sh:5-8` (one hardcodes `$HOME/projects/airprompt`) → green CI that tested nothing.
 - `agnostic-check` (the repo's own "no provider names in core" guard) is dev-only, not in `test-all`/CI — a PR can violate the architecture rule and stay green.
 - No `engines` field (Node ≥18 enforced only at install time); CI single Node 24, no matrix.
 
 ## Polish / later
 
-- Version tags + CHANGELOG (empty `git tag`, package.json 0.2.0), commit convention undocumented (add one line to CONTRIBUTING).
+- Version tags + CHANGELOG (empty `git tag`, package.json 0.2.0) — commit convention now documented in `CONTRIBUTING.md` (Stage 2.1).
 - `macapp:`/`vscode-ext:` detection probes claimed in `claude.js:238` but unimplemented (needed for future Cursor/Windsurf GUI detection).
 - Lint = syntax-only `node --check`; no real linter.
 - VS Code integrated terminal (no `$TMUX`) → phone attaches to an empty mirror shell, not the live Claude UI. Only works via `airprompt-launch`/`attach.sh`. Document this clearly.
@@ -91,8 +91,8 @@ High-level summary only. The full staged/commit breakdown lives in [PLAN - open 
 
 ### Phase 2 — contributor-ready (before accepting PRs)
 
-- [ ] `CONTRIBUTING.md` (prereqs, dev run with `AIRPROMPT_DEBUG=1`, `make test-all`, add-a-provider path, no-hardcoded-paths rule, commit convention).
-- [ ] PR + issue templates, `.editorconfig`, `.gitattributes`, `CODEOWNERS`.
+- [x] `CONTRIBUTING.md` (prereqs, dev run with `AIRPROMPT_DEBUG=1`, `make test-all`, add-a-provider path, no-hardcoded-paths rule, commit convention).
+- [x] PR + issue templates, `.editorconfig`, `.gitattributes`, `CODEOWNERS`.
 - [ ] Fix the 2 silent-skip shell tests; wire `agnostic-check` into `test-all`/CI.
 - [ ] `engines` field + Node CI matrix (18/20/24).
 

@@ -2,7 +2,7 @@
 
 > Derived from the audit in [REPORT - open readiness.md](<REPORT - open readiness.md>). Read the report for the full findings (blockers, should-fix, provider matrix); this plan sequences those fixes into stages.
 
-> **Status (2026-08-23): Phase 1 complete** — Stages 1.1–1.4 done, all blockers resolved. Phase 2 and 3 remain.
+> **Status (2026-08-23): Phase 1 complete, Phase 2 in progress** — Stages 1.1–2.1 done, all blockers resolved. Stage 2.2 (test/CI integrity) and Phase 3 remain.
 
 ## How to use this plan
 
@@ -30,7 +30,7 @@
 
 ### Stage 1.1 — Security hardening
 
-> **Implementation:** The auth-token piece is redesigned as SSH-style device pairing — detailed in [PLAN - Security hardening.md](<PLAN - Security hardening.md>).
+> **Implementation:** The auth-token piece is redesigned as SSH-style device pairing — detailed in [PLAN - security hardening.md](<PLAN - security hardening.md>).
 
 ### Stage 1.2 — Governance + identity
 
@@ -130,8 +130,8 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 #### Tasks
 
-- [ ] `CONTRIBUTING.md` (prereqs, dev run, `make test-all`, add-a-provider, commit convention)
-- [ ] PR template + issue templates + `CODEOWNERS` + `.editorconfig` + `.gitattributes`
+- [x] `CONTRIBUTING.md` (prereqs, dev run, `make test-all`, add-a-provider, commit convention)
+- [x] PR template + issue templates + `CODEOWNERS` + `.editorconfig` + `.gitattributes`
 - [ ] fix `statusline.test.sh` / `status-formatter.test.sh` silent-skip
 - [ ] `agnostic-check` into `test-all`/CI + `engines` + Node matrix
 
@@ -221,7 +221,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] 1.2 Governance + identity (LICENSE + re-home)
 - [x] 1.3 Docs + install path (README + statusline badge)
 - [x] 1.4 Provider scope honesty
-- [ ] 2.1 Contributing + repo governance
+- [x] 2.1 Contributing + repo governance
 - [ ] 2.2 Test/CI integrity
 - [ ] 3.1 macOS portability
 - [ ] 3.2 Install robustness

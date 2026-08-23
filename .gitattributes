@@ -1,0 +1,12 @@
+# AirPrompt — git attributes.
+# Force LF line endings everywhere (shell scripts break on CRLF) and
+# normalize text files so diffs are clean across platforms.
+
+* text=auto
+
+# Shell scripts must stay LF — a CRLF script fails with "bad interpreter".
+*.sh text eol=lf
+
+# No-op script (no extension) — the dispatcher + launch wrapper.
+bin/airprompt text eol=lf
+bin/airprompt-launch text eol=lf

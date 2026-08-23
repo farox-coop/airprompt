@@ -1,0 +1,9 @@
+# AirPrompt — code owners.
+#
+# GitHub routes review requests for changed files to the owners listed here.
+# Last matching pattern wins. Teams require write access to the repo.
+#
+# Owner syntax: @username, @org/team-name, or an email address.
+# There is no org-wide wildcard — list owners explicitly.
+
+* @diegomanuel

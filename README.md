@@ -254,6 +254,10 @@ AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter 
 
 **Adding new IDEs** (Codex, Cursor, Windsurf): create one provider file + thin hook wrappers. Provider auto-discovered by registry. Zero changes to core.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, running the tests, adding a provider, and project conventions.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). © Farox Software Cooperative — https://farox.coop
