@@ -156,7 +156,7 @@ fi
 
 # ── Create temp transcript with simulated events ────────────────────────
 TRANSCRIPT_DIR="$(mktemp -d)"
-trap "rm -rf '$TRANSCRIPT_DIR'" EXIT
+trap 'rm -rf "$TRANSCRIPT_DIR"' EXIT
 TRANSCRIPT_FILE="$TRANSCRIPT_DIR/transcript.jsonl"
 # Write turn_duration last so tac finds it first (notify.sh reads bottom-up)
 cat > "$TRANSCRIPT_FILE" <<TRANSCRIPT_EOF

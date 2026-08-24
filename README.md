@@ -209,8 +209,7 @@ The daemon requires SSH-style device pairing: each browser holds an ECDSA P-256 
 | `stop` | Stop daemon via PID file |
 | `refresh` | Stop, clean, setup, and start fresh |
 | `logs` | Tail daemon logs |
-| `lint` | Lint JS files with ESLint |
-| `lint-sh` | Lint shell scripts with shellcheck (optional) |
+| `lint` | Lint JS (ESLint) + shell (shellcheck) |
 | `format` | Reformat with Prettier |
 | `format-check` | Verify formatting with Prettier |
 | `test-all` | Run unit and integration tests |

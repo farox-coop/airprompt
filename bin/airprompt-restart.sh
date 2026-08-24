@@ -18,8 +18,6 @@ fi
 DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
-STATE_DIR="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
-DEBUG="${AIRPROMPT_DEBUG:-0}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
 source "$(dirname "$0")/lib/protocol.sh"
@@ -82,8 +80,8 @@ fi
 
 # ── 3. Wait for daemon to be ready ────────────────────────────────────
 DAEMON_READY=false
-for i in $(seq 1 20); do
-  if curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
+for _ in $(seq 1 20); do
+  if curl -s "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
     echo "  daemon ready on port $DAEMON_PORT"
     DAEMON_READY=true
     break
@@ -101,5 +99,5 @@ if ! $DAEMON_READY; then
 fi
 
 # ── 4. Show recovered sessions ────────────────────────────────────────
-SESSION_COUNT=$(curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" | jq '. | length' 2>/dev/null || echo "?")
+SESSION_COUNT=$(curl -s "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" | jq '. | length' 2>/dev/null || echo "?")
 echo "AirPrompt: daemon restarted — $SESSION_COUNT session(s) recovered"

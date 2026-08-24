@@ -104,14 +104,14 @@ if echo "$PANELINE" | grep -q "Unable to attach\|ptrace\|denied\|error"; then
 fi
 
 # ── Ensure daemon is running ─────────────────────────────────────────
-if ! curl -s $AP_CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then
+if ! curl -s "${AP_CURL_OPTS[@]}" "${API_URL}/api/sessions" > /dev/null 2>&1; then
   echo "Starting AirPrompt daemon..."
   cd "$DAEMON_DIR"
   nohup node server.js > /tmp/airprompt.log 2>&1 &
   DAEMON_PID=$!
   disown "$DAEMON_PID" 2>/dev/null || true
-  for i in $(seq 1 20); do
-    if curl -s $AP_CURL_OPTS "${API_URL}/api/sessions" > /dev/null 2>&1; then break; fi
+  for _ in $(seq 1 20); do
+    if curl -s "${AP_CURL_OPTS[@]}" "${API_URL}/api/sessions" > /dev/null 2>&1; then break; fi
     if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
       echo "Error: server process died. Check /tmp/airprompt.log" >&2
       exit 1
@@ -127,7 +127,7 @@ _json_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 ESC_CWD=$(_json_esc "$ORIG_PWD")
 ESC_TMUX=$(_json_esc "$TMUX_SESSION")
 ESC_PROV=$(_json_esc "$PROVIDER")
-RESP=$(curl -s $AP_CURL_OPTS -X POST "${API_URL}/api/sessions/register" \
+RESP=$(curl -s "${AP_CURL_OPTS[@]}" -X POST "${API_URL}/api/sessions/register" \
   -H "Content-Type: application/json" \
   -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ESC_CWD}\",\"tmuxSession\":\"${ESC_TMUX}\",\"providerId\":\"${ESC_PROV}\"}" || echo "")
 

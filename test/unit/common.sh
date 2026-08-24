@@ -10,5 +10,5 @@
 repo_root() {
   local dir
   dir="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
-  git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$dir/../.." && pwd)"
+  git -C "$dir" rev-parse --show-toplevel 2>/dev/null || (cd "$dir/../.." && pwd)
 }

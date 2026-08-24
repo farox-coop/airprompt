@@ -1,4 +1,4 @@
-.PHONY: setup cert start stop clean refresh logs lint lint-sh format format-check test-unit test-integration test-all agnostic-check install-plugin uninstall-plugin
+.PHONY: setup cert start stop clean refresh logs lint format format-check test-unit test-integration test-all agnostic-check install-plugin uninstall-plugin
 
 LOG_FILE := /tmp/airprompt.log
 PID_FILE := /tmp/airprompt-server.pid
@@ -37,16 +37,14 @@ logs:
 	@tail -f $(LOG_FILE)
 
 lint:
-	@npm run --silent lint
-
-lint-sh:
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $$(git ls-files '*.sh') bin/airprompt bin/airprompt-launch; else echo "  shellcheck not installed — skipping"; fi
+	@npm run lint
 
 format:
-	@npm run --silent format
+	@npm run format
 
 format-check:
-	@npm run --silent format:check
+	@npm run format:check
 
 test-unit:
 	@node --test test/unit/*.test.js

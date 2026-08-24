@@ -66,7 +66,7 @@ fi
 # ── Set name via API ──────────────────────────────────────────────────
 API_URL="${AP_PROTO}://localhost:${DAEMON_PORT}"
 ESC_NAME=$(printf '%s' "$NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
-RESP=$(curl $AP_CURL_OPTS -s -X PUT "${API_URL}/api/sessions/name" \
+RESP=$(curl "${AP_CURL_OPTS[@]}" -s -X PUT "${API_URL}/api/sessions/name" \
   -H "Content-Type: application/json" \
   -d "{\"sessionId\":\"${SESSION_ID}\",\"name\":\"${ESC_NAME}\"}" || echo "")
 

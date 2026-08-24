@@ -67,7 +67,7 @@ fi
 # ── Unregister from daemon (force: true — user explicitly asked) ────
 UNREG_OK=false
 if [ -n "$SESSION_ID" ]; then
-  RESP=$(curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+  RESP=$(curl -s "${AP_CURL_OPTS[@]}" -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
     -H "Content-Type: application/json" \
     -d "{\"sessionId\":\"${SESSION_ID}\",\"force\":true}" 2>/dev/null || echo "")
   if echo "$RESP" | grep -q '"ok":true'; then
@@ -95,14 +95,14 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
     REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r' || true)
     [ -z "$REAL_TMUX" ] && REAL_TMUX="$DN"
     tmux has-session -t "$REAL_TMUX" 2>/dev/null && HAS_RC=0 || HAS_RC=$?
-    if [ $HAS_RC -eq 0 ]; then
+    if [ "$HAS_RC" -eq 0 ]; then
       : # session alive — skip
-    elif [ $HAS_RC -eq 1 ]; then
+    elif [ "$HAS_RC" -eq 1 ]; then
       # Only delete if tmux explicitly says "no session" (exit code 1).
       echo "Cleaning up dead session dir: $DN" >&2
       SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r' || true)
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
-      curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+      curl -s "${AP_CURL_OPTS[@]}" -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
         -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
       rm -rf "$d"
@@ -113,7 +113,7 @@ fi
 # ── Stop daemon if no sessions remain ────────────────────────────────
 # Count with python3 if available, fallback to grep counting — safer
 # than defaulting to "0" which would kill daemon with active sessions.
-REMAINING=$(curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "")
+REMAINING=$(curl -s "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "")
 # If curl failed or returned empty, default to "unreachable" — never
 # kill daemon on a failed fetch.  Empty "[]" = truly zero sessions.
 if [ -z "$REMAINING" ]; then

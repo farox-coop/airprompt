@@ -136,7 +136,8 @@ save_session_marker() {
   local tmux_name="$1"
   local session_name="${2:-}"
   # Sanitize: use same charset as statusline/activate/on.sh — tr -cd 'a-zA-Z0-9_.-'
-  local safe_name=$(printf '%s' "$tmux_name" | tr -cd 'a-zA-Z0-9_.-')
+  local safe_name
+  safe_name=$(printf '%s' "$tmux_name" | tr -cd 'a-zA-Z0-9_.-')
   [ -z "$safe_name" ] && safe_name="$(echo "$tmux_name" | tr -cd 'a-zA-Z0-9')"  # fallback: strip dots/dashes too
   [ -z "$safe_name" ] && safe_name="airprompt-unknown"
   local my_dir="${SESSIONS_DIR}/${PROVIDER_ID}-${safe_name}"

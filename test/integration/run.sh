@@ -11,9 +11,6 @@ trap 'cleanup' EXIT
 # spawning daemon on real port 3210 while integration server is on 3211.
 export AIRPROMPT_AUTOSTART_SKIP_REGISTER=1
 
-MARKER="${TMPDIR}/.airprompt-active"
-URL_FILE="${TMPDIR}/.airprompt-url"
-
 pass=0; fail=0; skip=0
 ok()   { echo "  PASS: $1"; pass=$((pass + 1)); }
 not_ok() { echo "  FAIL: $1"; fail=$((fail + 1)); }
@@ -48,7 +45,7 @@ cd "$PROJECT_DIR"
 AIRPROMPT_NO_TLS=1 AIRPROMPT_PID_FILE="$TEST_PID_FILE" AIRPROMPT_STATE_DIR="$TMPDIR/state" AIRPROMPT_SESSIONS_DIR="$TMPDIR/sessions" AIRPROMPT_SKIP_RECOVERY=1 AIRPROMPT_PORT="$PORT" node server.js 2>/dev/null &
 SERVER_PID=$!
 
-for i in $(seq 1 20); do
+for _ in $(seq 1 20); do
   if kill -0 "$SERVER_PID" 2>/dev/null && curl -s "http://localhost:${PORT}/api/sessions" > /dev/null 2>&1; then
     break
   fi
@@ -543,7 +540,6 @@ echo "[11/8] Sweep no-force: stale dir shares sessionId with alive tmux → sess
 if $TMUX_OK; then
   ID_SW="integtest-$(date +%s)-$$-nosweep"
   TMUX_ALIVE="airprompt-${ID_SW}-alive"
-  TMUX_DEAD="airprompt-${ID_SW}-stale"
   tmux new-session -d -s "$TMUX_ALIVE" 2>/dev/null || true
 
   # Register session with alive tmux in daemon

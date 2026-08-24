@@ -37,7 +37,7 @@ if [ -f "$PID_FILE" ]; then
     if $IS_AIRPROMPT; then
       kill "$PID" 2>/dev/null || true
       # Wait for graceful shutdown
-      for i in $(seq 1 10); do
+      for _ in $(seq 1 10); do
         kill -0 "$PID" 2>/dev/null || break
         sleep 0.1
       done
@@ -54,7 +54,7 @@ fi
 _safe_rm_rf "${AIRPROMPT_DIR}/daemon.json" && { rm -rf "${AIRPROMPT_DIR}/daemon.json" 2>/dev/null || true; }
 # Device auth: wipe server keypair + whitelist + pending requests (full re-pair)
 for _authfile in server-key.json devices.json pending.json; do
-  _safe_rm_rf "${AIRPROMPT_DIR}/${_authfile}" && { rm -rf "${AIRPROMPT_DIR}/${_authfile}" 2>/dev/null || true; }
+  _safe_rm_rf "${AIRPROMPT_DIR}/${_authfile}" && { rm -rf "${AIRPROMPT_DIR:?}/${_authfile:?}" 2>/dev/null || true; }
 done
 echo "  state files removed (daemon.json + auth — devices must re-pair)"
 _safe_rm_rf "${SESSIONS_DIR}" && { rm -rf "${SESSIONS_DIR}" 2>/dev/null || true; }

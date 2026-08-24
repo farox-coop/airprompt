@@ -32,8 +32,6 @@ source "$(dirname "$0")/lib/protocol.sh"
 detect_protocol
 DAEMON_PORT="$AP_PORT"
 
-DEBUG="${AIRPROMPT_DEBUG:-0}"
-
 # ── Dependency checks ───────────────────────────────────────────────
 for cmd in tmux node curl; do
   if ! command -v "$cmd" &>/dev/null; then
@@ -123,7 +121,7 @@ if [ ! -f "$PID_FILE" ]; then
     tmux respawn-pane -k -t airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log" 2>/dev/null || true
   fi
   for i in $(seq 1 20); do
-    if curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
+    if curl -s "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
       break
     fi
     if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
@@ -134,7 +132,7 @@ if [ ! -f "$PID_FILE" ]; then
     sleep 0.5
   done
   # Verify daemon actually responded — not just timeout
-  if ! curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
+  if ! curl -s "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then
     echo "Error: daemon not responding after 10s. Check /tmp/airprompt.log" >&2
     cd "$ORIG_PWD"
     exit 1
@@ -187,7 +185,7 @@ _name_update() {
   local esc
   esc=$(printf '%s' "$name_val" | sed 's/\\/\\\\/g; s/"/\\"/g')
   local put_resp
-  put_resp=$(curl -s $AP_CURL_OPTS -X PUT "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/name" \
+  put_resp=$(curl -s "${AP_CURL_OPTS[@]}" -X PUT "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/name" \
     -H "Content-Type: application/json" \
     -d "{\"sessionId\":\"${sid}\",\"name\":\"${esc}\"}" 2>/dev/null || echo "")
   if echo "$put_resp" | grep -q '"ok":true'; then
@@ -215,7 +213,7 @@ if [ -f "$ACTIVE_FILE" ]; then
     # Verify daemon actually holds this session. Sweep force-unregister
     # can nuke it when a stale dir shares the same sessionId (reopened
     # Claude session gets same session_id, different tmux).
-    DAEMON_SESSIONS=$(curl -s $AP_CURL_OPTS "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "[]")
+    DAEMON_SESSIONS=$(curl -s "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "[]")
     if ! echo "$DAEMON_SESSIONS" | grep -Fq "\"tmuxSession\":\"$TMUX_SESSION\""; then
       echo "Re-registering — daemon lost session (stale sweep)" >&2
       rm -f "$ACTIVE_FILE"
@@ -248,7 +246,7 @@ if [ -n "$SESSION_NAME" ]; then
 fi
 REG_PAYLOAD="${REG_PAYLOAD}}"
 
-RESP=$(curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/register" \
+RESP=$(curl -s "${AP_CURL_OPTS[@]}" -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/register" \
   -H "Content-Type: application/json" \
   -d "$REG_PAYLOAD" || echo "")
 
@@ -296,16 +294,16 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
     REAL_TMUX=$(head -c 128 "${d}/tmux" 2>/dev/null | tr -d '\n\r' || true)
     [ -z "$REAL_TMUX" ] && REAL_TMUX="$DN"
     tmux has-session -t "$REAL_TMUX" 2>/dev/null && HAS_SESSION_RC=0 || HAS_SESSION_RC=$?
-    if [ $HAS_SESSION_RC -eq 0 ]; then
+    if [ "$HAS_SESSION_RC" -eq 0 ]; then
       : # session alive — skip
-    elif [ $HAS_SESSION_RC -eq 1 ]; then
+    elif [ "$HAS_SESSION_RC" -eq 1 ]; then
       # Only delete if tmux explicitly says "no session" (exit code 1).
       # Other non-zero codes = tmux error/timeout — don't touch (safe).
       echo "Cleaning up dead session dir: $DN" >&2
       # Read session ID from the session file (not from dir name)
       SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r' || true)
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
-      curl -s $AP_CURL_OPTS -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+      curl -s "${AP_CURL_OPTS[@]}" -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
         -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
       rm -rf "$d"

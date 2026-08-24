@@ -207,7 +207,7 @@ MISMATCHES=0
 TOTAL=0
 
 debug_mismatch() {
-  local what="$1" repo_path="$2" cache_base_dir="$3" file="$4"
+  local repo_path="$2" cache_base_dir="$3" file="$4"
   local repo_md5 cache_md5
   repo_md5=$(md5sum "$repo_path" | awk '{print $1}')
   cache_md5=$(md5sum "$cache_base_dir/$file" 2>/dev/null | awk '{print $1}')
@@ -241,7 +241,7 @@ done
 # Verify lib/ files in caches
 if [ -d "$REPO/bin/lib" ]; then
   while IFS= read -r -d '' libfile; do
-    rel="${libfile#$REPO/bin/}"
+    rel="${libfile#"$REPO/bin/"}"
     for d in "${CACHES[@]}"; do
       debug_mismatch "lib" "$libfile" "$d/bin" "$rel"
     done

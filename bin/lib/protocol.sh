@@ -5,14 +5,14 @@
 # Usage:
 #   source "$(dirname "$0")/lib/protocol.sh"
 #   detect_protocol
-#   curl $AP_CURL_OPTS "${AP_PROTO}://localhost:${AP_PORT}/..."
+#   curl "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${AP_PORT}/..."
 #
 # State dir: ~/.airprompt/state/ (daemon.json, certs)
 
 # Default port — callers may override before sourcing or after.
 AP_PORT="${AIRPROMPT_PORT:-3210}"
 AP_PROTO="http"
-AP_CURL_OPTS=""
+AP_CURL_OPTS=()
 
 detect_protocol() {
   local state_dir="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
@@ -33,7 +33,7 @@ detect_protocol() {
   elif [ -f "$cert_file" ] && [ -f "$key_file" ]; then
     AP_PROTO="https"
   fi
-  [ "$AP_PROTO" = "https" ] && AP_CURL_OPTS="-k" || true
+  [ "$AP_PROTO" = "https" ] && AP_CURL_OPTS=(-k) || true
 }
 
 # ── Daemon environment forwarding ─────────────────────────────────────

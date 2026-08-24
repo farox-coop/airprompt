@@ -137,7 +137,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 - Files: `package.json`, `Makefile`, `.eslintrc*`/`eslint.config.*` (new), `.prettierrc*` (new), `install.sh`, `install.ps1`, `bin/install.js`, `.github/workflows/test.yml`, all source files (format pass).
 - Scope:
-  - Replace the syntax-only `lint` (`node --check`) with a real linter — ESLint for `.js`, shellcheck for `.sh` (already referenced in `# shellcheck` comments) — wired into `make lint` (shellcheck via `make lint-sh`, CI-gated after the scripts are cleaned up).
+  - Replace the syntax-only `lint` (`node --check`) with a real linter — ESLint for `.js`, shellcheck for `.sh` (already referenced in `# shellcheck` comments) — wired into `make lint`.
   - Add a formatter (Prettier) aligned with `.editorconfig`.
   - Bump the Node floor to ≥20 (ESLint 10 requires ≥20.19.0) — `engines.node`, installer checks, CI matrix [20, 22, 24].
   - One-time `git add --renormalize .` + format pass, landed as its own "format only, no behavior change" commit so a future 2-line edit no longer churns the whole file.
