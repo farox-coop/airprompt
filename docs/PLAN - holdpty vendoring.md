@@ -23,11 +23,11 @@ Create `~/bin/claude` → resolves real binary → `airprompt-launch --provider 
 
 ### Why Phase 0 matters for holdpty
 
-| Without Phase 0 | With Phase 0 |
-|---|---|
-| holdpty replaces tmux → same auto-inject bug persists | holdpty owns PTY from spawn → guaranteed to work |
-| User runs `claude` directly → holdpty can't see it | User runs `claude` → wrapper captures it → holdpty gets it |
-| Fixing auto-inject in holdpty world requires same PATH solution anyway | PATH wrapper ships first, de-risks migration |
+| Without Phase 0                                                        | With Phase 0                                               |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------- |
+| holdpty replaces tmux → same auto-inject bug persists                  | holdpty owns PTY from spawn → guaranteed to work           |
+| User runs `claude` directly → holdpty can't see it                     | User runs `claude` → wrapper captures it → holdpty gets it |
+| Fixing auto-inject in holdpty world requires same PATH solution anyway | PATH wrapper ships first, de-risks migration               |
 
 ### Decision
 
@@ -53,49 +53,49 @@ holdpty is **archived** (read-only since May 2026). No upstream to contribute to
 
 ## What AirPrompt uses tmux for (12 features)
 
-| # | Feature | holdpty equivalent | Status |
-|---|---------|-------------------|--------|
-| 1 | `new-session -d` (detached session) | `holder.ts` — spawns PTY, keeps alive | Exists |
-| 2 | `attach-session` (connect to session) | `client.ts` → `attach()` — interactive mode | Exists |
-| 3 | `has-session` (session exists?) | `session.ts` → `isSessionActive()` | Exists |
-| 4 | `kill-session` (destroy session) | `holder.ts` → `kill()` + `session.ts` → `removeSession()` | Exists |
-| 5 | `send-keys` (inject text, no attach) | `client.ts` → `send()` — non-exclusive write | Exists |
-| 6 | `list-clients` (attached client count) | `holder.ts` tracks `ClientConnection[]` | Exists |
-| 7 | `display-message` (session metadata) | Own registry (`session.ts` metadata) | Exists |
-| 8 | `set-option` (status bar, focus-events) | N/A — no status bar in raw PTY | Not needed |
-| 9 | Clipboard buffers (`load-buffer` / `save-buffer`) | N/A — use OS clipboard directly | Not needed |
-| 10 | `list-panes` / `respawn-pane` (zombie handling) | N/A — no panes, just one PTY per session | Not needed |
-| 11 | Session grouping (parent/child) | N/A — each PTY is independent | Not needed |
-| 12 | Ring buffer / scrollback replay | `ring-buffer.ts` — 1MB ring buffer | Exists |
-| 13 | `capture-pane` (exit dump: last N lines on process exit) | `ring-buffer.ts` — read last N lines from buffer on PTY exit | Exists |
+| #   | Feature                                                  | holdpty equivalent                                           | Status     |
+| --- | -------------------------------------------------------- | ------------------------------------------------------------ | ---------- |
+| 1   | `new-session -d` (detached session)                      | `holder.ts` — spawns PTY, keeps alive                        | Exists     |
+| 2   | `attach-session` (connect to session)                    | `client.ts` → `attach()` — interactive mode                  | Exists     |
+| 3   | `has-session` (session exists?)                          | `session.ts` → `isSessionActive()`                           | Exists     |
+| 4   | `kill-session` (destroy session)                         | `holder.ts` → `kill()` + `session.ts` → `removeSession()`    | Exists     |
+| 5   | `send-keys` (inject text, no attach)                     | `client.ts` → `send()` — non-exclusive write                 | Exists     |
+| 6   | `list-clients` (attached client count)                   | `holder.ts` tracks `ClientConnection[]`                      | Exists     |
+| 7   | `display-message` (session metadata)                     | Own registry (`session.ts` metadata)                         | Exists     |
+| 8   | `set-option` (status bar, focus-events)                  | N/A — no status bar in raw PTY                               | Not needed |
+| 9   | Clipboard buffers (`load-buffer` / `save-buffer`)        | N/A — use OS clipboard directly                              | Not needed |
+| 10  | `list-panes` / `respawn-pane` (zombie handling)          | N/A — no panes, just one PTY per session                     | Not needed |
+| 11  | Session grouping (parent/child)                          | N/A — each PTY is independent                                | Not needed |
+| 12  | Ring buffer / scrollback replay                          | `ring-buffer.ts` — 1MB ring buffer                           | Exists     |
+| 13  | `capture-pane` (exit dump: last N lines on process exit) | `ring-buffer.ts` — read last N lines from buffer on PTY exit | Exists     |
 
 **Verdict:** 9/13 features already exist in holdpty. 4 are tmux-specific and not needed in a node-pty world.
 
 ### Files that become obsolete after Phase 5
 
-| File | Reason |
-|---|---|
-| `bin/airprompt-attach.sh` | reptyr-based manual attach — no tmux means no reptyr needed. PTY is owned from process start. |
-| `airprompt-daemon` tmux session | Daemon runs directly (systemd/nohup/child_process), not inside tmux. |
+| File                            | Reason                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------- |
+| `bin/airprompt-attach.sh`       | reptyr-based manual attach — no tmux means no reptyr needed. PTY is owned from process start. |
+| `airprompt-daemon` tmux session | Daemon runs directly (systemd/nohup/child_process), not inside tmux.                          |
 
 ## holdpty source files (14 files, ~1,800 loc TypeScript)
 
-| File | LOC | Role |
-|------|-----|------|
-| `holder.ts` | ~300 | Core: PTY owner, ring buffer, Unix socket server, client management |
-| `protocol.ts` | ~200 | Binary protocol: 8 message types (DATA_OUT, DATA_IN, RESIZE, EXIT, HELLO, HELLO_ACK, REPLAY_END, ERROR) |
-| `client.ts` | ~250 | Client side: connect(), attach(), view(), logs(), send(), waitForExit() |
-| `session.ts` | ~150 | Filesystem registry: metadata CRUD, listing, stale cleanup |
-| `ring-buffer.ts` | ~80 | 1MB ring buffer with line tracking |
-| `cli.ts` | ~200 | CLI interface (8 subcommands) — we replace this with REST API |
-| `platform.ts` | ~50 | Cross-platform abstractions (socket paths, shell resolution) |
-| `line-filter.ts` | ~60 | Line-based output filtering |
-| `e2e.test.ts` | ~150 | End-to-end tests |
-| `integration.test.ts` | ~100 | Integration tests |
-| `line-filter.test.ts` | ~60 | Line filter tests |
-| `platform.test.ts` | ~40 | Platform tests |
-| `protocol.test.ts` | ~80 | Protocol encode/decode tests |
-| `ring-buffer.test.ts` | ~70 | Ring buffer tests |
+| File                  | LOC  | Role                                                                                                    |
+| --------------------- | ---- | ------------------------------------------------------------------------------------------------------- |
+| `holder.ts`           | ~300 | Core: PTY owner, ring buffer, Unix socket server, client management                                     |
+| `protocol.ts`         | ~200 | Binary protocol: 8 message types (DATA_OUT, DATA_IN, RESIZE, EXIT, HELLO, HELLO_ACK, REPLAY_END, ERROR) |
+| `client.ts`           | ~250 | Client side: connect(), attach(), view(), logs(), send(), waitForExit()                                 |
+| `session.ts`          | ~150 | Filesystem registry: metadata CRUD, listing, stale cleanup                                              |
+| `ring-buffer.ts`      | ~80  | 1MB ring buffer with line tracking                                                                      |
+| `cli.ts`              | ~200 | CLI interface (8 subcommands) — we replace this with REST API                                           |
+| `platform.ts`         | ~50  | Cross-platform abstractions (socket paths, shell resolution)                                            |
+| `line-filter.ts`      | ~60  | Line-based output filtering                                                                             |
+| `e2e.test.ts`         | ~150 | End-to-end tests                                                                                        |
+| `integration.test.ts` | ~100 | Integration tests                                                                                       |
+| `line-filter.test.ts` | ~60  | Line filter tests                                                                                       |
+| `platform.test.ts`    | ~40  | Platform tests                                                                                          |
+| `protocol.test.ts`    | ~80  | Protocol encode/decode tests                                                                            |
+| `ring-buffer.test.ts` | ~70  | Ring buffer tests                                                                                       |
 
 ## holdpty protocol (binary, 8 message types)
 
@@ -156,6 +156,7 @@ Browser WS ───> daemon (server.js) ──IPC──> holder process (sessio
 holdpty's `attach` mode is exclusive (one writer). AirPrompt needs multiple web clients writing to same PTY.
 
 **Changes in `client.ts` `attach()` equivalent:**
+
 - Remove `writer` flag check in handshake
 - Allow multiple `DATA_IN` senders regardless of mode
 - `send()` already supports this — just make `attach()` not claim exclusivity
@@ -167,6 +168,7 @@ AirPrompt has its own session tracking: daemon `Map` + disk markers (`~/.claude/
 **Decision:** Keep AirPrompt's registry. Don't use holdpty's `session.ts`.
 
 What changes:
+
 - `register` endpoint creates holder process + writes disk markers (same as today)
 - `unregister` kills holder process + removes markers
 - Daemon stale sweep checks holder process aliveness (already has PID)
@@ -205,13 +207,13 @@ Once `pty` backend is stable for a release, flip default. One release later, del
 
 ## Risks & mitigations
 
-| Risk | Mitigation |
-|------|-----------|
-| holdpty is archived, no upstream fixes | Vendored code is small (~1,800 loc) and self-contained. We own it. |
-| PTY lifecycle bugs (orphaned processes) | Same orphan killer pattern from Layer C — daemon sweep checks PID aliveness |
-| Cross-platform Windows PTY quirks | node-pty has ConPTY support. Test on Windows before flipping default. |
-| Protocol overhead vs raw tmux PTY | Binary protocol is 5-byte header + payload. Negligible vs tmux overhead. |
-| Multiple writers corrupting PTY state | tmux handles this natively. Without tmux, PTY serializes writes via OS tty layer. Acceptable for our use case (one human typing at a time). |
+| Risk                                    | Mitigation                                                                                                                                  |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| holdpty is archived, no upstream fixes  | Vendored code is small (~1,800 loc) and self-contained. We own it.                                                                          |
+| PTY lifecycle bugs (orphaned processes) | Same orphan killer pattern from Layer C — daemon sweep checks PID aliveness                                                                 |
+| Cross-platform Windows PTY quirks       | node-pty has ConPTY support. Test on Windows before flipping default.                                                                       |
+| Protocol overhead vs raw tmux PTY       | Binary protocol is 5-byte header + payload. Negligible vs tmux overhead.                                                                    |
+| Multiple writers corrupting PTY state   | tmux handles this natively. Without tmux, PTY serializes writes via OS tty layer. Acceptable for our use case (one human typing at a time). |
 
 ## References
 

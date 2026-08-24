@@ -26,8 +26,9 @@ function withEnv(overrides, fn) {
     if (overrides[k] === undefined) delete process.env[k];
     else process.env[k] = overrides[k];
   }
-  try { return fn(); }
-  finally {
+  try {
+    return fn();
+  } finally {
     for (const k of Object.keys(saved)) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
@@ -197,7 +198,12 @@ test('ClaudeProvider — parseHookStdin preserves extra unknown fields in raw', 
 // ── formatHookOutput ────────────────────────────────────────────────────────
 
 test('ClaudeProvider — formatHookOutput returns JSON string', () => {
-  const result = { status: 'ok', message: 'registered', url: 'https://192.168.1.5:3210', sessionId: 's1' };
+  const result = {
+    status: 'ok',
+    message: 'registered',
+    url: 'https://192.168.1.5:3210',
+    sessionId: 's1',
+  };
   const output = ClaudeProvider.formatHookOutput(result);
   assert.strictEqual(output, JSON.stringify(result));
   // Verify round-trip
@@ -223,22 +229,26 @@ test('ClaudeProvider — formatHookOutput handles null url/sessionId', () => {
 test('ClaudeProvider — buildHookEntry returns Claude-format hook entry', () => {
   const entry = ClaudeProvider.buildHookEntry('SessionStart', '/path/to/script.js', 10);
   assert.deepStrictEqual(entry, {
-    hooks: [{
-      type: 'command',
-      command: '/path/to/script.js',
-      timeout: 10,
-    }],
+    hooks: [
+      {
+        type: 'command',
+        command: '/path/to/script.js',
+        timeout: 10,
+      },
+    ],
   });
 });
 
 test('ClaudeProvider — buildHookEntry with Stop event', () => {
   const entry = ClaudeProvider.buildHookEntry('Stop', '/path/to/deactivate.js', 5);
   assert.deepStrictEqual(entry, {
-    hooks: [{
-      type: 'command',
-      command: '/path/to/deactivate.js',
-      timeout: 5,
-    }],
+    hooks: [
+      {
+        type: 'command',
+        command: '/path/to/deactivate.js',
+        timeout: 5,
+      },
+    ],
   });
 });
 
@@ -276,7 +286,7 @@ test('ClaudeProvider — getHookFiles returns 3 hook files', () => {
 
 test('ClaudeProvider — getHookFiles includes all expected hooks', () => {
   const files = ClaudeProvider.getHookFiles();
-  const names = files.map(f => path.basename(f.src));
+  const names = files.map((f) => path.basename(f.src));
   assert.ok(names.includes('airprompt-activate.js'));
   assert.ok(names.includes('airprompt-deactivate.js'));
   assert.ok(names.includes('airprompt-statusline.sh'));
@@ -297,7 +307,7 @@ test('ClaudeProvider — getSkillFiles returns empty array (skills shipped via p
 test('ClaudeProvider — getCommandFiles returns 2 command files', () => {
   const files = ClaudeProvider.getCommandFiles();
   assert.strictEqual(files.length, 2);
-  const names = files.map(f => path.basename(f.src));
+  const names = files.map((f) => path.basename(f.src));
   assert.ok(names.includes('airprompt.md'));
   assert.ok(names.includes('airprompt.toml'));
 });
@@ -399,7 +409,7 @@ test('ClaudeProvider — appears in listProviders', () => {
 test('ClaudeProvider — appears in allProviders', () => {
   registry.clearCache();
   const all = registry.allProviders();
-  const claude = all.find(p => p.id === 'claude');
+  const claude = all.find((p) => p.id === 'claude');
   assert.ok(claude);
   assert.strictEqual(typeof claude.configDir, 'function');
 });
@@ -408,12 +418,24 @@ test('ClaudeProvider — appears in allProviders', () => {
 
 test('ClaudeProvider — has all required Provider interface properties', () => {
   const requiredProps = [
-    'id', 'label', 'mech', 'detect', 'profile',
-    'hookEvents', 'commandPrefix',
-    'detectMatch', 'parseHookStdin', 'formatHookOutput',
-    'buildHookEntry', 'buildStatusLineEntry',
-    'install', 'uninstall',
-    'getHookFiles', 'getSkillFiles', 'getCommandFiles', 'getRuleFiles',
+    'id',
+    'label',
+    'mech',
+    'detect',
+    'profile',
+    'hookEvents',
+    'commandPrefix',
+    'detectMatch',
+    'parseHookStdin',
+    'formatHookOutput',
+    'buildHookEntry',
+    'buildStatusLineEntry',
+    'install',
+    'uninstall',
+    'getHookFiles',
+    'getSkillFiles',
+    'getCommandFiles',
+    'getRuleFiles',
   ];
   for (const prop of requiredProps) {
     assert.ok(prop in ClaudeProvider, `missing property: ${prop}`);
@@ -422,16 +444,29 @@ test('ClaudeProvider — has all required Provider interface properties', () => 
 
 test('ClaudeProvider — has all required Provider interface methods as functions', () => {
   const methods = [
-    'configDir', 'sessionsDir', 'hooksDir', 'hooksConfigPath',
-    'skillsDir', 'commandsDir', 'rulesDir',
-    'detectMatch', 'parseHookStdin', 'formatHookOutput',
-    'buildHookEntry', 'buildStatusLineEntry',
-    'install', 'uninstall',
-    'getHookFiles', 'getSkillFiles', 'getCommandFiles', 'getRuleFiles',
+    'configDir',
+    'sessionsDir',
+    'hooksDir',
+    'hooksConfigPath',
+    'skillsDir',
+    'commandsDir',
+    'rulesDir',
+    'detectMatch',
+    'parseHookStdin',
+    'formatHookOutput',
+    'buildHookEntry',
+    'buildStatusLineEntry',
+    'install',
+    'uninstall',
+    'getHookFiles',
+    'getSkillFiles',
+    'getCommandFiles',
+    'getRuleFiles',
   ];
   for (const method of methods) {
     assert.strictEqual(
-      typeof ClaudeProvider[method], 'function',
+      typeof ClaudeProvider[method],
+      'function',
       `ClaudeProvider.${method} should be a function`
     );
   }

@@ -53,11 +53,19 @@ function runStaleSweep(sessions, deps) {
     if (!entry.tmuxSession.startsWith('airprompt-')) continue;
 
     const sessionsDir = getSessionsDir();
-    const safeName = entry.tmuxSession.replace(/[^a-zA-Z0-9_.-]/g, '')
-      || entry.tmuxSession.replace(/[^a-zA-Z0-9]/g, '') || 'unknown';
-    const mirrorFile = path.join(sessionsDir, `${entry.providerId || 'unknown'}-${safeName}`, 'mirror');
+    const safeName =
+      entry.tmuxSession.replace(/[^a-zA-Z0-9_.-]/g, '') ||
+      entry.tmuxSession.replace(/[^a-zA-Z0-9]/g, '') ||
+      'unknown';
+    const mirrorFile = path.join(
+      sessionsDir,
+      `${entry.providerId || 'unknown'}-${safeName}`,
+      'mirror'
+    );
     let isMirror = false;
-    try { isMirror = fs.existsSync(mirrorFile); } catch (_) {}
+    try {
+      isMirror = fs.existsSync(mirrorFile);
+    } catch (_) {}
     if (!isMirror) continue;
 
     const idle = now - (entry.lastActivity || 0);
@@ -66,8 +74,11 @@ function runStaleSweep(sessions, deps) {
     // Confirm no tmux client is attached before killing
     let canConfirmNoClients = false;
     try {
-      const clients = spawnSync('tmux', ['list-clients', '-t', entry.tmuxSession, '-F', '#{client_name}'],
-        { timeout: 2000, encoding: 'utf8' });
+      const clients = spawnSync(
+        'tmux',
+        ['list-clients', '-t', entry.tmuxSession, '-F', '#{client_name}'],
+        { timeout: 2000, encoding: 'utf8' }
+      );
       if (clients.status === 0) {
         canConfirmNoClients = true;
         if (clients.stdout.trim()) continue; // has attached client → not orphan
@@ -76,8 +87,14 @@ function runStaleSweep(sessions, deps) {
     if (!canConfirmNoClients) continue;
 
     // No clients + idle > grace → orphan. Kill tmux + unregister.
-    log('warn', 'orphan mirror session killed', { id, tmuxSession: entry.tmuxSession, idleMs: idle });
-    try { spawnSync('tmux', ['kill-session', '-t', entry.tmuxSession], { timeout: 2000 }); } catch (_) {}
+    log('warn', 'orphan mirror session killed', {
+      id,
+      tmuxSession: entry.tmuxSession,
+      idleMs: idle,
+    });
+    try {
+      spawnSync('tmux', ['kill-session', '-t', entry.tmuxSession], { timeout: 2000 });
+    } catch (_) {}
     sessions.delete(id);
     removed++;
   }

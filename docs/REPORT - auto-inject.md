@@ -26,6 +26,7 @@ When user runs `claude` directly (not through `airprompt-claude` or `airprompt-l
 AirPrompt mirrors IDE sessions by connecting to a **tmux session** via `node-pty` + `tmux attach-session`. The web UI creates a grouped tmux session (`airprompt-web-*`) that mirrors the real session, attaches node-pty to it, and streams terminal output to xterm.js over WebSocket.
 
 When `claude` is launched directly:
+
 1. Claude runs **outside tmux** (no `$TMUX` env var)
 2. The `SessionStart` hook fires → `airprompt-activate.js` runs
 3. `detectTmux()` returns empty string (line 74-87, `src/hooks/core/activate.js`)
@@ -69,6 +70,7 @@ Claude Code checks `$TMUX` for its own nested-session detection (it sets `CLAUDE
 ```
 
 Key files:
+
 - `bin/airprompt-launch` (295 lines) — creates tmux session, runs claude inside it
 - `src/hooks/core/activate.js` (309 lines) — SessionStart handler, `detectTmux()` at line 74
 - `server.js` (608 lines) — `spawnPty()` at line 349 creates grouped web session
@@ -86,6 +88,7 @@ Current PATH order: `~/.local/bin` (position 5) before `~/bin` (position 6). Rea
 **What:** Create `~/bin/claude` wrapper that calls `airprompt-launch --provider claude "$@"`, and ensure `~/bin` is before `~/.local/bin` in `$PATH`.
 
 **Implementation:**
+
 1. Create `~/bin/claude` wrapper (see section 6.1 below for full injection strategy — guard blocks, recursion fix, all four cases)
 2. Add to `~/.bashrc` / `~/.zshrc` (via install script):
    ```bash
@@ -95,6 +98,7 @@ Current PATH order: `~/.local/bin` (position 5) before `~/bin` (position 6). Rea
 3. Add same for `codex`, `cursor`, `windsurf` (already have `~/bin/airprompt-*` wrappers)
 
 **Pros:**
+
 - Zero user behavior change — they keep typing `claude`
 - Already-proven pattern (the `airprompt-claude` wrapper exists and works)
 - Works for all providers (claude, codex, cursor, windsurf)
@@ -104,13 +108,13 @@ Current PATH order: `~/.local/bin` (position 5) before `~/bin` (position 6). Rea
 
 **Cons & risks (with mitigations):**
 
-| Risk | Severity | Mitigation |
-|---|---|---|
-| **Recursion loop**: `~/bin/claude` → `airprompt-launch` → `command -v claude` → finds wrapper again → ∞ | 🔴 CRITICAL | Fix `airprompt-launch` binary resolution to skip `~/bin` when searching PATH. OR pass `--binary $(PATH minus ~/bin which claude)` from wrapper. **Must fix before shipping.** |
-| **Pre-existing `~/bin/claude`**: user already has a `~/bin/claude` (symlink, script, or whatever) | 🟡 Medium | **Minimal invasive injection — never overwrite.** Append AirPrompt's logic at top of existing file, inside marked guard block (`### AIRPROMPT BEGIN` / `### AIRPROMPT END`). Original user code runs after our guard returns. Uninstall/off/clean strips only the guard block, leaves user's original untouched. If file is binary or symlink: rename to `~/bin/claude.real`, create wrapper script that exec's original. |
-| **Claude updates overwrite?** | 🟢 None | Claude's installer only touches `~/.local/bin/claude` and `~/.local/share/claude/versions/`. Our wrapper lives at `~/bin/claude` — different directory. Never gets touched. |
-| **Absolute path bypass**: `~/.local/bin/claude` or `/usr/local/bin/claude` | 🟡 Medium | Uncommon for interactive terminal use. Desktop shortcuts / IDE integrations may use absolute paths. |
-| **`~/bin` before `~/.local/bin` shadows other tools** | 🟡 Medium | Only shadows tools that exist in BOTH `~/bin` and `~/.local/bin`. Installer lists conflicts. User can opt out. |
+| Risk                                                                                                    | Severity    | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Recursion loop**: `~/bin/claude` → `airprompt-launch` → `command -v claude` → finds wrapper again → ∞ | 🔴 CRITICAL | Fix `airprompt-launch` binary resolution to skip `~/bin` when searching PATH. OR pass `--binary $(PATH minus ~/bin which claude)` from wrapper. **Must fix before shipping.**                                                                                                                                                                                                                                             |
+| **Pre-existing `~/bin/claude`**: user already has a `~/bin/claude` (symlink, script, or whatever)       | 🟡 Medium   | **Minimal invasive injection — never overwrite.** Append AirPrompt's logic at top of existing file, inside marked guard block (`### AIRPROMPT BEGIN` / `### AIRPROMPT END`). Original user code runs after our guard returns. Uninstall/off/clean strips only the guard block, leaves user's original untouched. If file is binary or symlink: rename to `~/bin/claude.real`, create wrapper script that exec's original. |
+| **Claude updates overwrite?**                                                                           | 🟢 None     | Claude's installer only touches `~/.local/bin/claude` and `~/.local/share/claude/versions/`. Our wrapper lives at `~/bin/claude` — different directory. Never gets touched.                                                                                                                                                                                                                                               |
+| **Absolute path bypass**: `~/.local/bin/claude` or `/usr/local/bin/claude`                              | 🟡 Medium   | Uncommon for interactive terminal use. Desktop shortcuts / IDE integrations may use absolute paths.                                                                                                                                                                                                                                                                                                                       |
+| **`~/bin` before `~/.local/bin` shadows other tools**                                                   | 🟡 Medium   | Only shadows tools that exist in BOTH `~/bin` and `~/.local/bin`. Installer lists conflicts. User can opt out.                                                                                                                                                                                                                                                                                                            |
 
 **Success rate:** ~95% for interactive terminal use. Non-interactive (scripts, IDE launchers, desktop shortcuts) may bypass.
 
@@ -121,6 +125,7 @@ Current PATH order: `~/.local/bin` (position 5) before `~/bin` (position 6). Rea
 **What:** When `activateSession()` detects no tmux session, use `reptyr` to steal the running Claude process into a newly-created tmux session.
 
 **Implementation:**
+
 1. In `detectTmux()` failure path, find the Claude PID via `process.ppid` chain
 2. Create tmux session: `tmux new-session -d -s airprompt-$PID`
 3. Steal the process: `reptyr $CLAUDE_PID` (from within the tmux session)
@@ -129,11 +134,13 @@ Current PATH order: `~/.local/bin` (position 5) before `~/bin` (position 6). Rea
 **Existing code:** `bin/airprompt-attach.sh` already implements this pattern for manual use.
 
 **Pros:**
+
 - Works regardless of how claude was launched (absolute path, alias, desktop shortcut)
 - No PATH manipulation needed
 - Already partially implemented (`airprompt-attach.sh`)
 
 **Cons:**
+
 - `reptyr` uses `ptrace(2)` — requires:
   - `kernel.yama.ptrace_scope=0` (default is 1 on Ubuntu, only allows child tracing)
   - OR `sudo` (unacceptable for a user tool)
@@ -153,12 +160,13 @@ Current PATH order: `~/.local/bin` (position 5) before `~/bin` (position 6). Rea
 **What:** Hook into the shell's command execution pipeline to detect `claude` invocations and rewrite them to `airprompt-launch`.
 
 **Implementation (bash):**
+
 ```bash
 # In ~/.bashrc
 airprompt_intercept() {
   local cmd="$BASH_COMMAND"
   case "$cmd" in
-    claude\ *|claude) 
+    claude\ *|claude)
       # Kill the DEBUG trap temporarily to avoid recursion
       trap - DEBUG
       airprompt-launch --provider claude ${cmd#claude }
@@ -172,6 +180,7 @@ trap airprompt_intercept DEBUG
 ```
 
 **Implementation (zsh):**
+
 ```zsh
 airprompt_preexec() {
   if [[ "$1" =~ ^claude(\ |$) ]]; then
@@ -183,11 +192,13 @@ airprompt_preexec() {
 ```
 
 **Pros:**
+
 - No PATH tricks needed
 - Shell-native, no ptrace dependencies
 - Cross-platform (bash/zsh on any OS)
 
 **Cons:**
+
 - Shell-specific — needs bash AND zsh AND fish versions
 - `DEBUG` trap is fragile — other tools may fight over it
 - Only works in interactive shells
@@ -205,6 +216,7 @@ airprompt_preexec() {
 **What:** Move the real `claude` binary to `claude-real`, install a wrapper script at the original location that delegates to `airprompt-launch`.
 
 **Implementation:**
+
 ```bash
 # During install:
 mv ~/.local/bin/claude ~/.local/bin/claude-real
@@ -216,11 +228,13 @@ chmod +x ~/.local/bin/claude
 ```
 
 **Pros:**
+
 - 100% coverage — catches ALL invocations (absolute paths, scripts, aliases, everything)
 - No shell hooks needed
 - No PATH changes needed
 
 **Cons:**
+
 - **Invasive** — modifies Claude Code's installation directory
 - **Breaks on Claude updates** — `claude update` or `npm update` may overwrite the wrapper
 - Claude Code manages its own installation (`~/.local/share/claude/versions/...`) with symlinks
@@ -239,17 +253,20 @@ chmod +x ~/.local/bin/claude
 **What:** Instead of requiring the IDE to run inside tmux, have AirPrompt connect directly to the terminal's PTY master/slave pair.
 
 **Implementation sketch:**
+
 1. At SessionStart, find the Claude process's controlling terminal: `/proc/$PID/fd/0`
 2. Open the PTY master (requires root or special permissions)
 3. Stream PTY output to the web UI
 4. Inject input into the PTY
 
 **Pros:**
+
 - No tmux dependency at all
 - Works for any terminal-based app
 - Cleaner architecture long-term
 
 **Cons:**
+
 - **Massive architectural change** — rewrites core of server.js (lines 349-435)
 - Requires `root` or `CAP_SYS_ADMIN` to access another process's PTY master
 - Terminal ownership conflict — both local user AND web user fight over stdin
@@ -269,6 +286,7 @@ This is essentially what the [holdpty vendoring plan](./PLAN%20-%20holdpty%20ven
 **What:** Add `set-hook -g session-created 'run-shell ...'` to `~/.tmux.conf` so AirPrompt auto-registers ANY new tmux session, regardless of how it was created.
 
 **Implementation:**
+
 ```tmux
 # In ~/.tmux.conf
 set-hook -g session-created 'run-shell "~/.airprompt/bin/airprompt-on-session.sh #{session_name}"'
@@ -277,11 +295,13 @@ set-hook -g session-created 'run-shell "~/.airprompt/bin/airprompt-on-session.sh
 The script detects whether the session contains an IDE process and auto-registers it.
 
 **Pros:**
+
 - Captures sessions created by ANY means (manual `tmux new-session`, other tools, scripts)
 - No shell hooks or PATH tricks needed
 - tmux-native mechanism (since tmux 2.4)
 
 **Cons:**
+
 - Only works if user already has `claude` running inside SOME tmux session
 - Does NOT solve the core problem — if user runs `claude` outside tmux, no tmux session exists to hook
 - Complements rather than replaces PATH wrapper approach
@@ -395,6 +415,7 @@ fi
 The guard runs first. If `airprompt-launch` succeeds (daemon running, session registered), it takes over. If it fails (daemon down, uninstall in progress), execution falls through to the user's original `~/bin/claude` code.
 
 **Injection algorithm:**
+
 1. Read existing file
 2. If guard block already present → idempotent, skip
 3. If `#!/bin/bash` or `#!/bin/sh` shebang exists → insert guard after shebang
@@ -402,6 +423,7 @@ The guard runs first. If `airprompt-launch` succeeds (daemon running, session re
 5. Write modified file
 
 **Removal algorithm (`uninstall`/`off`/`clean`):**
+
 1. Read file
 2. Strip everything between `### AIRPROMPT BEGIN` and `### AIRPROMPT END` (inclusive)
 3. If result is empty file (was Case A) → delete file
@@ -411,9 +433,11 @@ The guard runs first. If `airprompt-launch` succeeds (daemon running, session re
 #### Case C: `~/bin/claude` is a SYMLINK
 
 Cannot inject into a symlink. Strategy:
+
 1. Record symlink target: `~/bin/claude → /some/path`
 2. Rename symlink: `mv ~/bin/claude ~/bin/claude.real`
 3. Create wrapper script at `~/bin/claude`:
+
 ```bash
 #!/bin/bash
 ### AIRPROMPT BEGIN
@@ -422,23 +446,25 @@ _real_claude="$HOME/bin/claude.real"  # renamed original symlink
 exec airprompt-launch --provider claude --binary "$_real_claude" "$@"
 ### AIRPROMPT END
 ```
+
 4. **Removal:** delete `~/bin/claude`, rename `claude.real` back to `claude`
 
 #### Case D: `~/bin/claude` is a BINARY (not a script)
 
 Cannot inject. Same strategy as symlink:
+
 1. Rename: `mv ~/bin/claude ~/bin/claude.real`
 2. Create wrapper script (same as Case C)
 3. **Removal:** delete wrapper, rename `.real` back
 
 ### 6.1b What triggers injection (all new — implemented in Phase 0)
 
-| Command | Action |
-|---|---|
-| `airprompt install` | Inject guard into `~/bin/{claude,codex,cursor,windsurf}` (Case A/B/C/D) |
-| `airprompt on` | Verify guard exists, inject if missing (idempotent) |
-| `airprompt autostart on` | Same as `on` — verify + inject |
-| `airprompt doctor` | Diagnose only: guard present? PATH correct? real binary accessible? |
+| Command                  | Action                                                                  |
+| ------------------------ | ----------------------------------------------------------------------- |
+| `airprompt install`      | Inject guard into `~/bin/{claude,codex,cursor,windsurf}` (Case A/B/C/D) |
+| `airprompt on`           | Verify guard exists, inject if missing (idempotent)                     |
+| `airprompt autostart on` | Same as `on` — verify + inject                                          |
+| `airprompt doctor`       | Diagnose only: guard present? PATH correct? real binary accessible?     |
 
 ### 6.1c What triggers removal — undo injection (all new — implemented in Phase 0)
 
@@ -446,11 +472,11 @@ Cannot inject. Same strategy as symlink:
 
 **After Phase 0:**
 
-| Command | Action |
-|---|---|
-| `airprompt uninstall` | Strip guard from ALL injected files, restore originals bit-for-bit |
-| `airprompt clean` | Same as uninstall — strip all guards, restore all originals |
-| `airprompt off` | Strip guard only for current provider (e.g., only `~/bin/claude` guard removed, `~/bin/codex` stays) |
+| Command               | Action                                                                                               |
+| --------------------- | ---------------------------------------------------------------------------------------------------- |
+| `airprompt uninstall` | Strip guard from ALL injected files, restore originals bit-for-bit                                   |
+| `airprompt clean`     | Same as uninstall — strip all guards, restore all originals                                          |
+| `airprompt off`       | Strip guard only for current provider (e.g., only `~/bin/claude` guard removed, `~/bin/codex` stays) |
 
 **Invariant:** After any of these commands, `~/bin/claude` is bit-for-bit identical to its pre-AirPrompt state. User never loses their customizations.
 
@@ -485,6 +511,7 @@ export PATH="$HOME/bin:$PATH"
 ### 6.3 `airprompt doctor` command
 
 New `bin/airprompt-doctor.sh` that checks:
+
 ```bash
 # 1. Is ~/bin in PATH before ~/.local/bin?
 # 2. Does ~/bin/claude exist?
@@ -495,17 +522,17 @@ New `bin/airprompt-doctor.sh` that checks:
 
 ### 6.4 Changes to existing code
 
-| File | Change | Status |
-|---|---|---|
-| `bin/airprompt` | Add `doctor` command dispatch | New |
-| `bin/airprompt-doctor.sh` | NEW — diagnostic script | New |
-| `bin/install.js` | Add base-name provider wrappers: `~/bin/{claude,codex,cursor,windsurf}` with guard-block injection | Modified |
-| `src/hooks/core/activate.js` | Warning message when no tmux detected (line 246-250) | Modified |
-| `src/providers/claude.js` | `install()` at line 408 creates `airprompt-claude` but NOT `claude` — extend to create base-name wrapper too. `uninstall()` at line 569 removes `airprompt-*` but must also strip guard blocks from `claude`/etc. | Modified |
-| `bin/airprompt-clean.sh` | Line 83 removes `airprompt-{provider}` wrappers — extend to also strip guard blocks from `~/bin/{claude,codex,cursor,windsurf}` (base names) and restore originals per Case A/B/C/D | Modified |
-| `bin/airprompt-off.sh` | Add guard-strip logic for current provider (currently has no wrapper removal at all) | Modified |
-| `bin/airprompt-launch` | Fix binary resolution to skip `~/bin` as defense-in-depth (section 6.1d) | Modified |
-| `bin/lib/protocol.sh` | `_ensure_bin_symlinks` (line 54-83) restores symlinks + wrappers after clean — extend to handle base-name guard-block injection | Modified |
+| File                         | Change                                                                                                                                                                                                            | Status   |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `bin/airprompt`              | Add `doctor` command dispatch                                                                                                                                                                                     | New      |
+| `bin/airprompt-doctor.sh`    | NEW — diagnostic script                                                                                                                                                                                           | New      |
+| `bin/install.js`             | Add base-name provider wrappers: `~/bin/{claude,codex,cursor,windsurf}` with guard-block injection                                                                                                                | Modified |
+| `src/hooks/core/activate.js` | Warning message when no tmux detected (line 246-250)                                                                                                                                                              | Modified |
+| `src/providers/claude.js`    | `install()` at line 408 creates `airprompt-claude` but NOT `claude` — extend to create base-name wrapper too. `uninstall()` at line 569 removes `airprompt-*` but must also strip guard blocks from `claude`/etc. | Modified |
+| `bin/airprompt-clean.sh`     | Line 83 removes `airprompt-{provider}` wrappers — extend to also strip guard blocks from `~/bin/{claude,codex,cursor,windsurf}` (base names) and restore originals per Case A/B/C/D                               | Modified |
+| `bin/airprompt-off.sh`       | Add guard-strip logic for current provider (currently has no wrapper removal at all)                                                                                                                              | Modified |
+| `bin/airprompt-launch`       | Fix binary resolution to skip `~/bin` as defense-in-depth (section 6.1d)                                                                                                                                          | Modified |
+| `bin/lib/protocol.sh`        | `_ensure_bin_symlinks` (line 54-83) restores symlinks + wrappers after clean — extend to handle base-name guard-block injection                                                                                   | Modified |
 
 ### 6.5 Rollback (undo injection)
 
@@ -521,6 +548,7 @@ airprompt uninstall
 ```
 
 **Manual rollback** (if automated undo fails):
+
 ```bash
 # If you have the .real backup (symlink/binary case):
 mv ~/bin/claude.real ~/bin/claude
@@ -552,6 +580,7 @@ User types: claude
 ```
 
 Edge cases handled:
+
 - **Already inside tmux**: `airprompt-launch` line 277-281 → `exec claude` directly (no double-wrapping)
 - **`--resume` flag**: `airprompt-launch` line 236-274 → resumes dead pane or reattaches
 - **`\claude` (bypass)**: Shell escapes disable alias/function lookup. Wrappers are regular executables, not aliases, so `\claude` still resolves through PATH. Only absolute paths bypass.
@@ -560,13 +589,13 @@ Edge cases handled:
 
 ## 8. Open Questions & Resolved
 
-| # | Question | Status |
-|---|---|---|
-| 1 | Other provider binaries — `codex`, `cursor`, `windsurf` — same wrapper pattern? | **Resolved:** Yes. Same guard-block injection for all four: `~/bin/{claude,codex,cursor,windsurf}` |
-| 2 | Non-interactive launches — VS Code "Open in Claude Code" button, desktop shortcuts | **Open:** PATH-only solution won't catch these. Out of scope for Phase 1. Phase 3 (process monitor) may address. |
-| 3 | `npx claude` — does it invoke the local `claude` binary? | **Open.** If `npx` uses full PATH resolution, our `~/bin/claude` wrapper catches it. If `npx` uses npm's own resolution, it bypasses. |
-| 4 | PATH ordering conflict — `~/bin` before `~/.local/bin` shadows other tools | **Open:** Installer lists conflicts. User opts out. Mitigation: `PATH="$HOME/bin:$PATH"` is only injected into interactive shell profiles, not system-wide. |
-| 5 | `airprompt-launch` not found in PATH after `clean` | **Resolved:** `lib/protocol.sh` `_ensure_bin_symlinks()` restores symlinks on next invocation. Clean → immediate re-use works. |
+| #   | Question                                                                           | Status                                                                                                                                                      |
+| --- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Other provider binaries — `codex`, `cursor`, `windsurf` — same wrapper pattern?    | **Resolved:** Yes. Same guard-block injection for all four: `~/bin/{claude,codex,cursor,windsurf}`                                                          |
+| 2   | Non-interactive launches — VS Code "Open in Claude Code" button, desktop shortcuts | **Open:** PATH-only solution won't catch these. Out of scope for Phase 1. Phase 3 (process monitor) may address.                                            |
+| 3   | `npx claude` — does it invoke the local `claude` binary?                           | **Open.** If `npx` uses full PATH resolution, our `~/bin/claude` wrapper catches it. If `npx` uses npm's own resolution, it bypasses.                       |
+| 4   | PATH ordering conflict — `~/bin` before `~/.local/bin` shadows other tools         | **Open:** Installer lists conflicts. User opts out. Mitigation: `PATH="$HOME/bin:$PATH"` is only injected into interactive shell profiles, not system-wide. |
+| 5   | `airprompt-launch` not found in PATH after `clean`                                 | **Resolved:** `lib/protocol.sh` `_ensure_bin_symlinks()` restores symlinks on next invocation. Clean → immediate re-use works.                              |
 
 ### Out of scope for Phase 1 (noted for future)
 

@@ -53,7 +53,9 @@ function discover() {
 
     if (!mod || typeof mod !== 'object' || !mod.id || typeof mod.configDir !== 'function') {
       if (process.env.AIRPROMPT_DEBUG === '1') {
-        process.stderr.write(`airprompt: registry — skipping ${entry}: missing id or configDir()\n`);
+        process.stderr.write(
+          `airprompt: registry — skipping ${entry}: missing id or configDir()\n`
+        );
       }
       continue;
     }
@@ -77,7 +79,9 @@ function loadProvider(id) {
   const providers = discover();
   const prov = providers.get(id);
   if (!prov) {
-    throw new Error(`airprompt: unknown provider '${id}'. Available: ${[...providers.keys()].join(', ')}`);
+    throw new Error(
+      `airprompt: unknown provider '${id}'. Available: ${[...providers.keys()].join(', ')}`
+    );
   }
   return prov;
 }
@@ -122,9 +126,11 @@ function detectInstalledProviders() {
 function defaultProvider() {
   const detected = detectInstalledProviders();
   if (detected.length === 0) {
-    throw new Error('airprompt: no provider detected. Set AIRPROMPT_PROVIDER env var or use --provider.');
+    throw new Error(
+      'airprompt: no provider detected. Set AIRPROMPT_PROVIDER env var or use --provider.'
+    );
   }
-  return detected.sort()[0];  // deterministic order regardless of readdir
+  return detected.sort()[0]; // deterministic order regardless of readdir
 }
 
 /**

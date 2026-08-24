@@ -34,7 +34,7 @@ if (providers.length === 0) {
 
 let provider;
 if (targetId) {
-  provider = providers.find(p => p.id === targetId);
+  provider = providers.find((p) => p.id === targetId);
   if (!provider) {
     process.stderr.write('AirPrompt: provider "' + targetId + '" not found\n');
     process.exit(1);

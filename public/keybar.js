@@ -11,44 +11,49 @@
 
   const ROWS = [
     [
-      { label: 'Esc',   seq: '\x1b',     cls: 'modifier' },
-      { label: 'Tab',   seq: '\t',       cls: 'modifier' },
-      { label: 'Ctrl',  seq: null,       cls: 'modifier sticky', id: 'ctrl' },
-      { label: 'Alt',   seq: null,       cls: 'modifier sticky', id: 'alt' },
-      { label: 'Shift', seq: null,       cls: 'modifier sticky', id: 'shift' },
-      { label: ':',     seq: ':',        cls: '' },
-      { label: '|',     seq: '|',        cls: '' },
-      { label: ';',     seq: ';',        cls: '' },
+      { label: 'Esc', seq: '\x1b', cls: 'modifier' },
+      { label: 'Tab', seq: '\t', cls: 'modifier' },
+      { label: 'Ctrl', seq: null, cls: 'modifier sticky', id: 'ctrl' },
+      { label: 'Alt', seq: null, cls: 'modifier sticky', id: 'alt' },
+      { label: 'Shift', seq: null, cls: 'modifier sticky', id: 'shift' },
+      { label: ':', seq: ':', cls: '' },
+      { label: '|', seq: '|', cls: '' },
+      { label: ';', seq: ';', cls: '' },
     ],
     [
-      { label: 'Home',  seq: '\x1b[H',   cls: '' },
-      { label: 'End',   seq: '\x1b[F',   cls: '' },
-      { label: 'PgUp',  seq: '\x1b[5~',  cls: '' },
-      { label: 'PgDn',  seq: '\x1b[6~',  cls: '' },
-      { label: 'Del',   seq: '\x1b[3~',  cls: '' },
-      { label: '/',     seq: '/',        cls: '' },
-      { label: '↑',     seq: '\x1b[A',   cls: 'arrow' },
-      { label: '\\',    seq: '\\',       cls: '' },
+      { label: 'Home', seq: '\x1b[H', cls: '' },
+      { label: 'End', seq: '\x1b[F', cls: '' },
+      { label: 'PgUp', seq: '\x1b[5~', cls: '' },
+      { label: 'PgDn', seq: '\x1b[6~', cls: '' },
+      { label: 'Del', seq: '\x1b[3~', cls: '' },
+      { label: '/', seq: '/', cls: '' },
+      { label: '↑', seq: '\x1b[A', cls: 'arrow' },
+      { label: '\\', seq: '\\', cls: '' },
     ],
     [
-      { label: 'Sft+Tab',seq: '\x1b[Z', cls: 'combo', raw: true },
+      { label: 'Sft+Tab', seq: '\x1b[Z', cls: 'combo', raw: true },
       { label: 'Paste', seq: null, cls: 'combo', raw: true, msg: { type: 'paste_buffer' } },
-      { label: 'Stash', seq: '\x13',     cls: 'combo', raw: true },
-      { label: 'Search',seq: '\x12',     cls: 'combo', raw: true },
-      { label: 'Send',  seq: '\r',       cls: 'send', raw: true,
-        html: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>' },
-      { label: '←',     seq: '\x1b[D',   cls: 'arrow' },
-      { label: '↓',     seq: '\x1b[B',   cls: 'arrow' },
-      { label: '→',     seq: '\x1b[C',   cls: 'arrow' },
+      { label: 'Stash', seq: '\x13', cls: 'combo', raw: true },
+      { label: 'Search', seq: '\x12', cls: 'combo', raw: true },
+      {
+        label: 'Send',
+        seq: '\r',
+        cls: 'send',
+        raw: true,
+        html: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>',
+      },
+      { label: '←', seq: '\x1b[D', cls: 'arrow' },
+      { label: '↓', seq: '\x1b[B', cls: 'arrow' },
+      { label: '→', seq: '\x1b[C', cls: 'arrow' },
     ],
   ];
 
   // ── State ─────────────────────────────────────────────────────────────
   let container = null;
-  const modBtns = {};     // { ctrl: btn, alt: btn, shift: btn }
+  const modBtns = {}; // { ctrl: btn, alt: btn, shift: btn }
   const modState = {
-    ctrl:  { armed: false, locked: false, lastTap: 0 },
-    alt:   { armed: false, locked: false, lastTap: 0 },
+    ctrl: { armed: false, locked: false, lastTap: 0 },
+    alt: { armed: false, locked: false, lastTap: 0 },
     shift: { armed: false, locked: false, lastTap: 0 },
   };
   const DOUBLE_TAP_MS = 300;
@@ -58,13 +63,15 @@
   // This is NOT character casing (a→A). It maps terminal escape codes
   // that change when Shift is held (e.g. Tab → reverse tab \x1b[Z]).
   const SHIFT_MAP = {
-    '\t': '\x1b[Z',   // Tab → Shift+Tab (reverse tab)
+    '\t': '\x1b[Z', // Tab → Shift+Tab (reverse tab)
   };
 
   function isMobile() {
     try {
       return window.matchMedia('(pointer: coarse)').matches;
-    } catch (_) { return false; }
+    } catch (_) {
+      return false;
+    }
   }
 
   // Re-focus mobile input to keep native Android keyboard open.
@@ -77,7 +84,9 @@
     suppressDisarm(300);
     const mi = document.getElementById('mobile-input');
     if (mi) {
-      try { mi.focus(); } catch (_) {}
+      try {
+        mi.focus();
+      } catch (_) {}
     }
   }
 
@@ -92,13 +101,19 @@
         seq = String.fromCharCode(code & 0x1f);
       }
     }
-    if (s.armed) { s.armed = false; updateModUI(); }
+    if (s.armed) {
+      s.armed = false;
+      updateModUI();
+    }
 
     // Apply sticky Alt: prefix \x1b
     const a = modState.alt;
     if (a.armed || a.locked) {
       seq = '\x1b' + seq;
-      if (!a.locked) { a.armed = false; updateModUI(); }
+      if (!a.locked) {
+        a.armed = false;
+        updateModUI();
+      }
     }
 
     // Apply sticky Shift: map known control sequences. Only for keys in
@@ -107,7 +122,10 @@
     if ((sh.armed || sh.locked) && SHIFT_MAP[seq]) {
       seq = SHIFT_MAP[seq];
     }
-    if (sh.armed) { sh.armed = false; updateModUI(); }
+    if (sh.armed) {
+      sh.armed = false;
+      updateModUI();
+    }
 
     if (window._airpromptSend) {
       window._airpromptSend({ type: 'input', data: seq });
@@ -207,7 +225,10 @@
           // Sticky modifier key
           modBtns[key.id] = btn;
           (function (m) {
-            btn.addEventListener('click', function () { handleSticky(m); refocusMobileInput(); });
+            btn.addEventListener('click', function () {
+              handleSticky(m);
+              refocusMobileInput();
+            });
           })(key.id);
         } else if (key.raw && (key.seq || key.msg)) {
           // Combo key: send pre-composed sequence or custom message, bypass modifier pipeline
@@ -221,7 +242,10 @@
           })(key.seq, key.msg);
         } else {
           (function (s) {
-            btn.addEventListener('click', function () { sendKey(s); refocusMobileInput(); });
+            btn.addEventListener('click', function () {
+              sendKey(s);
+              refocusMobileInput();
+            });
           })(key.seq);
         }
 
@@ -253,7 +277,7 @@
     }
   }
 
-  let _focusGraceUntil = 0;  // suppress disarm until this timestamp
+  let _focusGraceUntil = 0; // suppress disarm until this timestamp
 
   // ── Apply modifiers to data from native keyboard ──────────────────────
   // Called by client.js term.onData() to inject Ctrl/Alt/Shift before send.
@@ -262,18 +286,22 @@
     // Guard: empty/ghost events must not disarm one-shot modifiers.
     if (!data) return Promise.resolve(data);
 
-    const ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
-    const alt   = modState.alt.armed   || modState.alt.locked;
+    const ctrl = modState.ctrl.armed || modState.ctrl.locked;
+    const alt = modState.alt.armed || modState.alt.locked;
     const shift = modState.shift.armed || modState.shift.locked;
 
     // Disarm one-shot modifiers (locked stay active)
     const inGrace = Date.now() < _focusGraceUntil;
     if (!inGrace) {
-      if (modState.ctrl.armed)  { modState.ctrl.armed = false; }
+      if (modState.ctrl.armed) {
+        modState.ctrl.armed = false;
+      }
       if (modState.alt.armed && !modState.alt.locked) {
         modState.alt.armed = false;
       }
-      if (modState.shift.armed) { modState.shift.armed = false; }
+      if (modState.shift.armed) {
+        modState.shift.armed = false;
+      }
       updateModUI();
     }
 
@@ -327,21 +355,30 @@
   // These are pure checks — client.js calls them before applyModifiers()
   // to decide whether to send copy_buffer / paste_buffer to server.
   function isCopyPasteCombo(key) {
-    const ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
+    const ctrl = modState.ctrl.armed || modState.ctrl.locked;
     const shift = modState.shift.armed || modState.shift.locked;
     return ctrl && shift && (key === 'c' || key === 'v');
   }
 
   function disarmCopyPaste() {
-    if (modState.ctrl.armed)  { modState.ctrl.armed = false; }
-    if (modState.shift.armed) { modState.shift.armed = false; }
+    if (modState.ctrl.armed) {
+      modState.ctrl.armed = false;
+    }
+    if (modState.shift.armed) {
+      modState.shift.armed = false;
+    }
     updateModUI();
   }
 
   function hasAnyModifier() {
-    return modState.ctrl.armed  || modState.ctrl.locked ||
-           modState.alt.armed   || modState.alt.locked  ||
-           modState.shift.armed || modState.shift.locked;
+    return (
+      modState.ctrl.armed ||
+      modState.ctrl.locked ||
+      modState.alt.armed ||
+      modState.alt.locked ||
+      modState.shift.armed ||
+      modState.shift.locked
+    );
   }
 
   function suppressDisarm(ms) {

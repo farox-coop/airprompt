@@ -63,21 +63,30 @@ switch (cmd) {
 
   case 'allow': {
     const entry = auth.allowBySeq(seqArg());
-    if (!entry) { process.stderr.write('Error: no pending device with that seq\n'); process.exit(1); }
+    if (!entry) {
+      process.stderr.write('Error: no pending device with that seq\n');
+      process.exit(1);
+    }
     console.log(`Allowed device "${entry.name}" (seq ${entry.seq})`);
     break;
   }
 
   case 'deny': {
     const entry = auth.denyBySeq(seqArg());
-    if (!entry) { process.stderr.write('Error: no pending device with that seq\n'); process.exit(1); }
+    if (!entry) {
+      process.stderr.write('Error: no pending device with that seq\n');
+      process.exit(1);
+    }
     console.log(`Denied device "${entry.name}" (seq ${entry.seq})`);
     break;
   }
 
   case 'revoke': {
     const entry = auth.revokeBySeq(seqArg());
-    if (!entry) { process.stderr.write('Error: no paired device with that seq\n'); process.exit(1); }
+    if (!entry) {
+      process.stderr.write('Error: no paired device with that seq\n');
+      process.exit(1);
+    }
     console.log(`Revoked device "${entry.name}" (seq ${entry.seq})`);
     break;
   }
@@ -86,7 +95,10 @@ switch (cmd) {
     const seq = seqArg();
     const name = process.argv.slice(4).join(' ');
     const entry = auth.nameBySeq(seq, name);
-    if (!entry) { process.stderr.write('Error: no paired device with that seq\n'); process.exit(1); }
+    if (!entry) {
+      process.stderr.write('Error: no paired device with that seq\n');
+      process.exit(1);
+    }
     console.log(`Named device (seq ${seq}) "${entry.name}"`);
     break;
   }

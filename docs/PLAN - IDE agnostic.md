@@ -128,38 +128,38 @@ Each IDE implements this contract. Base code never references IDE names directly
 
 ### 2.1 Files to create
 
-| File | Purpose |
-|------|---------|
-| `src/providers/provider.js` | Interface definition (JSDoc types, constants) |
-| `src/providers/claude.js` | ClaudeProvider — all Claude-specific logic extracted here |
-| `src/providers/registry.js` | Loads provider by id, lists all available providers |
+| File                        | Purpose                                                   |
+| --------------------------- | --------------------------------------------------------- |
+| `src/providers/provider.js` | Interface definition (JSDoc types, constants)             |
+| `src/providers/claude.js`   | ClaudeProvider — all Claude-specific logic extracted here |
+| `src/providers/registry.js` | Loads provider by id, lists all available providers       |
 
 ### 2.2 Files to modify
 
-| File | Current (Claude-hardwired) | After (provider-agnostic) |
-|------|---------------------------|---------------------------|
-| `bin/install.js` | `PROVIDERS = [{id:'claude',...}]` only. Loop hardcodes `if claude`. Settings path hardcoded to `~/.claude`. | `PROVIDERS` populated from registry. Loop dispatches via `prov.install(ctx)`. Settings path via `provider.configDir()`. |
-| `src/utils.js:10` | `CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR \|\| path.join(os.homedir(), '.claude')` | `getConfigDir(providerId)` — looks up provider, returns its config dir |
-| `src/utils.js:12` | `SESSIONS_DIR` inside `~/.claude/.airprompt/` | `SESSIONS_DIR` = `~/.airprompt/sessions/`. Each session file prefixed: `{providerId}-{tmuxName}` |
-| `src/hooks/airprompt-activate.js` | Hardcoded Claude stdin parsing, `CLAUDE_PLUGIN_ROOT` env var, `~/.claude` paths | Core logic extracted into `src/hooks/core/activate.js`. This file becomes a thin Claude wrapper (~20 lines) that parses stdin, calls core, formats stdout. Filename preserved for backward-compat with plugin.json + existing hook entries. |
-| `src/hooks/airprompt-deactivate.js` | Same — Claude-specific stdin, env vars, paths | Same extraction pattern. |
-| `bin/airprompt` | `CLAUDE_PLUGIN_ROOT` → `~/.airprompt` fallback | `AIRPROMPT_INSTALL_DIR` env var (set by installer). Fallback to `~/.airprompt`. No Claude reference. |
-| `bin/airprompt-claude` | Hardcoded `~/.local/bin/claude`. Only Claude. | Rename to `bin/airprompt-launch`. Accepts `--provider <id>` flag. Claude is one of many. |
-| `bin/lib/settings.js` | `claudeConfigDir()` only | `configDirFor(providerId)` — generic. `MANAGED_HOOK_BASENAMES` stays same (script names don't depend on IDE). |
-| `.claude-plugin/plugin.json` | Only plugin manifest format | Stays. This IS the Claude-specific artifact — it's a data file, not code. Each provider gets its own plugin/extension manifest. |
+| File                                | Current (Claude-hardwired)                                                                                  | After (provider-agnostic)                                                                                                                                                                                                                   |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bin/install.js`                    | `PROVIDERS = [{id:'claude',...}]` only. Loop hardcodes `if claude`. Settings path hardcoded to `~/.claude`. | `PROVIDERS` populated from registry. Loop dispatches via `prov.install(ctx)`. Settings path via `provider.configDir()`.                                                                                                                     |
+| `src/utils.js:10`                   | `CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR \|\| path.join(os.homedir(), '.claude')`                        | `getConfigDir(providerId)` — looks up provider, returns its config dir                                                                                                                                                                      |
+| `src/utils.js:12`                   | `SESSIONS_DIR` inside `~/.claude/.airprompt/`                                                               | `SESSIONS_DIR` = `~/.airprompt/sessions/`. Each session file prefixed: `{providerId}-{tmuxName}`                                                                                                                                            |
+| `src/hooks/airprompt-activate.js`   | Hardcoded Claude stdin parsing, `CLAUDE_PLUGIN_ROOT` env var, `~/.claude` paths                             | Core logic extracted into `src/hooks/core/activate.js`. This file becomes a thin Claude wrapper (~20 lines) that parses stdin, calls core, formats stdout. Filename preserved for backward-compat with plugin.json + existing hook entries. |
+| `src/hooks/airprompt-deactivate.js` | Same — Claude-specific stdin, env vars, paths                                                               | Same extraction pattern.                                                                                                                                                                                                                    |
+| `bin/airprompt`                     | `CLAUDE_PLUGIN_ROOT` → `~/.airprompt` fallback                                                              | `AIRPROMPT_INSTALL_DIR` env var (set by installer). Fallback to `~/.airprompt`. No Claude reference.                                                                                                                                        |
+| `bin/airprompt-claude`              | Hardcoded `~/.local/bin/claude`. Only Claude.                                                               | Rename to `bin/airprompt-launch`. Accepts `--provider <id>` flag. Claude is one of many.                                                                                                                                                    |
+| `bin/lib/settings.js`               | `claudeConfigDir()` only                                                                                    | `configDirFor(providerId)` — generic. `MANAGED_HOOK_BASENAMES` stays same (script names don't depend on IDE).                                                                                                                               |
+| `.claude-plugin/plugin.json`        | Only plugin manifest format                                                                                 | Stays. This IS the Claude-specific artifact — it's a data file, not code. Each provider gets its own plugin/extension manifest.                                                                                                             |
 
 ### 2.3 What stays unchanged (conceptually generic — implementation still needs migration)
 
-| File | Why | Notes |
-|------|-----|-------|
-| `server.js` | Session IDs are opaque strings. REST API + WS protocol are IDE-agnostic. | **Must still change**: `recoverSessionsFromDisk()` reads old `~/.claude/.airprompt/sessions` path. `sessionToJSON()` keys by sanitized tmux name, needs provider-prefix awareness. certs/`daemon.json`/`project-names.json` also live under old `~/.claude/.airprompt/` and need a new home. Covered in Stage 6b. |
-| `public/index.html` + `public/client.js` | Mobile UI. Completely IDE-agnostic. | No changes needed. `grep` for `claude` across `public/` confirms zero hits. |
-| `public/notify.js`, `public/keybar.js` | Same — pure web UI. | No changes needed. |
-| WebSocket protocol | No IDE references. | No changes needed. |
-| REST API endpoints | `/api/sessions/register`, `/api/sessions/unregister`, etc. — no IDE coupling. | No changes needed. |
-| `bin/airprompt-on.sh`, `bin/airprompt-off.sh`, etc. | Shell scripts are tmux/session-based, not IDE-based. | **Currently do NOT accept `--provider`** — that flag is added in Stage 7. Internal session logic stays same; only config-dir resolution changes. |
-| `Makefile` | Dev workflow. | **Must change**: `clean` target removes old `~/.claude/.airprompt/` path. `lint` names pre-rename hook files. Covered in Stage 10. |
-| Test suite | Test logic is valid. | **Must update**: `server.test.js` sets old `CLAUDE_CONFIG_DIR` and session paths. `statusline.test.sh` installs to old hooks dir. `integration/run.sh` bakes current layout. Covered in Stage 11. |
+| File                                                | Why                                                                           | Notes                                                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server.js`                                         | Session IDs are opaque strings. REST API + WS protocol are IDE-agnostic.      | **Must still change**: `recoverSessionsFromDisk()` reads old `~/.claude/.airprompt/sessions` path. `sessionToJSON()` keys by sanitized tmux name, needs provider-prefix awareness. certs/`daemon.json`/`project-names.json` also live under old `~/.claude/.airprompt/` and need a new home. Covered in Stage 6b. |
+| `public/index.html` + `public/client.js`            | Mobile UI. Completely IDE-agnostic.                                           | No changes needed. `grep` for `claude` across `public/` confirms zero hits.                                                                                                                                                                                                                                       |
+| `public/notify.js`, `public/keybar.js`              | Same — pure web UI.                                                           | No changes needed.                                                                                                                                                                                                                                                                                                |
+| WebSocket protocol                                  | No IDE references.                                                            | No changes needed.                                                                                                                                                                                                                                                                                                |
+| REST API endpoints                                  | `/api/sessions/register`, `/api/sessions/unregister`, etc. — no IDE coupling. | No changes needed.                                                                                                                                                                                                                                                                                                |
+| `bin/airprompt-on.sh`, `bin/airprompt-off.sh`, etc. | Shell scripts are tmux/session-based, not IDE-based.                          | **Currently do NOT accept `--provider`** — that flag is added in Stage 7. Internal session logic stays same; only config-dir resolution changes.                                                                                                                                                                  |
+| `Makefile`                                          | Dev workflow.                                                                 | **Must change**: `clean` target removes old `~/.claude/.airprompt/` path. `lint` names pre-rename hook files. Covered in Stage 10.                                                                                                                                                                                |
+| Test suite                                          | Test logic is valid.                                                          | **Must update**: `server.test.js` sets old `CLAUDE_CONFIG_DIR` and session paths. `statusline.test.sh` installs to old hooks dir. `integration/run.sh` bakes current layout. Covered in Stage 11.                                                                                                                 |
 
 ---
 
@@ -321,6 +321,7 @@ Future IDEs get their own wrappers at `src/hooks/codex/activate.js`, `src/hooks/
 etc. — each is a new file, never touching the Claude wrappers.
 
 The wrapper (airprompt-activate.js becomes this):
+
 ```js
 #!/usr/bin/env node
 const provider = require('../providers/claude.js');
@@ -392,6 +393,7 @@ implementation has hardcoded paths that must change when sessions move.
 All 11 shell scripts in `bin/` must be audited and migrated:
 
 **Core dispatcher + sub-commands (already listed in plan):**
+
 - `bin/airprompt` dispatcher: replace `CLAUDE_PLUGIN_ROOT` fallback with
   `AIRPROMPT_INSTALL_DIR` env var. Add `--provider` passthrough to sub-scripts.
 - `bin/airprompt-on.sh`: accept `--provider <id>` flag. Use provider-aware session naming
@@ -399,6 +401,7 @@ All 11 shell scripts in `bin/` must be audited and migrated:
 - Same for `off.sh`, `status.sh`, `clean.sh`, `restart.sh`, `name.sh`.
 
 **Launcher:**
+
 - `bin/airprompt-claude`: rename to `bin/airprompt-launch`. Add `--provider <id>` flag.
   Accept `--binary <path>` to override the IDE binary (was hardcoded `~/.local/bin/claude`).
   Keep backward-compat symlink `airprompt-claude` → `airprompt-launch --provider claude`.
@@ -406,6 +409,7 @@ All 11 shell scripts in `bin/` must be audited and migrated:
   tmux for terminal capture. Those IDEs use hook-based daemon management instead.
 
 **Previously omitted scripts:**
+
 - `bin/airprompt-autostart.sh`: Hardcodes `~/.claude/settings.json`, hook paths, and a
   duplicate `MANAGED_HOOK_BASENAMES` list. Replace with provider-aware config dir and
   delegate to `bin/lib/settings.js` for managed hook basenames (single source of truth).
@@ -430,6 +434,7 @@ pointing into the full `src/` tree — they work with no changes. Hooks installe
 **standalone** (non-plugin, for IDEs without plugin systems) need a different strategy.
 
 **Strategy for standalone installs**:
+
 - Option A: Copy the full `src/` tree (hooks + providers + core) into `{configDir}/hooks/airprompt/`.
   Wrappers point at the copied tree. Installer copies `src/hooks/` + `src/providers/` wholesale.
 - Option B: Bake absolute install-dir paths at install time. Wrapper `require()` paths are
@@ -502,12 +507,14 @@ across releases.
 ### 5.1 Base code never mentions IDE names
 
 Bad:
+
 ```js
 if (process.env.CLAUDE_CONFIG_DIR) { ... }
 const configDir = path.join(os.homedir(), '.claude');
 ```
 
 Good:
+
 ```js
 const configDir = provider.configDir();
 ```
@@ -515,11 +522,13 @@ const configDir = provider.configDir();
 ### 5.2 Provider files are data + thin wrappers
 
 A provider file should have:
+
 - Config paths (data)
 - Hook format parsers (thin wrappers — 10-20 lines each)
 - Install/uninstall logic (orchestration, delegating to shared helpers)
 
 It should NOT have:
+
 - Core business logic (session registration, daemon management)
 - Duplicated code from other providers
 - tmux-specific logic (that's shared)
@@ -527,6 +536,7 @@ It should NOT have:
 ### 5.3 New provider = new file, zero base changes
 
 Adding Codex support should mean:
+
 1. Create `src/providers/codex.js` (implements Provider interface)
 2. Create `src/hooks/codex/activate.js` + `deactivate.js` (thin wrappers)
 3. Create `.codex-plugin/plugin.json` (if applicable)
@@ -547,16 +557,16 @@ Adding Codex support should mean:
 
 ## 6. Key Risks
 
-| Risk | Mitigation |
-|------|-----------|
-| tmux session name collision across IDEs | Prefix with `{providerId}-` in session dir. For CLI-launched IDEs: `bin/airprompt-launch --provider X` creates tmux session `{providerId}-{name}` automatically. For GUI IDEs (Cursor, Windsurf): they don't use tmux — hooks manage daemon lifecycle directly, no tmux naming involved. |
-| Same tmux session used by multiple IDEs simultaneously | Each IDE registers separately via different `providerId` prefix. `server.js` session dedup fixed (Stage 6b): multiple sessions per tmux allowed when `providerId` differs. |
-| Plugin cache dirs get out of sync | `airprompt-sync-agent` skill (Stage 7c) handles this across all installed providers. |
-| Hook format changes in IDE updates | Provider adapter isolates the change — only one small file to update. |
-| npm deps not available in all IDE environments | `npm install` runs once at install time. Hook scripts use Node stdlib only. |
-| Daemon state mixed with install dir | `~/.airprompt/state/` (daemon.json, certs, project-names.json) separated from `~/.airprompt/` (code). `rm -rf ~/.airprompt` (reinstall) won't destroy session data. Uninstall leaves `state/` alone by default. |
-| `airprompt-launch` doesn't work for GUI IDEs | Documented limitation. GUI IDEs (Cursor desktop app, Windsurf) don't run inside tmux — they use hook-based daemon management only (SessionStart → activate, Stop → deactivate). No terminal capture feature for those IDEs (terminal capture requires tmux). |
-| Stage 8/9: migration removed too early | Stage 9 ships in a **subsequent release**, not the same release as Stage 8. Ensures all active sessions from the old layout are migrated before code is deleted. |
+| Risk                                                   | Mitigation                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| tmux session name collision across IDEs                | Prefix with `{providerId}-` in session dir. For CLI-launched IDEs: `bin/airprompt-launch --provider X` creates tmux session `{providerId}-{name}` automatically. For GUI IDEs (Cursor, Windsurf): they don't use tmux — hooks manage daemon lifecycle directly, no tmux naming involved. |
+| Same tmux session used by multiple IDEs simultaneously | Each IDE registers separately via different `providerId` prefix. `server.js` session dedup fixed (Stage 6b): multiple sessions per tmux allowed when `providerId` differs.                                                                                                               |
+| Plugin cache dirs get out of sync                      | `airprompt-sync-agent` skill (Stage 7c) handles this across all installed providers.                                                                                                                                                                                                     |
+| Hook format changes in IDE updates                     | Provider adapter isolates the change — only one small file to update.                                                                                                                                                                                                                    |
+| npm deps not available in all IDE environments         | `npm install` runs once at install time. Hook scripts use Node stdlib only.                                                                                                                                                                                                              |
+| Daemon state mixed with install dir                    | `~/.airprompt/state/` (daemon.json, certs, project-names.json) separated from `~/.airprompt/` (code). `rm -rf ~/.airprompt` (reinstall) won't destroy session data. Uninstall leaves `state/` alone by default.                                                                          |
+| `airprompt-launch` doesn't work for GUI IDEs           | Documented limitation. GUI IDEs (Cursor desktop app, Windsurf) don't run inside tmux — they use hook-based daemon management only (SessionStart → activate, Stop → deactivate). No terminal capture feature for those IDEs (terminal capture requires tmux).                             |
+| Stage 8/9: migration removed too early                 | Stage 9 ships in a **subsequent release**, not the same release as Stage 8. Ensures all active sessions from the old layout are migrated before code is deleted.                                                                                                                         |
 
 ---
 
@@ -685,20 +695,20 @@ changes to core logic.
 
 ### Tasks
 
-- [X] Stage 1 — Define `Provider` adapter interface + shared types (`src/providers/provider.js`)
-- [X] Stage 2 — Implement `ClaudeProvider`: extract all Claude-specific logic (`src/providers/claude.js`)
-- [X] Stage 3 — Create provider registry: load, list, detect, default (`src/providers/registry.js`)
-- [X] Stage 4 — Extract hook core logic: `src/hooks/core/activate.js` + `deactivate.js`. Existing files become thin Claude wrappers (preserved for backward-compat with plugin.json)
-- [X] Stage 5 — Migrate `bin/install.js` to provider dispatch + port `installViaSkills()` from caveman
-- [X] Stage 6 — Migrate `src/utils.js` + `bin/lib/settings.js` to provider-agnostic paths
-- [X] Stage 6b — Migrate `server.js` + daemon state files. Fix session dedup for multiple providers on same tmux. Separate state dir (`~/.airprompt/state/`) from install dir
-- [X] Stage 7 — Migrate all 11 shell scripts: add `--provider` flag, rename `airprompt-claude` → `airprompt-launch`, generalize `autostart.sh` + `attach.sh`
-- [X] Stage 7b — Fix standalone hook module resolution: template-based with `{{INSTALL_DIR}}` placeholders resolved at install time
-- [X] Stage 7c — Generalize `sync-claude` → `airprompt-sync-agent` skill (sync script updated for new dirs; rename deferred)
-- [X] Stage 8 — Migrate marker files: `~/.claude/.airprompt/sessions/` → `~/.airprompt/sessions/claude-{name}/`
-- [X] Stage 9 — Remove backward-compat migration code (ships in subsequent release)
-- [X] Stage 10 — Update installer files + plugin manifest
-- [X] Stage 11 — Update README + skill docs (provider tests deferred to follow-up)
+- [x] Stage 1 — Define `Provider` adapter interface + shared types (`src/providers/provider.js`)
+- [x] Stage 2 — Implement `ClaudeProvider`: extract all Claude-specific logic (`src/providers/claude.js`)
+- [x] Stage 3 — Create provider registry: load, list, detect, default (`src/providers/registry.js`)
+- [x] Stage 4 — Extract hook core logic: `src/hooks/core/activate.js` + `deactivate.js`. Existing files become thin Claude wrappers (preserved for backward-compat with plugin.json)
+- [x] Stage 5 — Migrate `bin/install.js` to provider dispatch + port `installViaSkills()` from caveman
+- [x] Stage 6 — Migrate `src/utils.js` + `bin/lib/settings.js` to provider-agnostic paths
+- [x] Stage 6b — Migrate `server.js` + daemon state files. Fix session dedup for multiple providers on same tmux. Separate state dir (`~/.airprompt/state/`) from install dir
+- [x] Stage 7 — Migrate all 11 shell scripts: add `--provider` flag, rename `airprompt-claude` → `airprompt-launch`, generalize `autostart.sh` + `attach.sh`
+- [x] Stage 7b — Fix standalone hook module resolution: template-based with `{{INSTALL_DIR}}` placeholders resolved at install time
+- [x] Stage 7c — Generalize `sync-claude` → `airprompt-sync-agent` skill (sync script updated for new dirs; rename deferred)
+- [x] Stage 8 — Migrate marker files: `~/.claude/.airprompt/sessions/` → `~/.airprompt/sessions/claude-{name}/`
+- [x] Stage 9 — Remove backward-compat migration code (ships in subsequent release)
+- [x] Stage 10 — Update installer files + plugin manifest
+- [x] Stage 11 — Update README + skill docs (provider tests deferred to follow-up)
 
 ### Notes / Out of Scope
 

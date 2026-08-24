@@ -14,15 +14,15 @@ bash .claude/skills/sync-claude/sync.sh
 
 ## What it syncs
 
-| Source | Destination | Type |
-|---|---|---|
-| `src/hooks/airprompt-activate.js` | Plugin cache + `~/.claude/hooks/` | symlink → repo |
-| `src/hooks/airprompt-deactivate.js` | Plugin cache + `~/.claude/hooks/` | symlink → repo |
-| `src/hooks/airprompt-statusline.sh` | Plugin cache + `~/.claude/hooks/` | symlink → repo |
-| `src/status-formatter.js` | Plugin cache | copy |
-| `bin/` (12 files) | Each plugin cache | copy |
-| `bin/lib/` (directory) | Each plugin cache | copy |
-| `commands/` (2 files) | Each plugin cache + `~/.claude/commands/` | symlink → repo |
+| Source                              | Destination                               | Type           |
+| ----------------------------------- | ----------------------------------------- | -------------- |
+| `src/hooks/airprompt-activate.js`   | Plugin cache + `~/.claude/hooks/`         | symlink → repo |
+| `src/hooks/airprompt-deactivate.js` | Plugin cache + `~/.claude/hooks/`         | symlink → repo |
+| `src/hooks/airprompt-statusline.sh` | Plugin cache + `~/.claude/hooks/`         | symlink → repo |
+| `src/status-formatter.js`           | Plugin cache                              | copy           |
+| `bin/` (12 files)                   | Each plugin cache                         | copy           |
+| `bin/lib/` (directory)              | Each plugin cache                         | copy           |
+| `commands/` (2 files)               | Each plugin cache + `~/.claude/commands/` | symlink → repo |
 
 ### Symlink vs copy policy
 

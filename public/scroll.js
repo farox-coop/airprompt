@@ -25,9 +25,9 @@
 
   // Pick the scroll mechanism from the terminal's current state.
   function resolveStrategy(mouseTrackingMode, bufferType) {
-    if (mouseTrackingMode !== 'none') return 'sgr';   // app handles its own scroll
-    if (bufferType !== 'alternate') return 'wheel';   // xterm scrollback
-    return 'arrow';                                   // fallback (input may hijack)
+    if (mouseTrackingMode !== 'none') return 'sgr'; // app handles its own scroll
+    if (bufferType !== 'alternate') return 'wheel'; // xterm scrollback
+    return 'arrow'; // fallback (input may hijack)
   }
 
   // SGR mouse-wheel event. count < 0 = scroll up (older, button 64);
@@ -52,7 +52,12 @@
   }
 
   if (typeof window !== 'undefined') {
-    window.Scroll = { resolveStrategy: resolveStrategy, buildSgr: buildSgr, buildArrow: buildArrow, buildWheelDeltaY: buildWheelDeltaY };
+    window.Scroll = {
+      resolveStrategy: resolveStrategy,
+      buildSgr: buildSgr,
+      buildArrow: buildArrow,
+      buildWheelDeltaY: buildWheelDeltaY,
+    };
   }
 
   // ── Browser-only touch wiring ─────────────────────────────────────────
@@ -76,29 +81,41 @@
   // per finger travel). Tune for "mouse-wheel feel": ~5px ≈ 3 lines.
   const TICK_PX = 5;
 
-  container.addEventListener('touchstart', function (e) {
-    if (e.touches.length !== 1) { scrollActive = false; return; }
-    scrollActive = true;
-    scrolling = false;
-    startY = e.touches[0].clientY;
-    lastY = e.touches[0].clientY;
-    accumPx = 0;
-    strategy = resolveStrategy(term.modes.mouseTrackingMode, term.buffer.active.type);
-  }, { passive: true, capture: true });
+  container.addEventListener(
+    'touchstart',
+    function (e) {
+      if (e.touches.length !== 1) {
+        scrollActive = false;
+        return;
+      }
+      scrollActive = true;
+      scrolling = false;
+      startY = e.touches[0].clientY;
+      lastY = e.touches[0].clientY;
+      accumPx = 0;
+      strategy = resolveStrategy(term.modes.mouseTrackingMode, term.buffer.active.type);
+    },
+    { passive: true, capture: true }
+  );
 
   function flushScroll() {
-    if (!scrollActive) { rafId = null; return; }
+    if (!scrollActive) {
+      rafId = null;
+      return;
+    }
     const rows = Math.trunc(accumPx / TICK_PX);
     if (rows !== 0) {
       if (strategy === 'sgr') {
         send({ type: 'input', data: buildSgr(rows, term.cols, term.rows).repeat(Math.abs(rows)) });
       } else if (strategy === 'wheel') {
-        viewport.dispatchEvent(new WheelEvent('wheel', {
-          deltaY: buildWheelDeltaY(rows),  // negated: xterm wheel is inverted
-          deltaMode: 1,       // DOM_DELTA_LINE
-          bubbles: true,
-          cancelable: true,
-        }));
+        viewport.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: buildWheelDeltaY(rows), // negated: xterm wheel is inverted
+            deltaMode: 1, // DOM_DELTA_LINE
+            bubbles: true,
+            cancelable: true,
+          })
+        );
       } else {
         send({ type: 'input', data: buildArrow(rows).repeat(Math.abs(rows)) });
       }
@@ -107,26 +124,46 @@
     rafId = requestAnimationFrame(flushScroll);
   }
 
-  container.addEventListener('touchmove', function (e) {
-    if (!scrollActive || e.touches.length !== 1) return;
-    const absDy = startY - e.touches[0].clientY; // absolute displacement
-    const dy = lastY - e.touches[0].clientY;     // finger delta (px)
-    lastY = e.touches[0].clientY;
-    if (!scrolling && Math.abs(absDy) < TAP_SLOP) return;
-    scrolling = true;
-    e.preventDefault();
-    e.stopPropagation(); // stop xterm's native viewport touch handler from double-scrolling
-    accumPx += dy;
-    if (!rafId) rafId = requestAnimationFrame(flushScroll);
-  }, { passive: false, capture: true });
+  container.addEventListener(
+    'touchmove',
+    function (e) {
+      if (!scrollActive || e.touches.length !== 1) return;
+      const absDy = startY - e.touches[0].clientY; // absolute displacement
+      const dy = lastY - e.touches[0].clientY; // finger delta (px)
+      lastY = e.touches[0].clientY;
+      if (!scrolling && Math.abs(absDy) < TAP_SLOP) return;
+      scrolling = true;
+      e.preventDefault();
+      e.stopPropagation(); // stop xterm's native viewport touch handler from double-scrolling
+      accumPx += dy;
+      if (!rafId) rafId = requestAnimationFrame(flushScroll);
+    },
+    { passive: false, capture: true }
+  );
 
   function finish() {
     scrollActive = false;
     scrolling = false;
-    lastY = 0; accumPx = 0;
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    lastY = 0;
+    accumPx = 0;
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
   }
 
-  container.addEventListener('touchend', function () { finish(); }, { passive: true, capture: true });
-  container.addEventListener('touchcancel', function () { finish(); }, { passive: true, capture: true });
+  container.addEventListener(
+    'touchend',
+    function () {
+      finish();
+    },
+    { passive: true, capture: true }
+  );
+  container.addEventListener(
+    'touchcancel',
+    function () {
+      finish();
+    },
+    { passive: true, capture: true }
+  );
 })();

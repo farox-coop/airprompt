@@ -121,7 +121,7 @@ test('dictation macros — applyInline', async (t) => {
   await t.test('en-US parens and quotes inline', () => {
     assert.strictEqual(M.applyInline('open paren note close paren', 'en-US'), '(note)');
     assert.strictEqual(M.applyInline('open quote hello close quote', 'en-US'), '"hello"');
-    assert.strictEqual(M.applyInline('open single quote hi close single quote', 'en-US'), '\'hi\'');
+    assert.strictEqual(M.applyInline('open single quote hi close single quote', 'en-US'), "'hi'");
     assert.strictEqual(M.applyInline('open backticks code close backticks', 'en-US'), '`code`');
   });
 });
@@ -500,13 +500,17 @@ test('dictation macros — full fragment flow simulation', async (t) => {
   });
 
   await t.test('"nueva línea" embedded in phrase — NOT replaced', () => {
-    assert.strictEqual(M.applyInline('esto es una nueva línea de texto', 'es-AR'),
-      'esto es una nueva línea de texto');
+    assert.strictEqual(
+      M.applyInline('esto es una nueva línea de texto', 'es-AR'),
+      'esto es una nueva línea de texto'
+    );
   });
 
   await t.test('"nuevo párrafo" embedded in phrase — NOT replaced', () => {
-    assert.strictEqual(M.applyInline('empezamos un nuevo párrafo ahora', 'es-AR'),
-      'empezamos un nuevo párrafo ahora');
+    assert.strictEqual(
+      M.applyInline('empezamos un nuevo párrafo ahora', 'es-AR'),
+      'empezamos un nuevo párrafo ahora'
+    );
   });
 });
 
@@ -726,7 +730,10 @@ test('dictation macros — macro #3: signo de pregunta (question mark)', async (
   });
 
   await t.test('mid-sentence → unchanged (onEnd)', () => {
-    assert.strictEqual(M.applyInline('cómo estás signo de pregunta bien', 'es-AR'), 'cómo estás signo de pregunta bien');
+    assert.strictEqual(
+      M.applyInline('cómo estás signo de pregunta bien', 'es-AR'),
+      'cómo estás signo de pregunta bien'
+    );
   });
 
   await t.test('case insensitive → ?', () => {
@@ -735,11 +742,17 @@ test('dictation macros — macro #3: signo de pregunta (question mark)', async (
 
   await t.test('word boundary — "consigno de pregunta" → unchanged', () => {
     // \b before "signo" must not match inside "consigno".
-    assert.strictEqual(M.applyInline('esto es un consigno de pregunta', 'es-AR'), 'esto es un consigno de pregunta');
+    assert.strictEqual(
+      M.applyInline('esto es un consigno de pregunta', 'es-AR'),
+      'esto es un consigno de pregunta'
+    );
   });
 
   await t.test('only last occurrence replaced (onEnd anchors to $)', () => {
-    assert.strictEqual(M.applyInline('signo de pregunta aquí signo de pregunta', 'es-AR'), 'signo de pregunta aquí?');
+    assert.strictEqual(
+      M.applyInline('signo de pregunta aquí signo de pregunta', 'es-AR'),
+      'signo de pregunta aquí?'
+    );
   });
 
   await t.test('"signo de pregunta" is inline, not stateful (processFragment → text)', () => {
@@ -778,7 +791,10 @@ test('dictation macros — macro #4: signo de exclamación/admiración (exclamat
   });
 
   await t.test('mid-sentence → unchanged (onEnd)', () => {
-    assert.strictEqual(M.applyInline('hey signo de exclamación bien', 'es-AR'), 'hey signo de exclamación bien');
+    assert.strictEqual(
+      M.applyInline('hey signo de exclamación bien', 'es-AR'),
+      'hey signo de exclamación bien'
+    );
   });
 
   await t.test('case insensitive → !', () => {
@@ -811,7 +827,7 @@ test('dictation macros — macro #5: abre/abrí comillas simples (open single qu
     assert.strictEqual(M.applyInline('abri comilla simple', 'es-AR'), "'");
   });
 
-  await t.test('case insensitive → \'', () => {
+  await t.test("case insensitive → '", () => {
     assert.strictEqual(M.applyInline('ABRE COMILLAS SIMPLES', 'es-AR'), "'");
   });
 
@@ -829,7 +845,10 @@ test('dictation macros — macro #5: abre/abrí comillas simples (open single qu
   });
 
   await t.test('full pair inline → tight quotes', () => {
-    assert.strictEqual(M.applyInline('abre comillas simples hola cerrá comillas simples', 'es-AR'), "'hola'");
+    assert.strictEqual(
+      M.applyInline('abre comillas simples hola cerrá comillas simples', 'es-AR'),
+      "'hola'"
+    );
   });
 });
 
@@ -974,7 +993,10 @@ test('dictation macros — revertSttNewlines (STT built-in newline commands)', a
   });
 
   await t.test('embedded "texto \\n\\n texto" → literal (es-AR)', () => {
-    assert.strictEqual(M.revertSttNewlines('texto \n\n texto', 'es-AR'), 'texto nuevo párrafo texto');
+    assert.strictEqual(
+      M.revertSttNewlines('texto \n\n texto', 'es-AR'),
+      'texto nuevo párrafo texto'
+    );
   });
 
   await t.test('embedded "texto \\n texto" → literal (es-AR)', () => {
@@ -1083,7 +1105,9 @@ test('dictation macros — preferences (enable/disable + display helpers)', asyn
     assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), 'abre paréntesis nota');
     assert.strictEqual(M.processFragment('punto', 'es-AR').type, 'text');
     // per-macro checkboxes unchanged by the global flag
-    const openParen = M.getMacroList('es-AR').find(function (i) { return i.key === 'inline:replace:('; });
+    const openParen = M.getMacroList('es-AR').find(function (i) {
+      return i.key === 'inline:replace:(';
+    });
     assert.strictEqual(openParen.enabled, true);
     M.setGlobalEnabled(true);
     assert.strictEqual(M.applyInline('abre paréntesis nota', 'es-AR'), '(nota');
@@ -1094,8 +1118,12 @@ test('dictation macros — preferences (enable/disable + display helpers)', asyn
     M.resetPrefs();
     const list = M.getMacroList('es-AR');
     assert.ok(Array.isArray(list) && list.length > 0);
-    const inlineIdx = list.findIndex(function (i) { return i.category === 'inline'; });
-    const statefulIdx = list.findIndex(function (i) { return i.category === 'stateful'; });
+    const inlineIdx = list.findIndex(function (i) {
+      return i.category === 'inline';
+    });
+    const statefulIdx = list.findIndex(function (i) {
+      return i.category === 'stateful';
+    });
     assert.strictEqual(inlineIdx, 0);
     assert.ok(statefulIdx > inlineIdx);
     list.forEach(function (i) {
@@ -1105,7 +1133,9 @@ test('dictation macros — preferences (enable/disable + display helpers)', asyn
       assert.strictEqual(typeof i.enabled, 'boolean');
     });
     // exclamation macro → aliased trigger text + '!' value
-    const ex = list.find(function (i) { return i.key === 'inline:replace:!:end'; });
+    const ex = list.find(function (i) {
+      return i.key === 'inline:replace:!:end';
+    });
     assert.ok(ex);
     assert.strictEqual(ex.triggerText, 'signo de exclamación|admiración');
     assert.strictEqual(ex.valueLabel, '!');
@@ -1128,9 +1158,13 @@ test('dictation macros — preferences edge cases', async (t) => {
   await t.test('getMacroList has no duplicate keys (paren listed once)', () => {
     M.resetPrefs();
     const list = M.getMacroList('es-AR');
-    const keys = list.map(function (i) { return i.key; });
+    const keys = list.map(function (i) {
+      return i.key;
+    });
     assert.strictEqual(new Set(keys).size, keys.length);
-    const parenRows = list.filter(function (i) { return i.key === 'inline:replace:('; });
+    const parenRows = list.filter(function (i) {
+      return i.key === 'inline:replace:(';
+    });
     assert.strictEqual(parenRows.length, 1);
     assert.strictEqual(parenRows[0].category, 'inline');
   });
@@ -1139,16 +1173,24 @@ test('dictation macros — preferences edge cases', async (t) => {
     M.resetPrefs();
     assert.strictEqual(M.applyInline('abre comillas simples hola', 'es-AR'), "'hola");
     M.setEnabledByKey("inline:replace:':open", false);
-    assert.strictEqual(M.applyInline('abre comillas simples hola', 'es-AR'), 'abre comillas simples hola');
+    assert.strictEqual(
+      M.applyInline('abre comillas simples hola', 'es-AR'),
+      'abre comillas simples hola'
+    );
     M.setEnabledByKey("inline:replace:':close", false);
-    assert.strictEqual(M.applyInline('hola cerrá comillas simples chau', 'es-AR'), 'hola cerrá comillas simples chau');
+    assert.strictEqual(
+      M.applyInline('hola cerrá comillas simples chau', 'es-AR'),
+      'hola cerrá comillas simples chau'
+    );
     M.resetPrefs();
   });
 
   await t.test('setEnabledByKey reflects in getMacroList().enabled', () => {
     M.resetPrefs();
     M.setEnabledByKey('inline:replace:(', false);
-    const row = M.getMacroList('es-AR').find(function (i) { return i.key === 'inline:replace:('; });
+    const row = M.getMacroList('es-AR').find(function (i) {
+      return i.key === 'inline:replace:(';
+    });
     assert.strictEqual(row.enabled, false);
     M.resetPrefs();
   });
@@ -1158,7 +1200,9 @@ test('dictation macros — preferences edge cases', async (t) => {
     M.setGlobalEnabled(false);
     M.resetPrefs();
     assert.strictEqual(M.getGlobalEnabled(), true);
-    const row = M.getMacroList('es-AR').find(function (i) { return i.key === 'inline:replace:('; });
+    const row = M.getMacroList('es-AR').find(function (i) {
+      return i.key === 'inline:replace:(';
+    });
     assert.strictEqual(row.enabled, true);
   });
 });

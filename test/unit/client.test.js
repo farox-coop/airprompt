@@ -12,34 +12,34 @@ const assert = require('node:assert');
 // ── Key definitions (mirrors keybar.js ROWS) ──────────────────────────
 const ROWS = [
   [
-    { label: 'Esc',   seq: '\x1b',     cls: 'modifier' },
-    { label: 'Tab',   seq: '\t',       cls: 'modifier' },
-    { label: 'Ctrl',  seq: null,       cls: 'modifier sticky', id: 'ctrl' },
-    { label: 'Alt',   seq: null,       cls: 'modifier sticky', id: 'alt' },
-    { label: 'Shift', seq: null,       cls: 'modifier sticky', id: 'shift' },
-    { label: ':',     seq: ':',        cls: '' },
-    { label: '|',     seq: '|',        cls: '' },
-    { label: ';',     seq: ';',        cls: '' },
+    { label: 'Esc', seq: '\x1b', cls: 'modifier' },
+    { label: 'Tab', seq: '\t', cls: 'modifier' },
+    { label: 'Ctrl', seq: null, cls: 'modifier sticky', id: 'ctrl' },
+    { label: 'Alt', seq: null, cls: 'modifier sticky', id: 'alt' },
+    { label: 'Shift', seq: null, cls: 'modifier sticky', id: 'shift' },
+    { label: ':', seq: ':', cls: '' },
+    { label: '|', seq: '|', cls: '' },
+    { label: ';', seq: ';', cls: '' },
   ],
   [
-    { label: 'Home',  seq: '\x1b[H',   cls: '' },
-    { label: 'End',   seq: '\x1b[F',   cls: '' },
-    { label: 'PgUp',  seq: '\x1b[5~',  cls: '' },
-    { label: 'PgDn',  seq: '\x1b[6~',  cls: '' },
-    { label: 'Del',   seq: '\x1b[3~',  cls: '' },
-    { label: '/',     seq: '/',        cls: '' },
-    { label: '↑',     seq: '\x1b[A',   cls: 'arrow' },
-    { label: '\\',    seq: '\\',       cls: '' },
+    { label: 'Home', seq: '\x1b[H', cls: '' },
+    { label: 'End', seq: '\x1b[F', cls: '' },
+    { label: 'PgUp', seq: '\x1b[5~', cls: '' },
+    { label: 'PgDn', seq: '\x1b[6~', cls: '' },
+    { label: 'Del', seq: '\x1b[3~', cls: '' },
+    { label: '/', seq: '/', cls: '' },
+    { label: '↑', seq: '\x1b[A', cls: 'arrow' },
+    { label: '\\', seq: '\\', cls: '' },
   ],
   [
-    { label: 'Sft+Tab',seq: '\x1b[Z', cls: 'combo', raw: true },
+    { label: 'Sft+Tab', seq: '\x1b[Z', cls: 'combo', raw: true },
     { label: 'Paste', seq: null, cls: 'combo', raw: true, msg: { type: 'paste_buffer' } },
-    { label: 'Stash', seq: '\x13',     cls: 'combo', raw: true },
-    { label: 'Search',seq: '\x12',     cls: 'combo', raw: true },
-    { label: 'Send',  seq: '\r',       cls: 'send', raw: true },
-    { label: '←',     seq: '\x1b[D',   cls: 'arrow' },
-    { label: '↓',     seq: '\x1b[B',   cls: 'arrow' },
-    { label: '→',     seq: '\x1b[C',   cls: 'arrow' },
+    { label: 'Stash', seq: '\x13', cls: 'combo', raw: true },
+    { label: 'Search', seq: '\x12', cls: 'combo', raw: true },
+    { label: 'Send', seq: '\r', cls: 'send', raw: true },
+    { label: '←', seq: '\x1b[D', cls: 'arrow' },
+    { label: '↓', seq: '\x1b[B', cls: 'arrow' },
+    { label: '→', seq: '\x1b[C', cls: 'arrow' },
   ],
 ];
 
@@ -47,15 +47,15 @@ const DOUBLE_TAP_MS = 300;
 
 // SHIFT_MAP: mirrors keybar.js — terminal control sequences → Shift-modified version
 const SHIFT_MAP = {
-  '\t': '\x1b[Z',   // Tab → Shift+Tab (reverse tab)
+  '\t': '\x1b[Z', // Tab → Shift+Tab (reverse tab)
 };
 
 // ── Keybar state machine (mirrors keybar.js handleSticky) ─────────────
 
 function createModState() {
   return {
-    ctrl:  { armed: false, locked: false, lastTap: 0 },
-    alt:   { armed: false, locked: false, lastTap: 0 },
+    ctrl: { armed: false, locked: false, lastTap: 0 },
+    alt: { armed: false, locked: false, lastTap: 0 },
     shift: { armed: false, locked: false, lastTap: 0 },
   };
 }
@@ -100,13 +100,19 @@ function simulateSendKey(modState, seq) {
       seq = String.fromCharCode(code & 0x1f);
     }
   }
-  if (s.armed) { s.armed = false; disarmed.push('ctrl'); }
+  if (s.armed) {
+    s.armed = false;
+    disarmed.push('ctrl');
+  }
 
   // Apply sticky Alt: prefix \x1b
   const a = modState.alt;
   if (a.armed || a.locked) {
     seq = '\x1b' + seq;
-    if (!a.locked) { a.armed = false; disarmed.push('alt'); }
+    if (!a.locked) {
+      a.armed = false;
+      disarmed.push('alt');
+    }
   }
 
   // Apply sticky Shift: map known control sequences. Only for keys in
@@ -115,32 +121,42 @@ function simulateSendKey(modState, seq) {
   if ((sh.armed || sh.locked) && SHIFT_MAP[seq]) {
     seq = SHIFT_MAP[seq];
   }
-  if (sh.armed) { sh.armed = false; disarmed.push('shift'); }
+  if (sh.armed) {
+    sh.armed = false;
+    disarmed.push('shift');
+  }
 
   return { sent: seq, disarmed: disarmed };
 }
 
 // ── applyModifiers (mirrors keybar.js) — for native keyboard input ──
 
-let _focusGraceUntil = 0;  // suppress disarm until this timestamp (keybar.js:256)
+let _focusGraceUntil = 0; // suppress disarm until this timestamp (keybar.js:256)
 
 function applyModifiers(modState, data) {
   // Guard: empty/ghost events must not disarm one-shot modifiers.
   if (!data) return { result: data, disarmed: [] };
 
-  const ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
-  const alt   = modState.alt.armed   || modState.alt.locked;
+  const ctrl = modState.ctrl.armed || modState.ctrl.locked;
+  const alt = modState.alt.armed || modState.alt.locked;
   const shift = modState.shift.armed || modState.shift.locked;
 
   // Grace period: suppress disarm during focus-handoff window (keybar.js:270-278)
   const inGrace = Date.now() < _focusGraceUntil;
   const disarmed = [];
   if (!inGrace) {
-    if (modState.ctrl.armed)  { modState.ctrl.armed = false; disarmed.push('ctrl'); }
-    if (modState.alt.armed && !modState.alt.locked) {
-      modState.alt.armed = false; disarmed.push('alt');
+    if (modState.ctrl.armed) {
+      modState.ctrl.armed = false;
+      disarmed.push('ctrl');
     }
-    if (modState.shift.armed) { modState.shift.armed = false; disarmed.push('shift'); }
+    if (modState.alt.armed && !modState.alt.locked) {
+      modState.alt.armed = false;
+      disarmed.push('alt');
+    }
+    if (modState.shift.armed) {
+      modState.shift.armed = false;
+      disarmed.push('shift');
+    }
   }
 
   let result = data;
@@ -186,22 +202,33 @@ function applyModifiers(modState, data) {
 // ── Copy/paste combo checks (mirrors keybar.js) ──────────────────────
 
 function isCopyPasteCombo(modState, key) {
-  const ctrl  = modState.ctrl.armed  || modState.ctrl.locked;
+  const ctrl = modState.ctrl.armed || modState.ctrl.locked;
   const shift = modState.shift.armed || modState.shift.locked;
   return ctrl && shift && (key === 'c' || key === 'v');
 }
 
 function disarmCopyPaste(modState) {
   const disarmed = [];
-  if (modState.ctrl.armed)  { modState.ctrl.armed = false; disarmed.push('ctrl'); }
-  if (modState.shift.armed) { modState.shift.armed = false; disarmed.push('shift'); }
+  if (modState.ctrl.armed) {
+    modState.ctrl.armed = false;
+    disarmed.push('ctrl');
+  }
+  if (modState.shift.armed) {
+    modState.shift.armed = false;
+    disarmed.push('shift');
+  }
   return disarmed;
 }
 
 function hasAnyModifier(modState) {
-  return modState.ctrl.armed  || modState.ctrl.locked ||
-         modState.alt.armed   || modState.alt.locked  ||
-         modState.shift.armed || modState.shift.locked;
+  return (
+    modState.ctrl.armed ||
+    modState.ctrl.locked ||
+    modState.alt.armed ||
+    modState.alt.locked ||
+    modState.shift.armed ||
+    modState.shift.locked
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -243,7 +270,9 @@ function dispatchMessage(msg, state) {
 }
 
 function selectSessionLogic(sessions, id) {
-  const found = sessions.find(function (s) { return s.id === id; });
+  const found = sessions.find(function (s) {
+    return s.id === id;
+  });
   return { found: !!found, id: id };
 }
 
@@ -251,25 +280,43 @@ function selectSessionLogic(sessions, id) {
 
 const T_MAP = {
   'en-US': {
-    dictate: 'Dictate', recording: 'Recording', paused: 'Paused',
-    cancel: 'Cancel', accept: 'Accept', send: 'Send',
-    listening: 'Listening…', speaking: '● Speaking…',
-    noSession: 'No session selected', noActive: 'No active sessions',
-    activeSessions: 'Active Sessions', close: 'Close',
+    dictate: 'Dictate',
+    recording: 'Recording',
+    paused: 'Paused',
+    cancel: 'Cancel',
+    accept: 'Accept',
+    send: 'Send',
+    listening: 'Listening…',
+    speaking: '● Speaking…',
+    noSession: 'No session selected',
+    noActive: 'No active sessions',
+    activeSessions: 'Active Sessions',
+    close: 'Close',
     preferences: 'Preferences',
-    enableAllMacros: 'Enable all dictation macros', inline: 'Inline', stateful: 'Stateful',
+    enableAllMacros: 'Enable all dictation macros',
+    inline: 'Inline',
+    stateful: 'Stateful',
     micHttps: 'Voice needs HTTPS or localhost.',
     langFallback: 'Language not supported. Falling back to English.',
     disconnected: '⚠️ DISCONNECTED — Tap to dismiss',
   },
   'es-AR': {
-    dictate: 'Dictar', recording: 'Grabando', paused: 'Pausado',
-    cancel: 'Cancelar', accept: 'Aceptar', send: 'Enviar',
-    listening: 'Escuchando…', speaking: '● Hablando…',
-    noSession: 'Sin sesión', noActive: 'Sin sesiones activas',
-    activeSessions: 'Sesiones Activas', close: 'Cerrar',
+    dictate: 'Dictar',
+    recording: 'Grabando',
+    paused: 'Pausado',
+    cancel: 'Cancelar',
+    accept: 'Aceptar',
+    send: 'Enviar',
+    listening: 'Escuchando…',
+    speaking: '● Hablando…',
+    noSession: 'Sin sesión',
+    noActive: 'Sin sesiones activas',
+    activeSessions: 'Sesiones Activas',
+    close: 'Cerrar',
     preferences: 'Preferencias',
-    enableAllMacros: 'Activar todas las macros de dictado', inline: 'Inline', stateful: 'Stateful',
+    enableAllMacros: 'Activar todas las macros de dictado',
+    inline: 'Inline',
+    stateful: 'Stateful',
     micHttps: 'El micrófono requiere HTTPS o localhost.',
     langFallback: 'Idioma no soportado. Cambiando a inglés.',
     disconnected: '⚠️ DESCONECTADO — Tocar para cerrar',
@@ -304,26 +351,36 @@ test('keybar ROWS — three rows defined', async (t) => {
 
 test('keybar ROWS — modifier keys present', async (t) => {
   await t.test('Ctrl is modifier sticky with id', function () {
-    const k = ROWS[0].find(function (x) { return x.id === 'ctrl'; });
+    const k = ROWS[0].find(function (x) {
+      return x.id === 'ctrl';
+    });
     assert.ok(k);
     assert.strictEqual(k.cls, 'modifier sticky');
   });
 
   await t.test('Alt is modifier sticky with id', function () {
-    const k = ROWS[0].find(function (x) { return x.id === 'alt'; });
+    const k = ROWS[0].find(function (x) {
+      return x.id === 'alt';
+    });
     assert.ok(k);
     assert.strictEqual(k.cls, 'modifier sticky');
   });
 
   await t.test('Shift is modifier sticky with id', function () {
-    const k = ROWS[0].find(function (x) { return x.id === 'shift'; });
+    const k = ROWS[0].find(function (x) {
+      return x.id === 'shift';
+    });
     assert.ok(k);
     assert.strictEqual(k.cls, 'modifier sticky');
   });
 
   await t.test('Esc and Tab are modifier (non-sticky)', function () {
-    const esc = ROWS[0].find(function (x) { return x.label === 'Esc'; });
-    const tab = ROWS[0].find(function (x) { return x.label === 'Tab'; });
+    const esc = ROWS[0].find(function (x) {
+      return x.label === 'Esc';
+    });
+    const tab = ROWS[0].find(function (x) {
+      return x.label === 'Tab';
+    });
     assert.ok(esc);
     assert.ok(tab);
     assert.strictEqual(esc.cls, 'modifier');
@@ -333,17 +390,26 @@ test('keybar ROWS — modifier keys present', async (t) => {
 
 test('keybar ROWS — Shift does NOT transform characters', async (t) => {
   await t.test('Shift has seq=null (no own sequence)', function () {
-    const shift = ROWS[0].find(function (x) { return x.id === 'shift'; });
+    const shift = ROWS[0].find(function (x) {
+      return x.id === 'shift';
+    });
     assert.strictEqual(shift.seq, null);
   });
 
-  await t.test('no key sends shifted char directly — | and : are their own keys in row 0', function () {
-    // | and : are row 0 positions 6,5 — both have their literal seq values
-    const pipe = ROWS[0].find(function (k) { return k.label === '|'; });
-    const colon = ROWS[0].find(function (k) { return k.label === ':'; });
-    assert.strictEqual(pipe.seq, '|');
-    assert.strictEqual(colon.seq, ':');
-  });
+  await t.test(
+    'no key sends shifted char directly — | and : are their own keys in row 0',
+    function () {
+      // | and : are row 0 positions 6,5 — both have their literal seq values
+      const pipe = ROWS[0].find(function (k) {
+        return k.label === '|';
+      });
+      const colon = ROWS[0].find(function (k) {
+        return k.label === ':';
+      });
+      assert.strictEqual(pipe.seq, '|');
+      assert.strictEqual(colon.seq, ':');
+    }
+  );
 });
 
 test('keybar ROWS — inverted-T arrow layout', async (t) => {
@@ -361,49 +427,108 @@ test('keybar ROWS — inverted-T arrow layout', async (t) => {
   });
 
   await t.test('all four arrows have cls "arrow"', function () {
-    const arrows = ROWS.flat().filter(function (k) { return k.cls === 'arrow'; });
+    const arrows = ROWS.flat().filter(function (k) {
+      return k.cls === 'arrow';
+    });
     assert.strictEqual(arrows.length, 4);
   });
 
   await t.test('no more spacers in layout', function () {
-    const spacers = ROWS.flat().filter(function (k) { return k.cls === 'spacer'; });
+    const spacers = ROWS.flat().filter(function (k) {
+      return k.cls === 'spacer';
+    });
     assert.strictEqual(spacers.length, 0);
   });
 });
 
 test('keybar ROWS — all keys have expected sequences', async (t) => {
   await t.test('Esc → \\x1b', function () {
-    assert.strictEqual(ROWS[0].find(function (k) { return k.label === 'Esc'; }).seq, '\x1b');
+    assert.strictEqual(
+      ROWS[0].find(function (k) {
+        return k.label === 'Esc';
+      }).seq,
+      '\x1b'
+    );
   });
   await t.test('Tab → \\t', function () {
-    assert.strictEqual(ROWS[0].find(function (k) { return k.label === 'Tab'; }).seq, '\t');
+    assert.strictEqual(
+      ROWS[0].find(function (k) {
+        return k.label === 'Tab';
+      }).seq,
+      '\t'
+    );
   });
   await t.test('↑ → \\x1b[A', function () {
-    assert.strictEqual(ROWS[1].find(function (k) { return k.label === '↑'; }).seq, '\x1b[A');
+    assert.strictEqual(
+      ROWS[1].find(function (k) {
+        return k.label === '↑';
+      }).seq,
+      '\x1b[A'
+    );
   });
   await t.test('↓ → \\x1b[B', function () {
-    assert.strictEqual(ROWS[2].find(function (k) { return k.label === '↓'; }).seq, '\x1b[B');
+    assert.strictEqual(
+      ROWS[2].find(function (k) {
+        return k.label === '↓';
+      }).seq,
+      '\x1b[B'
+    );
   });
   await t.test('← → \\x1b[D', function () {
-    assert.strictEqual(ROWS[2].find(function (k) { return k.label === '←'; }).seq, '\x1b[D');
+    assert.strictEqual(
+      ROWS[2].find(function (k) {
+        return k.label === '←';
+      }).seq,
+      '\x1b[D'
+    );
   });
   await t.test('→ → \\x1b[C', function () {
-    assert.strictEqual(ROWS[2].find(function (k) { return k.label === '→'; }).seq, '\x1b[C');
+    assert.strictEqual(
+      ROWS[2].find(function (k) {
+        return k.label === '→';
+      }).seq,
+      '\x1b[C'
+    );
   });
   await t.test('Home → \\x1b[H', function () {
-    assert.strictEqual(ROWS[1].find(function (k) { return k.label === 'Home'; }).seq, '\x1b[H');
+    assert.strictEqual(
+      ROWS[1].find(function (k) {
+        return k.label === 'Home';
+      }).seq,
+      '\x1b[H'
+    );
   });
   await t.test('End → \\x1b[F', function () {
-    assert.strictEqual(ROWS[1].find(function (k) { return k.label === 'End'; }).seq, '\x1b[F');
+    assert.strictEqual(
+      ROWS[1].find(function (k) {
+        return k.label === 'End';
+      }).seq,
+      '\x1b[F'
+    );
   });
   await t.test('PgUp → \\x1b[5~', function () {
-    assert.strictEqual(ROWS[1].find(function (k) { return k.label === 'PgUp'; }).seq, '\x1b[5~');
+    assert.strictEqual(
+      ROWS[1].find(function (k) {
+        return k.label === 'PgUp';
+      }).seq,
+      '\x1b[5~'
+    );
   });
   await t.test('PgDn → \\x1b[6~', function () {
-    assert.strictEqual(ROWS[1].find(function (k) { return k.label === 'PgDn'; }).seq, '\x1b[6~');
+    assert.strictEqual(
+      ROWS[1].find(function (k) {
+        return k.label === 'PgDn';
+      }).seq,
+      '\x1b[6~'
+    );
   });
   await t.test('Del → \\x1b[3~', function () {
-    assert.strictEqual(ROWS[1].find(function (k) { return k.label === 'Del'; }).seq, '\x1b[3~');
+    assert.strictEqual(
+      ROWS[1].find(function (k) {
+        return k.label === 'Del';
+      }).seq,
+      '\x1b[3~'
+    );
   });
 });
 
@@ -790,7 +915,7 @@ test('sendKey — Ctrl+Alt combo (keybar buttons)', async (t) => {
     const st = createModState();
     handleSticky(st, 'ctrl', 1000);
     handleSticky(st, 'ctrl', 1100); // Ctrl locked
-    handleSticky(st, 'alt', 1500);  // Alt armed
+    handleSticky(st, 'alt', 1500); // Alt armed
     const r = simulateSendKey(st, 'd');
     assert.strictEqual(r.sent, '\x1b\x04');
     assert.deepStrictEqual(r.disarmed, ['alt']); // only Alt disarmed, Ctrl stays locked
@@ -819,14 +944,17 @@ test('sendKey — Shift modifier behavior', async (t) => {
     assert.strictEqual(st.shift.locked, true);
   });
 
-  await t.test('Ctrl+Shift armed + "c" → \\x03 (Ctrl-C, Shift ignored for regular chars)', function () {
-    const st = createModState();
-    handleSticky(st, 'ctrl', 1000);
-    handleSticky(st, 'shift', 1100);
-    const r = simulateSendKey(st, 'c');
-    assert.strictEqual(r.sent, '\x03');
-    assert.deepStrictEqual(r.disarmed.sort(), ['ctrl', 'shift'].sort());
-  });
+  await t.test(
+    'Ctrl+Shift armed + "c" → \\x03 (Ctrl-C, Shift ignored for regular chars)',
+    function () {
+      const st = createModState();
+      handleSticky(st, 'ctrl', 1000);
+      handleSticky(st, 'shift', 1100);
+      const r = simulateSendKey(st, 'c');
+      assert.strictEqual(r.sent, '\x03');
+      assert.deepStrictEqual(r.disarmed.sort(), ['ctrl', 'shift'].sort());
+    }
+  );
 
   await t.test('Shift armed + Tab → \\x1b[Z (reverse tab)', function () {
     const st = createModState();
@@ -855,17 +983,20 @@ test('sendKey — Shift modifier behavior', async (t) => {
     assert.deepStrictEqual(r.disarmed, ['shift']);
   });
 
-  await t.test('Shift + Ctrl armed + Tab → Ctrl mask first, no Shift map (\\t masked to \\x09, 0x09<0x20)', function () {
-    const st = createModState();
-    handleSticky(st, 'ctrl', 1000);
-    handleSticky(st, 'shift', 1100);
-    // Ctrl masks first: \t (0x09) is < 0x20 → NOT masked. Shift checks SHIFT_MAP after.
-    // But result after Ctrl is still '\t' → SHIFT_MAP['\t'] = '\x1b[Z'
-    const r = simulateSendKey(st, '\t');
-    // \t is 0x09 < 0x20, Ctrl doesn't mask it. Result is \t → Shift maps to \x1b[Z
-    assert.strictEqual(r.sent, '\x1b[Z');
-    assert.deepStrictEqual(r.disarmed.sort(), ['ctrl', 'shift'].sort());
-  });
+  await t.test(
+    'Shift + Ctrl armed + Tab → Ctrl mask first, no Shift map (\\t masked to \\x09, 0x09<0x20)',
+    function () {
+      const st = createModState();
+      handleSticky(st, 'ctrl', 1000);
+      handleSticky(st, 'shift', 1100);
+      // Ctrl masks first: \t (0x09) is < 0x20 → NOT masked. Shift checks SHIFT_MAP after.
+      // But result after Ctrl is still '\t' → SHIFT_MAP['\t'] = '\x1b[Z'
+      const r = simulateSendKey(st, '\t');
+      // \t is 0x09 < 0x20, Ctrl doesn't mask it. Result is \t → Shift maps to \x1b[Z
+      assert.strictEqual(r.sent, '\x1b[Z');
+      assert.deepStrictEqual(r.disarmed.sort(), ['ctrl', 'shift'].sort());
+    }
+  );
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -915,13 +1046,16 @@ test('applyModifiers — Ctrl active (armed or locked)', async (t) => {
     assert.strictEqual(r.result, '\x08\x05\x0c\x0c\x0f');
   });
 
-  await t.test('Ctrl locked + mixed non-ASCII "a\\nb" → a masked, b masked, LF passed', function () {
-    const st = createModState();
-    handleSticky(st, 'ctrl', 1000);
-    handleSticky(st, 'ctrl', 1100);
-    const r = applyModifiers(st, 'a\nb');
-    assert.strictEqual(r.result, '\x01\n\x02');
-  });
+  await t.test(
+    'Ctrl locked + mixed non-ASCII "a\\nb" → a masked, b masked, LF passed',
+    function () {
+      const st = createModState();
+      handleSticky(st, 'ctrl', 1000);
+      handleSticky(st, 'ctrl', 1100);
+      const r = applyModifiers(st, 'a\nb');
+      assert.strictEqual(r.result, '\x01\n\x02');
+    }
+  );
 });
 
 test('applyModifiers — Alt active', async (t) => {
@@ -1034,7 +1168,8 @@ test('applyModifiers — Shift locked (ALL UPPER)', async (t) => {
 
   await t.test('Shift locked + Ctrl armed + "c" → \\x03 (no casing, Ctrl wins)', function () {
     const st = createModState();
-    handleSticky(st, 'shift', 1000); handleSticky(st, 'shift', 1100);
+    handleSticky(st, 'shift', 1000);
+    handleSticky(st, 'shift', 1100);
     handleSticky(st, 'ctrl', 1000);
     const r = applyModifiers(st, 'c');
     assert.strictEqual(r.result, '\x03');
@@ -1060,14 +1195,17 @@ test('applyModifiers — Shift map for native keyboard input', async (t) => {
     assert.strictEqual(st.shift.locked, true);
   });
 
-  await t.test('Shift armed + native "a" → "A" (one-shot uppercase, now does transform)', function () {
-    const st = createModState();
-    handleSticky(st, 'shift', 1000);
-    const r = applyModifiers(st, 'a');
-    assert.strictEqual(r.result, 'A');
-    // Shift was armed → disarmed
-    assert.deepStrictEqual(r.disarmed, ['shift']);
-  });
+  await t.test(
+    'Shift armed + native "a" → "A" (one-shot uppercase, now does transform)',
+    function () {
+      const st = createModState();
+      handleSticky(st, 'shift', 1000);
+      const r = applyModifiers(st, 'a');
+      assert.strictEqual(r.result, 'A');
+      // Shift was armed → disarmed
+      assert.deepStrictEqual(r.disarmed, ['shift']);
+    }
+  );
 });
 
 test('applyModifiers — ghost event guard (empty data does not disarm)', async (t) => {
@@ -1109,7 +1247,7 @@ test('applyModifiers — ghost event guard (empty data does not disarm)', async 
 
   await t.test('ghost event does not disarm, real keypress after works', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000);  // arm Ctrl
+    handleSticky(st, 'ctrl', 1000); // arm Ctrl
     handleSticky(st, 'shift', 1100); // arm Shift
 
     // Ghost event from terminal focus — must NOT disarm
@@ -1126,22 +1264,22 @@ test('applyModifiers — ghost event guard (empty data does not disarm)', async 
   // Mirrors keybar.js _focusGraceUntil + suppressDisarm logic (L270-278).
   await t.test('grace period — modifiers not disarmed within window', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000);  // arm Ctrl
+    handleSticky(st, 'ctrl', 1000); // arm Ctrl
     handleSticky(st, 'shift', 1100); // arm Shift
-    _focusGraceUntil = Date.now() + 500;  // 500ms grace window
+    _focusGraceUntil = Date.now() + 500; // 500ms grace window
     const r = applyModifiers(st, 'x');
     // Modifiers still applied (Ctrl+Shift transform)
     assert.strictEqual(r.disarmed.length, 0, 'no disarming during grace');
     assert.strictEqual(st.ctrl.armed, true);
     assert.strictEqual(st.shift.armed, true);
-    _focusGraceUntil = 0;  // reset
+    _focusGraceUntil = 0; // reset
   });
 
   await t.test('grace period expired — modifiers disarm normally', function () {
     const st = createModState();
     handleSticky(st, 'ctrl', 1000);
     handleSticky(st, 'shift', 1100);
-    _focusGraceUntil = 0;  // expired
+    _focusGraceUntil = 0; // expired
     const r = applyModifiers(st, 'x');
     assert.ok(r.disarmed.length >= 2, 'should disarm both ctrl and shift');
     assert.strictEqual(st.ctrl.armed, false);
@@ -1156,16 +1294,20 @@ test('applyModifiers — ghost event guard (empty data does not disarm)', async 
 test('isCopyPasteCombo — detects Ctrl+Shift+C and Ctrl+Shift+V', async (t) => {
   await t.test('Ctrl+Shift locked + "c" → true', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
-    handleSticky(st, 'shift', 1200); handleSticky(st, 'shift', 1300);
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100);
+    handleSticky(st, 'shift', 1200);
+    handleSticky(st, 'shift', 1300);
     assert.strictEqual(isCopyPasteCombo(st, 'c'), true);
     assert.strictEqual(isCopyPasteCombo(st, 'v'), true);
   });
 
   await t.test('Ctrl+Shift locked + "x" → false (not c or v)', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
-    handleSticky(st, 'shift', 1200); handleSticky(st, 'shift', 1300);
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100);
+    handleSticky(st, 'shift', 1200);
+    handleSticky(st, 'shift', 1300);
     assert.strictEqual(isCopyPasteCombo(st, 'x'), false);
     assert.strictEqual(isCopyPasteCombo(st, 'a'), false);
   });
@@ -1288,25 +1430,31 @@ test('sendKey — Ctrl mask correctness: all lowercase letters', function () {
     const st = createModState();
     handleSticky(st, 'ctrl', 1000);
     const r = simulateSendKey(st, letter);
-    assert.strictEqual(r.sent, String.fromCharCode(expectedCode),
-      'Ctrl+' + letter + ' should produce 0x' + expectedCode.toString(16));
+    assert.strictEqual(
+      r.sent,
+      String.fromCharCode(expectedCode),
+      'Ctrl+' + letter + ' should produce 0x' + expectedCode.toString(16)
+    );
   }
 });
 
 test('sendKey — Ctrl mask correctness: digits and symbols', function () {
   const cases = {
-    '/': '\x0f',  // 0x2f & 0x1f = 0x0f
-    ';': '\x1b',  // 0x3b & 0x1f = 0x1b (same as Esc!)
+    '/': '\x0f', // 0x2f & 0x1f = 0x0f
+    ';': '\x1b', // 0x3b & 0x1f = 0x1b (same as Esc!)
     '\\': '\x1c', // 0x5c & 0x1f = 0x1c
-    ':': '\x1a',  // 0x3a & 0x1f = 0x1a
-    '|': '\x1c',  // 0x7c & 0x1f = 0x1c
+    ':': '\x1a', // 0x3a & 0x1f = 0x1a
+    '|': '\x1c', // 0x7c & 0x1f = 0x1c
   };
   Object.keys(cases).forEach(function (ch) {
     const st = createModState();
     handleSticky(st, 'ctrl', 1000);
     const r = simulateSendKey(st, ch);
-    assert.strictEqual(r.sent, cases[ch],
-      'Ctrl+' + ch + ' should produce ' + JSON.stringify(cases[ch]));
+    assert.strictEqual(
+      r.sent,
+      cases[ch],
+      'Ctrl+' + ch + ' should produce ' + JSON.stringify(cases[ch])
+    );
   });
 });
 
@@ -1316,7 +1464,10 @@ test('sendKey — Ctrl mask correctness: digits and symbols', function () {
 
 test('sessionDisplayLabel — name vs cwd', async (t) => {
   await t.test('session with name → returns name', function () {
-    assert.strictEqual(sessionDisplayLabel({ name: 'My Session', cwd: '/home/project' }), 'My Session');
+    assert.strictEqual(
+      sessionDisplayLabel({ name: 'My Session', cwd: '/home/project' }),
+      'My Session'
+    );
   });
 
   await t.test('session without name → returns cwd', function () {
@@ -1385,8 +1536,10 @@ test('escHtml — handles edge cases', async (t) => {
   });
 
   await t.test('multiple special chars', function () {
-    assert.strictEqual(escHtml('<div class="x">&</div>\''),
-      '&lt;div class=&quot;x&quot;&gt;&amp;&lt;/div&gt;&#39;');
+    assert.strictEqual(
+      escHtml('<div class="x">&</div>\''),
+      '&lt;div class=&quot;x&quot;&gt;&amp;&lt;/div&gt;&#39;'
+    );
   });
 
   await t.test('path-like cwd with no special chars → unchanged', function () {
@@ -1589,8 +1742,10 @@ function simulateTermOnData(modState, data) {
 test('term.onData flow — Ctrl+Shift+C intercepts BEFORE Ctrl mask', async (t) => {
   await t.test('Ctrl+Shift locked + "c" → copy_buffer (NOT \\x03)', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
-    handleSticky(st, 'shift', 1200); handleSticky(st, 'shift', 1300);
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100);
+    handleSticky(st, 'shift', 1200);
+    handleSticky(st, 'shift', 1300);
     const r = simulateTermOnData(st, 'c');
     assert.strictEqual(r.action, 'copy_buffer');
     assert.strictEqual(r.data, null);
@@ -1601,8 +1756,10 @@ test('term.onData flow — Ctrl+Shift+C intercepts BEFORE Ctrl mask', async (t) 
 
   await t.test('Ctrl+Shift locked + "v" → paste_buffer (NOT Ctrl-V)', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
-    handleSticky(st, 'shift', 1200); handleSticky(st, 'shift', 1300);
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100);
+    handleSticky(st, 'shift', 1200);
+    handleSticky(st, 'shift', 1300);
     const r = simulateTermOnData(st, 'v');
     assert.strictEqual(r.action, 'paste_buffer');
   });
@@ -1621,7 +1778,7 @@ test('term.onData flow — Ctrl+Shift+C intercepts BEFORE Ctrl mask', async (t) 
 test('term.onData flow — ghost event guard (empty data does not disarm)', async (t) => {
   await t.test('empty string with modifiers armed → skip_ghost, modifiers intact', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000);  // arm
+    handleSticky(st, 'ctrl', 1000); // arm
     handleSticky(st, 'shift', 1100); // arm
     const r = simulateTermOnData(st, '');
     assert.strictEqual(r.action, 'skip_ghost');
@@ -1657,8 +1814,10 @@ test('term.onData flow — ghost event guard (empty data does not disarm)', asyn
 test('term.onData flow — double-tap Ctrl+Shift + native keyboard V pastes', async (t) => {
   await t.test('Ctrl locked + Shift locked + "v" → paste_buffer', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);  // lock
-    handleSticky(st, 'shift', 1200); handleSticky(st, 'shift', 1300); // lock
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100); // lock
+    handleSticky(st, 'shift', 1200);
+    handleSticky(st, 'shift', 1300); // lock
     const r = simulateTermOnData(st, 'v');
     assert.strictEqual(r.action, 'paste_buffer');
     // Locked modifiers stay locked after paste
@@ -1668,8 +1827,10 @@ test('term.onData flow — double-tap Ctrl+Shift + native keyboard V pastes', as
 
   await t.test('Ctrl locked + Shift locked + "c" → copy_buffer', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
-    handleSticky(st, 'shift', 1200); handleSticky(st, 'shift', 1300);
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100);
+    handleSticky(st, 'shift', 1200);
+    handleSticky(st, 'shift', 1300);
     const r = simulateTermOnData(st, 'c');
     assert.strictEqual(r.action, 'copy_buffer');
     // Locked modifiers stay locked
@@ -1679,7 +1840,7 @@ test('term.onData flow — double-tap Ctrl+Shift + native keyboard V pastes', as
 
   await t.test('single-tap (armed) Ctrl+Shift + "v" → paste_buffer, disarms both', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000);  // arm
+    handleSticky(st, 'ctrl', 1000); // arm
     handleSticky(st, 'shift', 1100); // arm
     const r = simulateTermOnData(st, 'v');
     assert.strictEqual(r.action, 'paste_buffer');
@@ -1708,7 +1869,8 @@ test('term.onData flow — no modifiers → raw passthrough', async (t) => {
 test('term.onData flow — Ctrl only + "c" → Ctrl mask (not copy)', async (t) => {
   await t.test('Ctrl locked + "c" → send_input \\x03 ', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100);
     const r = simulateTermOnData(st, 'c');
     assert.strictEqual(r.action, 'send_input');
     assert.strictEqual(r.data, '\x03');
@@ -1716,7 +1878,8 @@ test('term.onData flow — Ctrl only + "c" → Ctrl mask (not copy)', async (t) 
 
   await t.test('Ctrl locked + "v" → send_input \\x16', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100);
     const r = simulateTermOnData(st, 'v');
     assert.strictEqual(r.action, 'send_input');
     assert.strictEqual(r.data, '\x16');
@@ -1724,20 +1887,27 @@ test('term.onData flow — Ctrl only + "c" → Ctrl mask (not copy)', async (t) 
 });
 
 test('term.onData flow — Ctrl+Shift+other keys pass through modifiers normally', async (t) => {
-  await t.test('Ctrl+Shift locked + "d" → masked Ctrl, passed through (not copy/paste)', function () {
-    const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
-    handleSticky(st, 'shift', 1200); handleSticky(st, 'shift', 1300);
-    // 'd' is not 'c' or 'v', so falls through to normal modifiers
-    const r = simulateTermOnData(st, 'd');
-    assert.strictEqual(r.action, 'send_input');
-    assert.strictEqual(r.data, '\x04'); // Ctrl-D
-  });
+  await t.test(
+    'Ctrl+Shift locked + "d" → masked Ctrl, passed through (not copy/paste)',
+    function () {
+      const st = createModState();
+      handleSticky(st, 'ctrl', 1000);
+      handleSticky(st, 'ctrl', 1100);
+      handleSticky(st, 'shift', 1200);
+      handleSticky(st, 'shift', 1300);
+      // 'd' is not 'c' or 'v', so falls through to normal modifiers
+      const r = simulateTermOnData(st, 'd');
+      assert.strictEqual(r.action, 'send_input');
+      assert.strictEqual(r.data, '\x04'); // Ctrl-D
+    }
+  );
 
   await t.test('Ctrl+Shift locked + "x" → \\x18 (Ctrl-X)', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
-    handleSticky(st, 'shift', 1200); handleSticky(st, 'shift', 1300);
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100);
+    handleSticky(st, 'shift', 1200);
+    handleSticky(st, 'shift', 1300);
     const r = simulateTermOnData(st, 'x');
     assert.strictEqual(r.action, 'send_input');
     assert.strictEqual(r.data, '\x18');
@@ -1854,7 +2024,9 @@ function simulateComboClick(key) {
 
 test('simulateComboClick — Paste button sends paste_buffer message', async (t) => {
   await t.test('Paste key → { type: "paste_buffer" } (msg wins, no seq)', function () {
-    const pasteKey = ROWS[2].find(function (k) { return k.label === 'Paste'; });
+    const pasteKey = ROWS[2].find(function (k) {
+      return k.label === 'Paste';
+    });
     assert.ok(pasteKey, 'Paste key exists in row 2');
     assert.strictEqual(pasteKey.seq, null);
     assert.deepStrictEqual(pasteKey.msg, { type: 'paste_buffer' });
@@ -1865,25 +2037,33 @@ test('simulateComboClick — Paste button sends paste_buffer message', async (t)
 
 test('simulateComboClick — existing combo keys unchanged', async (t) => {
   await t.test('Sft+Tab → { type: "input", data: "\\x1b[Z" }', function () {
-    const k = ROWS[2].find(function (x) { return x.label === 'Sft+Tab'; });
+    const k = ROWS[2].find(function (x) {
+      return x.label === 'Sft+Tab';
+    });
     const r = simulateComboClick(k);
     assert.deepStrictEqual(r, { type: 'input', data: '\x1b[Z' });
   });
 
   await t.test('Stash → { type: "input", data: "\\x13" }', function () {
-    const k = ROWS[2].find(function (x) { return x.label === 'Stash'; });
+    const k = ROWS[2].find(function (x) {
+      return x.label === 'Stash';
+    });
     const r = simulateComboClick(k);
     assert.deepStrictEqual(r, { type: 'input', data: '\x13' });
   });
 
   await t.test('Search → { type: "input", data: "\\x12" }', function () {
-    const k = ROWS[2].find(function (x) { return x.label === 'Search'; });
+    const k = ROWS[2].find(function (x) {
+      return x.label === 'Search';
+    });
     const r = simulateComboClick(k);
     assert.deepStrictEqual(r, { type: 'input', data: '\x12' });
   });
 
   await t.test('Send → { type: "input", data: "\\r" }', function () {
-    const k = ROWS[2].find(function (x) { return x.label === 'Send'; });
+    const k = ROWS[2].find(function (x) {
+      return x.label === 'Send';
+    });
     const r = simulateComboClick(k);
     assert.deepStrictEqual(r, { type: 'input', data: '\r' });
   });
@@ -1891,7 +2071,9 @@ test('simulateComboClick — existing combo keys unchanged', async (t) => {
 
 test('simulateComboClick — edge cases', async (t) => {
   await t.test('non-raw key returns null', function () {
-    const escKey = ROWS[0].find(function (k) { return k.label === 'Esc'; });
+    const escKey = ROWS[0].find(function (k) {
+      return k.label === 'Esc';
+    });
     assert.strictEqual(escKey.raw, undefined);
     assert.strictEqual(simulateComboClick(escKey), null);
   });
@@ -1916,7 +2098,9 @@ test('simulateComboClick — edge cases', async (t) => {
   });
 
   await t.test('modifier sticky key (Ctrl) → null (not raw)', function () {
-    const ctrlKey = ROWS[0].find(function (k) { return k.id === 'ctrl'; });
+    const ctrlKey = ROWS[0].find(function (k) {
+      return k.id === 'ctrl';
+    });
     assert.strictEqual(ctrlKey.raw, undefined);
     assert.strictEqual(simulateComboClick(ctrlKey), null);
   });
@@ -1972,8 +2156,10 @@ test('mirror model — Ctrl+Shift+C copies current selection (NOT auto-copy)', a
 
   await t.test('Ctrl locked + Shift locked + native "c" → copy_buffer, locked stay', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100);
-    handleSticky(st, 'shift', 1200); handleSticky(st, 'shift', 1300);
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100);
+    handleSticky(st, 'shift', 1200);
+    handleSticky(st, 'shift', 1300);
     const r = simulateTermOnData(st, 'c');
     assert.strictEqual(r.action, 'copy_buffer');
     assert.strictEqual(st.ctrl.locked, true);
@@ -2047,13 +2233,17 @@ test('mirror model — same modifier state for both input sources', async (t) =>
   await t.test('Ctrl+Alt locked: both sources produce identical \\x1b+mask', function () {
     // Ctrl locked + Alt locked + 'a' — both sources should be identical
     const stK = createModState();
-    handleSticky(stK, 'ctrl', 1000); handleSticky(stK, 'ctrl', 1100);
-    handleSticky(stK, 'alt', 1200); handleSticky(stK, 'alt', 1300);
+    handleSticky(stK, 'ctrl', 1000);
+    handleSticky(stK, 'ctrl', 1100);
+    handleSticky(stK, 'alt', 1200);
+    handleSticky(stK, 'alt', 1300);
     const keybarResult = simulateSendKey(stK, 'a');
 
     const stN = createModState();
-    handleSticky(stN, 'ctrl', 1000); handleSticky(stN, 'ctrl', 1100);
-    handleSticky(stN, 'alt', 1200); handleSticky(stN, 'alt', 1300);
+    handleSticky(stN, 'ctrl', 1000);
+    handleSticky(stN, 'ctrl', 1100);
+    handleSticky(stN, 'alt', 1200);
+    handleSticky(stN, 'alt', 1300);
     const nativeResult = applyModifiers(stN, 'a');
 
     assert.strictEqual(keybarResult.sent, '\x1b\x01');
@@ -2063,18 +2253,21 @@ test('mirror model — same modifier state for both input sources', async (t) =>
     assert.deepStrictEqual(nativeResult.disarmed, []);
   });
 
-  await t.test('Shift armed: keybar sends ":" as-is, native produces uppercase ":" (no-op)', function () {
-    const stK = createModState();
-    handleSticky(stK, 'shift', 1000);
-    const keybarResult = simulateSendKey(stK, ':');
+  await t.test(
+    'Shift armed: keybar sends ":" as-is, native produces uppercase ":" (no-op)',
+    function () {
+      const stK = createModState();
+      handleSticky(stK, 'shift', 1000);
+      const keybarResult = simulateSendKey(stK, ':');
 
-    const stN = createModState();
-    handleSticky(stN, 'shift', 1000);
-    const nativeResult = applyModifiers(stN, ':');
+      const stN = createModState();
+      handleSticky(stN, 'shift', 1000);
+      const nativeResult = applyModifiers(stN, ':');
 
-    assert.strictEqual(keybarResult.sent, ':');
-    assert.strictEqual(nativeResult.result, ':');  // ':' is not a letter — toUpperCase no-op
-  });
+      assert.strictEqual(keybarResult.sent, ':');
+      assert.strictEqual(nativeResult.result, ':'); // ':' is not a letter — toUpperCase no-op
+    }
+  );
 });
 
 test('mirror model — non-modifier keys send raw keystrokes always', async (t) => {
@@ -2084,7 +2277,8 @@ test('mirror model — non-modifier keys send raw keystrokes always', async (t) 
 
   await t.test('Esc keybar button sends \\x1b regardless of modifiers', function () {
     const st = createModState();
-    handleSticky(st, 'ctrl', 1000); handleSticky(st, 'ctrl', 1100); // Ctrl locked
+    handleSticky(st, 'ctrl', 1000);
+    handleSticky(st, 'ctrl', 1100); // Ctrl locked
     const r = simulateSendKey(st, '\x1b');
     // Esc (0x1b) is NOT in 0x20-0x7f range → NOT masked by Ctrl → stays as \x1b
     assert.strictEqual(r.sent, '\x1b');
@@ -2098,7 +2292,8 @@ test('mirror model — non-modifier keys send raw keystrokes always', async (t) 
 
   await t.test('arrow keys always send ANSI sequences', function () {
     const st = createModState();
-    handleSticky(st, 'alt', 1000); handleSticky(st, 'alt', 1100); // Alt locked
+    handleSticky(st, 'alt', 1000);
+    handleSticky(st, 'alt', 1100); // Alt locked
     const r = simulateSendKey(st, '\x1b[A');
     // Alt prefixes: \x1b + \x1b[A = \x1b\x1b[A
     assert.strictEqual(r.sent, '\x1b\x1b[A');

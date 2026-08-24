@@ -23,10 +23,16 @@ function resolveCurrentTmux() {
   }
   if (process.env.TMUX) {
     let s = '';
-    const r = spawnSync('tmux', ['display-message', '-p', '#S'], { timeout: 2000, encoding: 'utf8' });
+    const r = spawnSync('tmux', ['display-message', '-p', '#S'], {
+      timeout: 2000,
+      encoding: 'utf8',
+    });
     if (r.status === 0) s = r.stdout.trim();
     if (s && s.startsWith('airprompt-web-')) {
-      const r2 = spawnSync('tmux', ['display-message', '-p', '#{session_group}'], { timeout: 2000, encoding: 'utf8' });
+      const r2 = spawnSync('tmux', ['display-message', '-p', '#{session_group}'], {
+        timeout: 2000,
+        encoding: 'utf8',
+      });
       if (r2.status === 0 && r2.stdout.trim()) s = r2.stdout.trim();
     }
     return s || '';
@@ -56,7 +62,9 @@ function findMyDir(sessionsDir, currentTmux, providerId) {
         // Only match dirs belonging to this provider
         if (!name.startsWith(providerId + '-')) continue;
         let dirTmux = '';
-        try { dirTmux = fs.readFileSync(path.join(d, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
+        try {
+          dirTmux = fs.readFileSync(path.join(d, 'tmux'), 'utf8').trim().slice(0, 128);
+        } catch (_) {}
         if (!dirTmux) continue;
         const r = spawnSync('tmux', ['has-session', '-t', dirTmux], { timeout: 2000 });
         if (r.status === 1 && fs.existsSync(path.join(d, 'active'))) {
@@ -71,13 +79,17 @@ function findMyDir(sessionsDir, currentTmux, providerId) {
 
 function readSessionId(myDir) {
   if (!myDir) return '';
-  try { return fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
+  try {
+    return fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128);
+  } catch (_) {}
   return '';
 }
 
 function readRegisteredTmux(myDir) {
   if (!myDir) return '';
-  try { return fs.readFileSync(path.join(myDir, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
+  try {
+    return fs.readFileSync(path.join(myDir, 'tmux'), 'utf8').trim().slice(0, 128);
+  } catch (_) {}
   return '';
 }
 
@@ -89,7 +101,9 @@ function stopDaemon(pidFile) {
     process.kill(pid, 'SIGTERM');
     // Unlink AFTER kill — prevents racing activate from spawning duplicate
     // daemon while this one is still shutting down.
-    try { fs.unlinkSync(pidFile); } catch (_) {}
+    try {
+      fs.unlinkSync(pidFile);
+    } catch (_) {}
   } catch (_) {}
 }
 
@@ -128,19 +142,35 @@ async function deactivateSession(ctx) {
     // Try session group check
     try {
       const r = spawnSync('tmux', ['display-message', '-p', '#{session_group}'], {
-        timeout: 2000, encoding: 'utf8',
+        timeout: 2000,
+        encoding: 'utf8',
       });
       if (r.status === 0 && r.stdout) {
         const group = r.stdout.trim();
         const r2 = spawnSync('tmux', ['has-session', '-t', group], { timeout: 2000 });
         if (r2.status === 0) {
-          return { status: 'ok', message: 'session group alive — no cleanup', url: null, sessionId: null };
+          return {
+            status: 'ok',
+            message: 'session group alive — no cleanup',
+            url: null,
+            sessionId: null,
+          };
         }
       }
     } catch (_) {
-      return { status: 'ok', message: 'cannot confirm tmux state — safe exit', url: null, sessionId: null };
+      return {
+        status: 'ok',
+        message: 'cannot confirm tmux state — safe exit',
+        url: null,
+        sessionId: null,
+      };
     }
-    return { status: 'ok', message: 'cannot confirm tmux state — safe exit', url: null, sessionId: null };
+    return {
+      status: 'ok',
+      message: 'cannot confirm tmux state — safe exit',
+      url: null,
+      sessionId: null,
+    };
   }
 
   try {
@@ -152,11 +182,21 @@ async function deactivateSession(ctx) {
         spawnSync('tmux', ['kill-session', '-t', registeredTmux], { timeout: 2000 });
         // Fall through to cleanup
       } else {
-        return { status: 'ok', message: 'tmux session alive — no cleanup', url: null, sessionId: null };
+        return {
+          status: 'ok',
+          message: 'tmux session alive — no cleanup',
+          url: null,
+          sessionId: null,
+        };
       }
     }
     if (r.status === null || r.error) {
-      return { status: 'ok', message: 'tmux not available — safe exit', url: null, sessionId: null };
+      return {
+        status: 'ok',
+        message: 'tmux not available — safe exit',
+        url: null,
+        sessionId: null,
+      };
     }
   } catch (_) {
     return { status: 'ok', message: 'tmux check error — safe exit', url: null, sessionId: null };
@@ -173,7 +213,10 @@ async function deactivateSession(ctx) {
       // disagrees). Retry with force:true if we already killed the mirror.
       const mirrorFile = myDir ? path.join(myDir, 'mirror') : '';
       if (mirrorFile && fs.existsSync(mirrorFile)) {
-        try { await post('/api/sessions/unregister', { sessionId, force: true }, port, tls); serverOk = true; } catch (_) {}
+        try {
+          await post('/api/sessions/unregister', { sessionId, force: true }, port, tls);
+          serverOk = true;
+        } catch (_) {}
       }
       // Always fall through to local cleanup — the per-session dir is stale
     }

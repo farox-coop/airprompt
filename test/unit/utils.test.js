@@ -35,16 +35,30 @@ function withEnv(overrides, fn) {
 const DEFAULT_SESSIONS = path.join(os.homedir(), '.airprompt', 'sessions');
 
 test('isSafeRmTarget — allows a path under the default sessions dir', () => {
-  withEnv({ AIRPROMPT_INSTALL_DIR: undefined, AIRPROMPT_SESSIONS_DIR: undefined, AIRPROMPT_STATE_DIR: undefined }, () => {
-    assert.strictEqual(isSafeRmTarget(path.join(DEFAULT_SESSIONS, 'claude-myproj')), true);
-  });
+  withEnv(
+    {
+      AIRPROMPT_INSTALL_DIR: undefined,
+      AIRPROMPT_SESSIONS_DIR: undefined,
+      AIRPROMPT_STATE_DIR: undefined,
+    },
+    () => {
+      assert.strictEqual(isSafeRmTarget(path.join(DEFAULT_SESSIONS, 'claude-myproj')), true);
+    }
+  );
 });
 
 test('isSafeRmTarget — allows a path under a custom sessions dir containing "airprompt"', () => {
   const dir = '/tmp/airprompt-test-sessions';
-  withEnv({ AIRPROMPT_SESSIONS_DIR: dir, AIRPROMPT_STATE_DIR: undefined, AIRPROMPT_INSTALL_DIR: undefined }, () => {
-    assert.strictEqual(isSafeRmTarget(path.join(dir, 'claude-x')), true);
-  });
+  withEnv(
+    {
+      AIRPROMPT_SESSIONS_DIR: dir,
+      AIRPROMPT_STATE_DIR: undefined,
+      AIRPROMPT_INSTALL_DIR: undefined,
+    },
+    () => {
+      assert.strictEqual(isSafeRmTarget(path.join(dir, 'claude-x')), true);
+    }
+  );
 });
 
 test('isSafeRmTarget — blocks a sibling dir sharing the "airprompt" prefix', () => {
@@ -52,9 +66,16 @@ test('isSafeRmTarget — blocks a sibling dir sharing the "airprompt" prefix', (
   // /tmp/airprompt-test-sessions-evil must NOT pass containment for root
   // /tmp/airprompt-test-sessions.
   const dir = '/tmp/airprompt-test-sessions';
-  withEnv({ AIRPROMPT_SESSIONS_DIR: dir, AIRPROMPT_STATE_DIR: undefined, AIRPROMPT_INSTALL_DIR: undefined }, () => {
-    assert.strictEqual(isSafeRmTarget('/tmp/airprompt-test-sessions-evil/claude-x'), false);
-  });
+  withEnv(
+    {
+      AIRPROMPT_SESSIONS_DIR: dir,
+      AIRPROMPT_STATE_DIR: undefined,
+      AIRPROMPT_INSTALL_DIR: undefined,
+    },
+    () => {
+      assert.strictEqual(isSafeRmTarget('/tmp/airprompt-test-sessions-evil/claude-x'), false);
+    }
+  );
 });
 
 test('isSafeRmTarget — blocks a misconfigured sessions dir (/home)', () => {
@@ -95,15 +116,30 @@ test('isSafeRmTarget — blocks a symlinked sessions dir resolving to a non-airp
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-symlink-'));
   const symlinkPath = path.join(base, 'sessions');
   try {
-    try { fs.symlinkSync(realTarget, symlinkPath, 'dir'); }
-    catch (_) { t.skip('symlinks not supported on this platform'); return; }
+    try {
+      fs.symlinkSync(realTarget, symlinkPath, 'dir');
+    } catch (_) {
+      t.skip('symlinks not supported on this platform');
+      return;
+    }
 
-    withEnv({ AIRPROMPT_SESSIONS_DIR: symlinkPath, AIRPROMPT_STATE_DIR: undefined, AIRPROMPT_INSTALL_DIR: undefined }, () => {
-      assert.strictEqual(isSafeRmTarget(path.join(symlinkPath, 'child')), false);
-    });
+    withEnv(
+      {
+        AIRPROMPT_SESSIONS_DIR: symlinkPath,
+        AIRPROMPT_STATE_DIR: undefined,
+        AIRPROMPT_INSTALL_DIR: undefined,
+      },
+      () => {
+        assert.strictEqual(isSafeRmTarget(path.join(symlinkPath, 'child')), false);
+      }
+    );
   } finally {
-    try { fs.rmSync(base, { recursive: true, force: true }); } catch (_) {}
-    try { fs.rmSync(realTarget, { recursive: true, force: true }); } catch (_) {}
+    try {
+      fs.rmSync(base, { recursive: true, force: true });
+    } catch (_) {}
+    try {
+      fs.rmSync(realTarget, { recursive: true, force: true });
+    } catch (_) {}
   }
 });
 
@@ -113,14 +149,29 @@ test('isSafeRmTarget — allows a symlinked sessions dir resolving to an airprom
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-symlink-'));
   const symlinkPath = path.join(base, 'sessions');
   try {
-    try { fs.symlinkSync(realTarget, symlinkPath, 'dir'); }
-    catch (_) { t.skip('symlinks not supported on this platform'); return; }
+    try {
+      fs.symlinkSync(realTarget, symlinkPath, 'dir');
+    } catch (_) {
+      t.skip('symlinks not supported on this platform');
+      return;
+    }
 
-    withEnv({ AIRPROMPT_SESSIONS_DIR: symlinkPath, AIRPROMPT_STATE_DIR: undefined, AIRPROMPT_INSTALL_DIR: undefined }, () => {
-      assert.strictEqual(isSafeRmTarget(path.join(symlinkPath, 'child')), true);
-    });
+    withEnv(
+      {
+        AIRPROMPT_SESSIONS_DIR: symlinkPath,
+        AIRPROMPT_STATE_DIR: undefined,
+        AIRPROMPT_INSTALL_DIR: undefined,
+      },
+      () => {
+        assert.strictEqual(isSafeRmTarget(path.join(symlinkPath, 'child')), true);
+      }
+    );
   } finally {
-    try { fs.rmSync(base, { recursive: true, force: true }); } catch (_) {}
-    try { fs.rmSync(realTarget, { recursive: true, force: true }); } catch (_) {}
+    try {
+      fs.rmSync(base, { recursive: true, force: true });
+    } catch (_) {}
+    try {
+      fs.rmSync(realTarget, { recursive: true, force: true });
+    } catch (_) {}
   }
 });

@@ -20,44 +20,70 @@ function hasCmd(cmd) {
       const r = child_process.spawnSync('where', [cmd], { stdio: 'ignore' });
       return r.status === 0;
     }
-    const r = child_process.spawnSync('sh', ['-c', `command -v '${String(cmd).replace(/'/g, "'\\''")}'`], { stdio: 'ignore' });
+    const r = child_process.spawnSync(
+      'sh',
+      ['-c', `command -v '${String(cmd).replace(/'/g, "'\\''")}'`],
+      { stdio: 'ignore' }
+    );
     return r.status === 0;
-  } catch (_) { return false; }
+  } catch (_) {
+    return false;
+  }
 }
 
 // ── Path helpers ──────────────────────────────────────────────────────────
 
-function shellEscape(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
+function shellEscape(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
 
-function expandHome(p) { return p.replace(/^\$HOME/, os.homedir()).replace(/^~/, os.homedir()); }
+function expandHome(p) {
+  return p.replace(/^\$HOME/, os.homedir()).replace(/^~/, os.homedir());
+}
 
 // ── Spawn helpers ─────────────────────────────────────────────────────────
 
 function spawnXplat(cmd, args, opts) {
   if (IS_WIN) {
-    const quoted = args.map(a => {
-      if (a === '' || /[\s"]/.test(a)) return '"' + String(a).replace(/"/g, '\\"') + '"';
-      return a;
-    }).join(' ');
-    return child_process.spawnSync(`${cmd} ${quoted}`, [], Object.assign({ shell: true }, opts || {}));
+    const quoted = args
+      .map((a) => {
+        if (a === '' || /[\s"]/.test(a)) return '"' + String(a).replace(/"/g, '\\"') + '"';
+        return a;
+      })
+      .join(' ');
+    return child_process.spawnSync(
+      `${cmd} ${quoted}`,
+      [],
+      Object.assign({ shell: true }, opts || {})
+    );
   }
   return child_process.spawnSync(cmd, args, opts || {});
 }
 
 function runSpawn(cmd, args, opts, dry) {
-  if (dry) { process.stdout.write(`  would run: ${cmd} ${args.join(' ')}\n`); return { status: 0 }; }
+  if (dry) {
+    process.stdout.write(`  would run: ${cmd} ${args.join(' ')}\n`);
+    return { status: 0 };
+  }
   process.stdout.write(`  $ ${cmd} ${args.join(' ')}\n`);
   return spawnXplat(cmd, args, Object.assign({ stdio: 'inherit' }, opts || {}));
 }
 
 function captureSpawn(cmd, args) {
-  try { return spawnXplat(cmd, args, { encoding: 'utf8' }); }
-  catch (_) { return { status: 1, stdout: '', stderr: '' }; }
+  try {
+    return spawnXplat(cmd, args, { encoding: 'utf8' });
+  } catch (_) {
+    return { status: 1, stdout: '', stderr: '' };
+  }
 }
 
-function spawnOk(r) { return !!r && !r.error && r.status === 0; }
+function spawnOk(r) {
+  return !!r && !r.error && r.status === 0;
+}
 
-function absoluteNodePath() { return process.execPath; }
+function absoluteNodePath() {
+  return process.execPath;
+}
 
 // ── File helpers ──────────────────────────────────────────────────────────
 
@@ -74,7 +100,9 @@ function copyDirRecursive(src, dest) {
 // Create env with TMPDIR inside configDir for same-filesystem renames
 function sameFilesystemTmpEnv(configDir) {
   const tmpDir = path.join(configDir, 'tmp');
-  try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (_) {}
+  try {
+    fs.mkdirSync(tmpDir, { recursive: true });
+  } catch (_) {}
   return Object.assign({}, process.env, { TMPDIR: tmpDir, TEMP: tmpDir, TMP: tmpDir });
 }
 
@@ -86,7 +114,8 @@ function generateCert(targetDir, dryRun, say, note, warn, ok) {
     warn('  cert script not found — HTTPS will not be enforced');
     return false;
   }
-  const stateDir = process.env.AIRPROMPT_STATE_DIR || path.join(os.homedir(), '.airprompt', 'state');
+  const stateDir =
+    process.env.AIRPROMPT_STATE_DIR || path.join(os.homedir(), '.airprompt', 'state');
   const certFile = path.join(stateDir, 'airprompt-cert.pem');
   const keyFile = path.join(stateDir, 'airprompt-key.pem');
   if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
@@ -95,7 +124,10 @@ function generateCert(targetDir, dryRun, say, note, warn, ok) {
   }
   say('  → generating TLS certificate (required for HTTPS)');
   if (!dryRun) {
-    const r = spawnXplat('bash', [certScript], { stdio: 'inherit', env: { ...process.env, AIRPROMPT_STATE_DIR: stateDir } });
+    const r = spawnXplat('bash', [certScript], {
+      stdio: 'inherit',
+      env: { ...process.env, AIRPROMPT_STATE_DIR: stateDir },
+    });
     if (!spawnOk(r)) {
       warn('  cert generation failed — voice dictation needs HTTPS. Run: make cert');
       return false;
@@ -110,7 +142,10 @@ function generateCert(targetDir, dryRun, say, note, warn, ok) {
 // ── jq dependency check ───────────────────────────────────────────────────
 
 function checkJq(note, warn, ok, dryRun, nonInteractive) {
-  if (hasCmd('jq')) { note('  jq: found'); return true; }
+  if (hasCmd('jq')) {
+    note('  jq: found');
+    return true;
+  }
   warn('  jq is required but not installed.');
   if (nonInteractive) {
     warn('  (non-interactive mode — skipping jq install prompt)');

@@ -33,21 +33,30 @@ function ensureCerts(installDir) {
 // ── Daemon management ─────────────────────────────────────────────────────
 
 function pidAlive(pid) {
-  try { process.kill(pid, 0); return true; } catch (_) { return false; }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 function daemonRunning(pidFile) {
   try {
     const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
     return pidAlive(pid);
-  } catch (_) { return false; }
+  } catch (_) {
+    return false;
+  }
 }
 
 async function startDaemon(installDir, port, pidFile) {
   // Clean stale PID file before spawning — server.js writePid() uses 'wx'
   // (exclusive write) which fails if the file exists, even if the PID is dead.
   if (fs.existsSync(pidFile) && !daemonRunning(pidFile)) {
-    try { fs.unlinkSync(pidFile); } catch (_) {}
+    try {
+      fs.unlinkSync(pidFile);
+    } catch (_) {}
   }
   const serverJs = path.join(installDir, 'server.js');
   if (!fs.existsSync(serverJs)) {
@@ -56,7 +65,10 @@ async function startDaemon(installDir, port, pidFile) {
   }
   const env = { ...process.env, PORT: String(port) };
   const child = spawn('node', [serverJs], {
-    cwd: installDir, env, detached: true, stdio: 'ignore',
+    cwd: installDir,
+    env,
+    detached: true,
+    stdio: 'ignore',
   });
   child.on('error', (err) => {
     process.stderr.write(`airprompt: daemon spawn failed: ${err.message}\n`);
@@ -70,17 +82,23 @@ async function startDaemon(installDir, port, pidFile) {
         const http = require('http');
         const resp = await new Promise((resolve) => {
           const req = http.get(`http://localhost:${port}/api/sessions`, (res) => {
-            let data = ''; res.on('data', (c) => data += c);
+            let data = '';
+            res.on('data', (c) => (data += c));
             res.on('end', () => resolve(data));
           });
           req.on('error', () => resolve(null));
-          req.setTimeout(500, () => { req.destroy(); resolve(null); });
+          req.setTimeout(500, () => {
+            req.destroy();
+            resolve(null);
+          });
         });
         if (resp !== null) return true;
       } catch (_) {}
     }
-    const ms = (i < 10) ? 0.1 : 0.3;
-    try { spawnSync('sleep', [String(ms)], { timeout: 1000 }); } catch (_) {}
+    const ms = i < 10 ? 0.1 : 0.3;
+    try {
+      spawnSync('sleep', [String(ms)], { timeout: 1000 });
+    } catch (_) {}
   }
   return daemonRunning(pidFile);
 }
@@ -90,11 +108,17 @@ async function startDaemon(installDir, port, pidFile) {
 function detectTmux() {
   let tmux = '';
   if (process.env.TMUX) {
-    const r = spawnSync('tmux', ['display-message', '-p', '#S'], { timeout: 2000, encoding: 'utf8' });
+    const r = spawnSync('tmux', ['display-message', '-p', '#S'], {
+      timeout: 2000,
+      encoding: 'utf8',
+    });
     if (r.status === 0) {
       tmux = r.stdout.toString().trim();
       if (tmux.startsWith('airprompt-web-')) {
-        const r2 = spawnSync('tmux', ['display-message', '-p', '#{session_group}'], { timeout: 2000, encoding: 'utf8' });
+        const r2 = spawnSync('tmux', ['display-message', '-p', '#{session_group}'], {
+          timeout: 2000,
+          encoding: 'utf8',
+        });
         if (r2.status === 0 && r2.stdout.trim()) tmux = r2.stdout.trim();
       }
     }
@@ -118,9 +142,14 @@ function getLanIp() {
     }
     // Prefer non-docker/non-bridge interfaces (filter 172.x and docker0/br-*)
     for (const c of candidates) {
-      if (!c.address.startsWith('172.') && !c.address.startsWith('10.')
-          && !c.name.startsWith('docker') && !c.name.startsWith('br-')
-          && !c.name.startsWith('veth') && !c.name.startsWith('virbr')) {
+      if (
+        !c.address.startsWith('172.') &&
+        !c.address.startsWith('10.') &&
+        !c.name.startsWith('docker') &&
+        !c.name.startsWith('br-') &&
+        !c.name.startsWith('veth') &&
+        !c.name.startsWith('virbr')
+      ) {
         return c.address;
       }
     }
@@ -137,14 +166,24 @@ async function sweepDeadSessions(sessionsDir, port, tls) {
   // Safety: only sweep dirs under ~/.airprompt/sessions/
   if (!sessionsDir.includes('.airprompt')) return;
   let entries;
-  try { entries = fs.readdirSync(sessionsDir); } catch (_) { return; }
+  try {
+    entries = fs.readdirSync(sessionsDir);
+  } catch (_) {
+    return;
+  }
   for (const entry of entries) {
     const full = path.join(sessionsDir, entry);
-    try { if (!fs.statSync(full).isDirectory()) continue; } catch (_) { continue; }
+    try {
+      if (!fs.statSync(full).isDirectory()) continue;
+    } catch (_) {
+      continue;
+    }
     // Read REAL tmux session name from marker. Dir name is {providerId}-{safeName}
     // so it can't be used as a fallback tmux name.
     let realTmux = '';
-    try { realTmux = fs.readFileSync(path.join(full, 'tmux'), 'utf8').trim().slice(0, 128); } catch (_) {}
+    try {
+      realTmux = fs.readFileSync(path.join(full, 'tmux'), 'utf8').trim().slice(0, 128);
+    } catch (_) {}
     if (!realTmux) continue;
     const r = spawnSync('tmux', ['has-session', '-t', realTmux], { timeout: 2000 });
     // Only delete on explicit "no session" (exit 1). Other codes (tmux error,
@@ -193,7 +232,9 @@ async function autoApplyName(sessionId, cwd, myDir, port, tls) {
   if (!resolvedName) return;
 
   // 3. Write name to disk synchronously
-  try { fs.writeFileSync(nameFilePath, resolvedName + '\n'); } catch (_) {}
+  try {
+    fs.writeFileSync(nameFilePath, resolvedName + '\n');
+  } catch (_) {}
 
   // 4. Sync to daemon (await so name is set before hook returns)
   try {
@@ -233,7 +274,7 @@ async function activateSession(ctx) {
   // 2. Ensure daemon is running
   if (!daemonRunning(pidFile)) {
     process.stdout.write('airprompt: starting daemon...');
-    if (!await startDaemon(installDir, port, pidFile)) {
+    if (!(await startDaemon(installDir, port, pidFile))) {
       return {
         status: 'error',
         message: `could not start daemon on port ${port}`,
@@ -259,11 +300,15 @@ async function activateSession(ctx) {
       const r = spawnSync('tmux', ['has-session', '-t', currentTmux], { timeout: 2000 });
       if (r.status === 1) {
         // Tmux session definitely dead — clean up stale marker and proceed to re-register
-        try { fs.unlinkSync(activeFile); } catch (_) {}
+        try {
+          fs.unlinkSync(activeFile);
+        } catch (_) {}
       } else if (r.status === 0) {
         // Read session ID first — needed for daemon check and auto-name
         let sid = '';
-        try { sid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128); } catch (_) {}
+        try {
+          sid = fs.readFileSync(path.join(myDir, 'session'), 'utf8').trim().slice(0, 128);
+        } catch (_) {}
 
         // Verify daemon actually holds this session — idempotency fast-path
         // can be stale if daemon was restarted without cleaning markers.
@@ -271,12 +316,16 @@ async function activateSession(ctx) {
         try {
           const resp = await get('/api/sessions', port, tls);
           if (Array.isArray(resp)) {
-            daemonHasSession = resp.some(s => s.id === sid || s.tmuxSession === currentTmux);
+            daemonHasSession = resp.some((s) => s.id === sid || s.tmuxSession === currentTmux);
           }
-        } catch (_) { daemonHasSession = true; /* unreachable — assume yes */ }
+        } catch (_) {
+          daemonHasSession = true; /* unreachable — assume yes */
+        }
         if (!daemonHasSession) {
           // Daemon lost it — clean the stale marker and re-register
-          try { fs.unlinkSync(activeFile); } catch (_) {}
+          try {
+            fs.unlinkSync(activeFile);
+          } catch (_) {}
         } else {
           process.stdout.write('airprompt: session already registered (from /airprompt on)\n');
           if (sid) await autoApplyName(sid, ctx.cwd, myDir, port, tls);
@@ -286,10 +335,10 @@ async function activateSession(ctx) {
             message: 'session already registered',
             url: null,
             sessionId: sid || null,
-        };
+          };
+        }
       }
     }
-  }
   }
 
   // 5. Generate session ID
@@ -302,13 +351,20 @@ async function activateSession(ctx) {
   let isMirror = false;
   if (!tmuxSession) {
     tmuxSession = `airprompt-${sessionId}`;
-    const mirrorResult = spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], { timeout: 2000 });
+    const mirrorResult = spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], {
+      timeout: 2000,
+    });
     isMirror = mirrorResult.status === 0;
   }
 
   // 7. Register with daemon
   try {
-    const resp = await post('/api/sessions/register', { sessionId, cwd, tmuxSession, providerId }, port, tls);
+    const resp = await post(
+      '/api/sessions/register',
+      { sessionId, cwd, tmuxSession, providerId },
+      port,
+      tls
+    );
     if (resp && resp.ok) {
       const myDir = sessionDir(providerId, tmuxSession);
       const lanIp = getLanIp();
@@ -324,7 +380,9 @@ async function activateSession(ctx) {
         if (isMirror) fs.writeFileSync(path.join(myDir, 'mirror'), '');
       } catch (e) {
         process.stderr.write(`airprompt: marker write failed: ${e.message}\n`);
-        try { await post('/api/sessions/unregister', { sessionId, force: true }, port, tls); } catch (_) {}
+        try {
+          await post('/api/sessions/unregister', { sessionId, force: true }, port, tls);
+        } catch (_) {}
         return {
           status: 'error',
           message: `marker write failed: ${e.message}`,
@@ -355,7 +413,9 @@ async function activateSession(ctx) {
         // kill it and skip marker writes — the real session (under the
         // live tmux from the original registration) already has them.
         if (isMirror) {
-          try { spawnSync('tmux', ['kill-session', '-t', tmuxSession], { timeout: 2000 }); } catch (_) {}
+          try {
+            spawnSync('tmux', ['kill-session', '-t', tmuxSession], { timeout: 2000 });
+          } catch (_) {}
           await sweepDeadSessions(sessionsDir, port, tls);
           return {
             status: 'ok',
@@ -378,11 +438,14 @@ async function activateSession(ctx) {
           // (airprompt name, statusline badge) find complete state on disk.
           fs.writeFileSync(path.join(myDir, 'session'), sessionId + '\n');
           // Only write files that are missing (airprompt-launch writes tmux+provider)
-          if (!fs.existsSync(path.join(myDir, 'tmux'))) fs.writeFileSync(path.join(myDir, 'tmux'), tmuxSession + '\n');
-          if (!fs.existsSync(path.join(myDir, 'provider'))) fs.writeFileSync(path.join(myDir, 'provider'), providerId + '\n');
+          if (!fs.existsSync(path.join(myDir, 'tmux')))
+            fs.writeFileSync(path.join(myDir, 'tmux'), tmuxSession + '\n');
+          if (!fs.existsSync(path.join(myDir, 'provider')))
+            fs.writeFileSync(path.join(myDir, 'provider'), providerId + '\n');
           // Write url so statusline badge works after recovery
-          if (!fs.existsSync(path.join(myDir, 'url'))) fs.writeFileSync(path.join(myDir, 'url'), url + '\n');
-          fs.writeFileSync(path.join(myDir, 'active'), '');  // always write — this is what idempotency checks
+          if (!fs.existsSync(path.join(myDir, 'url')))
+            fs.writeFileSync(path.join(myDir, 'url'), url + '\n');
+          fs.writeFileSync(path.join(myDir, 'active'), ''); // always write — this is what idempotency checks
           if (isMirror) fs.writeFileSync(path.join(myDir, 'mirror'), '');
         } catch (e) {
           process.stderr.write(`airprompt: marker write failed: ${e.message}\n`);

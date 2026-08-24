@@ -26,24 +26,53 @@ const REPO = 'farox-coop/airprompt';
 // ── Argv ───────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
   const opts = {
-    dryRun: false, force: false, withHooks: 'auto',
-    only: [], uninstall: false, nonInteractive: false,
-    configDir: null, help: false, noColor: false,
-    targetDir: null, port: 3210,
+    dryRun: false,
+    force: false,
+    withHooks: 'auto',
+    only: [],
+    uninstall: false,
+    nonInteractive: false,
+    configDir: null,
+    help: false,
+    noColor: false,
+    targetDir: null,
+    port: 3210,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     switch (a) {
-      case '--dry-run': opts.dryRun = true; break;
-      case '--force': opts.force = true; break;
-      case '--with-hooks': opts.withHooks = true; break;
-      case '--no-hooks': opts.withHooks = false; break;
-      case '--no-color': opts.noColor = true; break;
-      case '--uninstall': case '-u': opts.uninstall = true; break;
-      case '--non-interactive': opts.nonInteractive = true; break;
-      case '-h': case '--help': opts.help = true; break;
-      case '--': break;
-      case '--list': printList(opts.noColor); process.exit(0); break;
+      case '--dry-run':
+        opts.dryRun = true;
+        break;
+      case '--force':
+        opts.force = true;
+        break;
+      case '--with-hooks':
+        opts.withHooks = true;
+        break;
+      case '--no-hooks':
+        opts.withHooks = false;
+        break;
+      case '--no-color':
+        opts.noColor = true;
+        break;
+      case '--uninstall':
+      case '-u':
+        opts.uninstall = true;
+        break;
+      case '--non-interactive':
+        opts.nonInteractive = true;
+        break;
+      case '-h':
+      case '--help':
+        opts.help = true;
+        break;
+      case '--':
+        break;
+      case '--list':
+        printList(opts.noColor);
+        process.exit(0);
+        break;
       case '--only': {
         const v = argv[++i];
         if (!v) die('error: --only requires an argument');
@@ -78,7 +107,9 @@ function parseArgs(argv) {
     for (const id of opts.only) {
       if (knownIds.has(id)) continue;
       if (plannedIds.has(id)) {
-        die(`error: ${id} is not yet implemented — coming soon.\n  Available today: ${[...knownIds].join(', ')}`);
+        die(
+          `error: ${id} is not yet implemented — coming soon.\n  Available today: ${[...knownIds].join(', ')}`
+        );
       }
       die(`error: unknown agent: ${id}\n  see 'airprompt --list' for valid ids`);
     }
@@ -86,30 +117,39 @@ function parseArgs(argv) {
   return opts;
 }
 
-function die(msg) { process.stderr.write(msg + '\n'); process.exit(2); }
+function die(msg) {
+  process.stderr.write(msg + '\n');
+  process.exit(2);
+}
 
 // ── Color helpers ──────────────────────────────────────────────────────────
 function makeChalk(noColor) {
   const useColor = !noColor && process.stdout.isTTY && !process.env.NO_COLOR;
-  const wrap = (codes) => (s) => useColor ? `\x1b[${codes}m${s}\x1b[0m` : s;
+  const wrap = (codes) => (s) => (useColor ? `\x1b[${codes}m${s}\x1b[0m` : s);
   return {
-    orange: wrap('38;5;172'), dim: wrap('2'), red: wrap('31'),
-    green: wrap('32'), yellow: wrap('33'),
+    orange: wrap('38;5;172'),
+    dim: wrap('2'),
+    red: wrap('31'),
+    green: wrap('32'),
+    yellow: wrap('33'),
   };
 }
 
 // ── Env guards ─────────────────────────────────────────────────────────────
 function checkNodeVersion() {
   const major = parseInt(process.versions.node.split('.')[0], 10);
-  if (major < 20) die(`airprompt: Node ${process.versions.node} too old. Need Node ≥20. https://nodejs.org`);
+  if (major < 20)
+    die(`airprompt: Node ${process.versions.node} too old. Need Node ≥20. https://nodejs.org`);
 }
 
 // ── Repo root resolution ───────────────────────────────────────────────────
 function detectRepoRoot() {
   const here = path.dirname(__filename);
   const root = path.resolve(here, '..');
-  if (fs.existsSync(path.join(root, 'server.js')) &&
-      fs.existsSync(path.join(root, 'src', 'hooks'))) {
+  if (
+    fs.existsSync(path.join(root, 'server.js')) &&
+    fs.existsSync(path.join(root, 'src', 'hooks'))
+  ) {
     return root;
   }
   return null;
@@ -167,7 +207,10 @@ function printList(noColor) {
   process.stdout.write('\n');
 }
 
-function pad(s, n) { s = String(s); return s + ' '.repeat(Math.max(0, n - s.length)); }
+function pad(s, n) {
+  s = String(s);
+  return s + ' '.repeat(Math.max(0, n - s.length));
+}
 
 // ── Uninstall (provider dispatch) ──────────────────────────────────────────
 async function uninstall(ctx) {
@@ -190,7 +233,10 @@ async function uninstall(ctx) {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const c = makeChalk(opts.noColor);
-  if (opts.help) { printHelp(); return 0; }
+  if (opts.help) {
+    printHelp();
+    return 0;
+  }
 
   checkNodeVersion();
 
@@ -201,15 +247,20 @@ async function main() {
   const configDir = resolveConfigDir(opts, firstProv);
 
   const ctx = {
-    opts, configDir, repoRoot,
-    say:  (s) => process.stdout.write(c.orange(s) + '\n'),
+    opts,
+    configDir,
+    repoRoot,
+    say: (s) => process.stdout.write(c.orange(s) + '\n'),
     note: (s) => process.stdout.write(c.dim(s) + '\n'),
     warn: (s) => process.stderr.write(c.red(s) + '\n'),
-    ok:   (s) => process.stdout.write(c.green(s) + '\n'),
+    ok: (s) => process.stdout.write(c.green(s) + '\n'),
     results: { installed: [], skipped: [], failed: [], detected: 0 },
   };
 
-  if (opts.uninstall) { await uninstall(ctx); return 0; }
+  if (opts.uninstall) {
+    await uninstall(ctx);
+    return 0;
+  }
 
   ctx.say('airprompt installer');
   ctx.note(`  ${REPO}`);
@@ -245,16 +296,23 @@ async function main() {
     for (const [id, why] of ctx.results.failed) process.stderr.write(`    • ${id} — ${why}\n`);
   }
   process.stdout.write('\n');
-  const stateDir = process.env.AIRPROMPT_STATE_DIR || path.join(os.homedir(), '.airprompt', 'state');
+  const stateDir =
+    process.env.AIRPROMPT_STATE_DIR || path.join(os.homedir(), '.airprompt', 'state');
   const certFile = path.join(stateDir, 'airprompt-cert.pem');
   const keyFile = path.join(stateDir, 'airprompt-key.pem');
   const hasTls = fs.existsSync(certFile) && fs.existsSync(keyFile);
   ctx.note('  start your IDE and AirPrompt will auto-register each session');
   ctx.note(`  mobile URL: ${hasTls ? 'https' : 'http'}://<your-lan-ip>:${opts.port}`);
-  ctx.note(`  uninstall: node ${path.join(opts.targetDir || path.join(os.homedir(), '.airprompt'), 'bin', 'install.js')} --uninstall`);
+  ctx.note(
+    `  uninstall: node ${path.join(opts.targetDir || path.join(os.homedir(), '.airprompt'), 'bin', 'install.js')} --uninstall`
+  );
 
   return 0;
 }
 
-main().then(code => process.exit(code || 0))
-      .catch(err => { process.stderr.write((err && err.stack || String(err)) + '\n'); process.exit(1); });
+main()
+  .then((code) => process.exit(code || 0))
+  .catch((err) => {
+    process.stderr.write(((err && err.stack) || String(err)) + '\n');
+    process.exit(1);
+  });

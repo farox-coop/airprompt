@@ -21,9 +21,9 @@ const { stateDir } = require('./providers/provider');
 
 // Auto-reject pairing requests not approved within this window.
 const PENDING_TTL_MS = 60_000; // 1 minute
-const PENDING_MAX = 8;          // cap the pending list (anti-flood)
-const PENDING_PER_IP_MAX = 2;   // cap distinct pending requests per source IP
-const PAIR_RATE_MAX = 5;        // per-IP pair attempts
+const PENDING_MAX = 8; // cap the pending list (anti-flood)
+const PENDING_PER_IP_MAX = 2; // cap distinct pending requests per source IP
+const PAIR_RATE_MAX = 5; // per-IP pair attempts
 const PAIR_RATE_WINDOW_MS = 60_000;
 
 const SERVER_KEY_FILE = 'server-key.json';
@@ -39,8 +39,11 @@ function stateFile(name) {
 // ── JSON I/O (0600, atomic-enough for a local single daemon) ───────────────
 
 function readJSON(file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
-  catch (_) { return fallback; }
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (_) {
+    return fallback;
+  }
 }
 
 function writeJSON(file, data) {
@@ -59,7 +62,10 @@ function writeJSON(file, data) {
 // SSH known_hosts style.
 function fingerprintOf(publicKeyDer) {
   const hex = crypto.createHash('sha256').update(publicKeyDer).digest('hex');
-  return hex.slice(0, 32).replace(/(.{2})/g, '$1:').replace(/:$/, '');
+  return hex
+    .slice(0, 32)
+    .replace(/(.{2})/g, '$1:')
+    .replace(/:$/, '');
 }
 
 // Normalize a base64 public key to its canonical spelling so that storage,
@@ -77,7 +83,12 @@ function canonicalPublicKey(publicKeyB64) {
 // notifications — strip control/ANSI chars so a rogue device can't inject
 // escape sequences into the host's terminal or spoof the approval prompt.
 function sanitizeName(name) {
-  return String(name || '').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 64).trim() || 'device';
+  return (
+    String(name || '')
+      .replace(/[^a-zA-Z0-9 _-]/g, '')
+      .slice(0, 64)
+      .trim() || 'device'
+  );
 }
 
 // ── Server keypair ─────────────────────────────────────────────────────────
@@ -107,7 +118,12 @@ function loadOrCreateServerKey() {
     createdAt: new Date().toISOString(),
   };
   writeJSON(file, data);
-  return { publicKeyDer, privateKey, fingerprint: fingerprintOf(publicKeyDer), createdAt: data.createdAt };
+  return {
+    publicKeyDer,
+    privateKey,
+    fingerprint: fingerprintOf(publicKeyDer),
+    createdAt: data.createdAt,
+  };
 }
 
 // ── Devices / pending ──────────────────────────────────────────────────────
@@ -259,10 +275,12 @@ function generateNonce() {
 // Sign a nonce string with an ECDSA private key, raw IEEE P1363 format
 // (matches WebCrypto's ECDSA signature format, unlike Node's DER default).
 function signNonce(nonceStr, privateKey) {
-  return crypto.sign('sha256', Buffer.from(nonceStr, 'utf8'), {
-    key: privateKey,
-    dsaEncoding: 'ieee-p1363',
-  }).toString('base64');
+  return crypto
+    .sign('sha256', Buffer.from(nonceStr, 'utf8'), {
+      key: privateKey,
+      dsaEncoding: 'ieee-p1363',
+    })
+    .toString('base64');
 }
 
 // Validate a base64 SPKI public key is an ECDSA P-256 key (reject junk from a
@@ -270,12 +288,16 @@ function signNonce(nonceStr, privateKey) {
 function isValidPublicKey(publicKeyB64) {
   try {
     const key = crypto.createPublicKey({
-      key: Buffer.from(publicKeyB64, 'base64'), format: 'der', type: 'spki',
+      key: Buffer.from(publicKeyB64, 'base64'),
+      format: 'der',
+      type: 'spki',
     });
-    return key.asymmetricKeyType === 'ec'
-      && key.asymmetricKeyDetails
-      && (key.asymmetricKeyDetails.namedCurve === 'prime256v1'
-          || key.asymmetricKeyDetails.namedCurve === 'P-256');
+    return (
+      key.asymmetricKeyType === 'ec' &&
+      key.asymmetricKeyDetails &&
+      (key.asymmetricKeyDetails.namedCurve === 'prime256v1' ||
+        key.asymmetricKeyDetails.namedCurve === 'P-256')
+    );
   } catch (_) {
     return false;
   }
@@ -285,12 +307,19 @@ function isValidPublicKey(publicKeyB64) {
 function verifyNonce(nonceStr, signatureB64, publicKeyB64) {
   try {
     const publicKey = crypto.createPublicKey({
-      key: Buffer.from(publicKeyB64, 'base64'), format: 'der', type: 'spki',
+      key: Buffer.from(publicKeyB64, 'base64'),
+      format: 'der',
+      type: 'spki',
     });
-    return crypto.verify('sha256', Buffer.from(nonceStr, 'utf8'), {
-      key: publicKey,
-      dsaEncoding: 'ieee-p1363',
-    }, Buffer.from(signatureB64, 'base64'));
+    return crypto.verify(
+      'sha256',
+      Buffer.from(nonceStr, 'utf8'),
+      {
+        key: publicKey,
+        dsaEncoding: 'ieee-p1363',
+      },
+      Buffer.from(signatureB64, 'base64')
+    );
   } catch (_) {
     return false;
   }

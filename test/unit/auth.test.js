@@ -31,7 +31,9 @@ before(() => {
 
 after(() => {
   delete process.env.AIRPROMPT_STATE_DIR;
-  try { fs.rmSync(stateDir, { recursive: true, force: true }); } catch (_) {}
+  try {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  } catch (_) {}
 });
 
 // ── Server keypair ─────────────────────────────────────────────────────────
@@ -85,7 +87,13 @@ test('addPending assigns monotonic seq, dedupes by publicKey, allow/revoke move 
 
   // no shift: deny the first, seq 2 stays seq 2
   auth.denyBySeq(1);
-  assert.strictEqual(auth.listPending().map((p) => p.seq).join(','), '2');
+  assert.strictEqual(
+    auth
+      .listPending()
+      .map((p) => p.seq)
+      .join(','),
+    '2'
+  );
 
   // allow the remaining; revoke it
   auth.allowBySeq(2);
@@ -132,7 +140,11 @@ test('addPending returns null when the pending list is full (cap)', () => {
   }
   assert.strictEqual(auth.listPending().length, auth.PENDING_MAX);
   const { publicKeyB64 } = genKeyPair();
-  assert.strictEqual(auth.addPending(publicKeyB64, 'overflow'), null, 'cap should refuse the next request');
+  assert.strictEqual(
+    auth.addPending(publicKeyB64, 'overflow'),
+    null,
+    'cap should refuse the next request'
+  );
   for (const p of auth.listPending()) auth.denyBySeq(p.seq); // cleanup shared state
 });
 
@@ -140,7 +152,11 @@ test('addPending respects the per-IP pending cap', () => {
   const ip = '192.0.2.50'; // TEST-NET-1
   assert.ok(auth.addPending(genKeyPair().publicKeyB64, 'a', ip), 'first from IP accepted');
   assert.ok(auth.addPending(genKeyPair().publicKeyB64, 'b', ip), 'second from IP accepted');
-  assert.strictEqual(auth.addPending(genKeyPair().publicKeyB64, 'c', ip), null, 'third from same IP rejected');
+  assert.strictEqual(
+    auth.addPending(genKeyPair().publicKeyB64, 'c', ip),
+    null,
+    'third from same IP rejected'
+  );
   for (const p of auth.listPending()) auth.denyBySeq(p.seq); // cleanup
 });
 

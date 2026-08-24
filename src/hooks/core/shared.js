@@ -38,29 +38,45 @@ function request(method, urlPath, body, port, tls, opts) {
       ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
       : {};
     const reqOpts = {
-      hostname: 'localhost', port, path: urlPath, method,
-      headers, timeout,
+      hostname: 'localhost',
+      port,
+      path: urlPath,
+      method,
+      headers,
+      timeout,
     };
     const mod = tls ? https : http;
     if (tls) reqOpts.rejectUnauthorized = false;
     const req = mod.request(reqOpts, (res) => {
       let data = '';
-      res.on('data', (c) => data += c);
+      res.on('data', (c) => (data += c));
       res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (_) { resolve(nullOnParseError ? null : { raw: data }); }
+        try {
+          resolve(JSON.parse(data));
+        } catch (_) {
+          resolve(nullOnParseError ? null : { raw: data });
+        }
       });
     });
-    req.on('timeout', () => { req.destroy(); reject(new Error('request timeout')); });
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('request timeout'));
+    });
     req.on('error', reject);
     if (body) req.write(payload);
     req.end();
   });
 }
 
-function post(p, body, port, tls, opts) { return request('POST', p, body, port, tls, opts); }
-function get(p, port, tls, opts) { return request('GET', p, null, port, tls, opts); }
-function put(p, body, port, tls, opts) { return request('PUT', p, body, port, tls, opts); }
+function post(p, body, port, tls, opts) {
+  return request('POST', p, body, port, tls, opts);
+}
+function get(p, port, tls, opts) {
+  return request('GET', p, null, port, tls, opts);
+}
+function put(p, body, port, tls, opts) {
+  return request('PUT', p, body, port, tls, opts);
+}
 
 // ── TLS detection ────────────────────────────────────────────────────────
 

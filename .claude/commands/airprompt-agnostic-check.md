@@ -1,6 +1,6 @@
 ---
 description: DEV-ONLY — Audit codebase for hardcoded provider names in core/agnostic code
-argument-hint: ""
+argument-hint: ''
 ---
 
 # /airprompt-agnostic-check — Provider Hardcoding Audit (DEV ONLY)

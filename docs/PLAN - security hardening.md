@@ -22,12 +22,14 @@ Replace the unauthenticated WebSocket terminal with SSH-style device pairing: ea
 ## Threat model
 
 Covers:
+
 - Rogue LAN device gets a terminal → blocked (needs a whitelisted keypair).
 - QR/token sniping → QR carries only a fingerprint, no secret.
 - MITM page impersonating the daemon → client pins + verifies the server key each connect.
 - Per-device revocation → drop one phone without touching others.
 
 Does NOT cover (documented, out of scope):
+
 - REST hooks endpoints (`/api/sessions/register|kill|notify|name`, …) are host-internal; they are now **restricted to loopback** (a middleware rejects non-loopback requests, exempting only `/api/pair`). No shared secret needed since the hooks already call `localhost`.
 - `NO_TLS` mode: browser pairing **requires TLS** — WebCrypto `crypto.subtle` is secure-context-only (HTTPS or `localhost`), so a phone reaching `http://<LAN-IP>:3210` cannot generate/sign keys at all. `NO_TLS` is effectively CLI-only now.
 - Device auth ≠ user accounts (one keypair = one device).
@@ -36,10 +38,10 @@ Does NOT cover (documented, out of scope):
 
 ### Keys
 
-| Holder | Key | Storage |
-|---|---|---|
+| Holder | Key                        | Storage                                                  |
+| ------ | -------------------------- | -------------------------------------------------------- |
 | Daemon | ECDSA P-256 server keypair | `state/server-key.json` (0600), generated on first start |
-| Device | ECDSA P-256 device keypair | browser IndexedDB, `extractable: false` |
+| Device | ECDSA P-256 device keypair | browser IndexedDB, `extractable: false`                  |
 
 Fingerprint = SHA-256 of the public key (SPKI), formatted `aa:bb:…` (first 16 bytes shown).
 
@@ -48,24 +50,49 @@ Fingerprint = SHA-256 of the public key (SPKI), formatted `aa:bb:…` (first 16 
 `server-key.json`
 
 ```json
-{ "algorithm": "ECDSA", "curve": "P-256",
-  "publicKey": "<base64 SPKI>", "privateKey": "<base64 PKCS8>", "createdAt": "…" }
+{
+  "algorithm": "ECDSA",
+  "curve": "P-256",
+  "publicKey": "<base64 SPKI>",
+  "privateKey": "<base64 PKCS8>",
+  "createdAt": "…"
+}
 ```
 
 `devices.json` (the whitelist)
 
 ```json
-{ "devices": [
-  { "seq": 1, "id": "<uuid>", "publicKey": "<base64 SPKI>", "name": "iPhone",
-    "fingerprint": "aa:bb:…", "createdAt": "…", "lastSeen": "…" } ] }
+{
+  "devices": [
+    {
+      "seq": 1,
+      "id": "<uuid>",
+      "publicKey": "<base64 SPKI>",
+      "name": "iPhone",
+      "fingerprint": "aa:bb:…",
+      "createdAt": "…",
+      "lastSeen": "…"
+    }
+  ]
+}
 ```
 
 `pending.json` (pairing requests awaiting approval)
 
 ```json
-{ "pending": [
-  { "seq": 3, "id": "<uuid>", "publicKey": "<base64 SPKI>", "name": "iPhone",
-    "fingerprint": "aa:bb:…", "createdAt": "…", "expiresAt": "…" } ] }
+{
+  "pending": [
+    {
+      "seq": 3,
+      "id": "<uuid>",
+      "publicKey": "<base64 SPKI>",
+      "name": "iPhone",
+      "fingerprint": "aa:bb:…",
+      "createdAt": "…",
+      "expiresAt": "…"
+    }
+  ]
+}
 ```
 
 ### `seq` (stable ordinal)
@@ -126,9 +153,9 @@ The daemon has no TTY (`nohup … > /tmp/airprompt.log`). Approval rides existin
 
 1. **Desktop notification** (primary popup) — `notify-send` invoked inline from the daemon (no separate `notify.sh`). Body: `New device "iPhone" (seq 3) wants to pair — airprompt auth allow 3`. (Action buttons are not implemented — the command is in the body.)
 2. **CLI** (universal, always works) — `airprompt auth list` → `airprompt auth allow <seq>`.
-3. **Browser banner** (only for **already-authenticated** browsers, for approving *additional* devices) — pushed over the WS to paired sessions only. **Never** pushed to unauthenticated sockets, or a rogue device's own browser could approve itself. First device is always approved via (1) or (2).
+3. **Browser banner** (only for **already-authenticated** browsers, for approving _additional_ devices) — pushed over the WS to paired sessions only. **Never** pushed to unauthenticated sockets, or a rogue device's own browser could approve itself. First device is always approved via (1) or (2).
 
-The approval *always* executes as a local filesystem write (the CLI, or the daemon acting on a paired browser's instruction). Granting never flows through the unauthenticated `/api/pair` surface.
+The approval _always_ executes as a local filesystem write (the CLI, or the daemon acting on a paired browser's instruction). Granting never flows through the unauthenticated `/api/pair` surface.
 
 ## Anti-flood (`/api/pair`)
 
@@ -152,7 +179,7 @@ airprompt auth revoke <seq>  # drop a paired device
 
 - **`clean`** — wipes `server-key.json`, `devices.json`, `pending.json` (full auth reset). Next start regenerates the keypair; every device re-pairs.
 - **`restart`** — unaffected. Keypair + whitelist live in `state/`, survive restart (like session recovery).
-- **`autostart`** — unaffected. Controls *when* the daemon starts, not auth.
+- **`autostart`** — unaffected. Controls _when_ the daemon starts, not auth.
 - **`help`** + `commands/airprompt.md` + README + docs — new `auth` subcommands documented.
 
 ## Identity-changed UX
@@ -167,19 +194,19 @@ This is the SSH `REMOTE HOST IDENTIFICATION HAS CHANGED` equivalent: hard block,
 
 ## File map
 
-| File | Change |
-|---|---|
-| `src/auth.js` | new — keygen/load, fingerprint, challenge nonce, sign/verify, devices/pending read-write, `seq`, TTL/eviction, rate-limit helper |
-| `server.js` | wire `/api/pair` + status endpoint; WS `hello`/`challenge`/`auth` handshake; reject before PTY; QR carries server fingerprint |
-| `public/auth.js` | new — WebCrypto keygen/sign, IndexedDB storage, handshake, pairing UI, identity overlay |
-| `public/client.js` | gate terminal init behind auth; hook `auth.js` |
-| `public/index.html` | script tag + pairing/identity overlay DOM |
-| `public/styles.css` | overlay styles |
-| `bin/airprompt` | dispatch `auth` subcommand |
-| `bin/airprompt-auth.sh` | new — `list|allow|deny|revoke` (filesystem ops) |
-| `bin/airprompt-clean.sh` | wipe auth state |
-| `server.js` | pairing-request notification (`notify-send` inline) |
-| `commands/airprompt.md`, `README.md`, `docs/*` | help + docs |
+| File                                           | Change                                                                                                                           |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `src/auth.js`                                  | new — keygen/load, fingerprint, challenge nonce, sign/verify, devices/pending read-write, `seq`, TTL/eviction, rate-limit helper |
+| `server.js`                                    | wire `/api/pair` + status endpoint; WS `hello`/`challenge`/`auth` handshake; reject before PTY; QR carries server fingerprint    |
+| `public/auth.js`                               | new — WebCrypto keygen/sign, IndexedDB storage, handshake, pairing UI, identity overlay                                          |
+| `public/client.js`                             | gate terminal init behind auth; hook `auth.js`                                                                                   |
+| `public/index.html`                            | script tag + pairing/identity overlay DOM                                                                                        |
+| `public/styles.css`                            | overlay styles                                                                                                                   |
+| `bin/airprompt`                                | dispatch `auth` subcommand                                                                                                       |
+| `bin/airprompt-auth.sh`                        | new — `list                                                                                                                      | allow | deny | revoke` (filesystem ops) |
+| `bin/airprompt-clean.sh`                       | wipe auth state                                                                                                                  |
+| `server.js`                                    | pairing-request notification (`notify-send` inline)                                                                              |
+| `commands/airprompt.md`, `README.md`, `docs/*` | help + docs                                                                                                                      |
 
 ## Stages (atomic commits)
 

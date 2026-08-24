@@ -29,19 +29,19 @@ function loadInstallDeps() {
 
 const REPO = 'farox-coop/airprompt';
 
-const HOOK_FILES = [
-  'airprompt-activate.js',
-  'airprompt-deactivate.js',
-  'airprompt-statusline.sh',
-];
+const HOOK_FILES = ['airprompt-activate.js', 'airprompt-deactivate.js', 'airprompt-statusline.sh'];
 
 // ── Detection ──────────────────────────────────────────────────────────────
 
 function hasCmd(cmd) {
   try {
-    const r = spawnSync('sh', ['-c', `command -v '${String(cmd).replace(/'/g, "'\\''")}'`], { stdio: 'ignore' });
+    const r = spawnSync('sh', ['-c', `command -v '${String(cmd).replace(/'/g, "'\\''")}'`], {
+      stdio: 'ignore',
+    });
     return r.status === 0;
-  } catch (_) { return false; }
+  } catch (_) {
+    return false;
+  }
 }
 
 // ── Hook installer (standalone, non-plugin) ─────────────────────────────────
@@ -49,7 +49,8 @@ function hasCmd(cmd) {
 async function installHooks(ctx, targetDir) {
   const { SETTINGS, H } = loadInstallDeps();
   const { note, warn, opts } = ctx;
-  const configDir = ctx.configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const configDir =
+    ctx.configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const hooksDir = path.join(configDir, 'hooks');
   const settingsPath = path.join(configDir, 'settings.json');
   const sourceDir = path.join(targetDir, 'src', 'hooks');
@@ -78,12 +79,14 @@ async function installHooks(ctx, targetDir) {
       // Rewrite: require('../providers/X') → require('/abs/path/src/providers/X')
       content = content.replace(
         /require\((['"])(\.\.\/providers\/[^'"]+)\1\)/g,
-        (m, q, p) => `require(${JSON.stringify(targetDir + '/src/providers/' + p.replace('../providers/', ''))})`
+        (m, q, p) =>
+          `require(${JSON.stringify(targetDir + '/src/providers/' + p.replace('../providers/', ''))})`
       );
       // Rewrite: require('./core/X') → require('/abs/path/src/hooks/core/X')
       content = content.replace(
         /require\((['"])(\.\/core\/[^'"]+)\1\)/g,
-        (m, q, p) => `require(${JSON.stringify(targetDir + '/src/hooks/core/' + p.replace('./core/', ''))})`
+        (m, q, p) =>
+          `require(${JSON.stringify(targetDir + '/src/hooks/core/' + p.replace('./core/', ''))})`
       );
       fs.writeFileSync(dest, content);
     } else {
@@ -92,7 +95,9 @@ async function installHooks(ctx, targetDir) {
     process.stdout.write(`  installed: ${dest}\n`);
   }
 
-  try { fs.chmodSync(path.join(hooksDir, 'airprompt-statusline.sh'), 0o755); } catch (_) {}
+  try {
+    fs.chmodSync(path.join(hooksDir, 'airprompt-statusline.sh'), 0o755);
+  } catch (_) {}
 
   let settings = SETTINGS.readSettings(settingsPath);
   if (settings === null) {
@@ -102,7 +107,9 @@ async function installHooks(ctx, targetDir) {
 
   const bak = settingsPath + '.bak';
   if (fs.existsSync(settingsPath) && !fs.existsSync(bak)) {
-    try { fs.copyFileSync(settingsPath, bak); } catch (_) {}
+    try {
+      fs.copyFileSync(settingsPath, bak);
+    } catch (_) {}
   }
 
   const node = H.absoluteNodePath();
@@ -136,7 +143,8 @@ async function installHooks(ctx, targetDir) {
 async function installStatusline(ctx, targetDir) {
   const { SETTINGS } = loadInstallDeps();
   const { note, warn, opts } = ctx;
-  const configDir = ctx.configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const configDir =
+    ctx.configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const hooksDir = path.join(configDir, 'hooks');
   const settingsPath = path.join(configDir, 'settings.json');
   const src = path.join(targetDir, 'src', 'hooks', 'airprompt-statusline.sh');
@@ -158,11 +166,12 @@ async function installStatusline(ctx, targetDir) {
   // Never clobber an existing statusline — a user may have their own, or a
   // prior install already wired the badge. Report, don't rewrite.
   if (settings.statusLine !== undefined) {
-    const existing = typeof settings.statusLine === 'string'
-      ? settings.statusLine
-      : (settings.statusLine && typeof settings.statusLine.command === 'string'
-        ? settings.statusLine.command
-        : '');
+    const existing =
+      typeof settings.statusLine === 'string'
+        ? settings.statusLine
+        : settings.statusLine && typeof settings.statusLine.command === 'string'
+          ? settings.statusLine.command
+          : '';
     if (existing.includes('airprompt-statusline')) {
       process.stdout.write('  statusline badge already configured.\n');
     } else {
@@ -173,12 +182,16 @@ async function installStatusline(ctx, targetDir) {
 
   fs.mkdirSync(hooksDir, { recursive: true });
   fs.copyFileSync(src, dest);
-  try { fs.chmodSync(dest, 0o755); } catch (_) {}
+  try {
+    fs.chmodSync(dest, 0o755);
+  } catch (_) {}
   process.stdout.write(`  installed: ${dest}\n`);
 
   const bak = settingsPath + '.bak';
   if (fs.existsSync(settingsPath) && !fs.existsSync(bak)) {
-    try { fs.copyFileSync(settingsPath, bak); } catch (_) {}
+    try {
+      fs.copyFileSync(settingsPath, bak);
+    } catch (_) {}
   }
 
   settings.statusLine = { type: 'command', command: `bash "${dest}"` };
@@ -191,7 +204,8 @@ async function installStatusline(ctx, targetDir) {
 
 function copyUserFiles(ctx, targetDir) {
   const { note, opts } = ctx;
-  const configDir = ctx.configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const configDir =
+    ctx.configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const commandsDir = path.join(configDir, 'commands');
 
   if (opts.dryRun) {
@@ -288,7 +302,13 @@ const ClaudeProvider = {
       if (!c) continue;
       const colon = c.indexOf(':');
       const kind = colon === -1 ? c : c.slice(0, colon);
-      const val = colon === -1 ? '' : c.slice(colon + 1).replace(/^\$HOME/, os.homedir()).replace(/^~/, os.homedir());
+      const val =
+        colon === -1
+          ? ''
+          : c
+              .slice(colon + 1)
+              .replace(/^\$HOME/, os.homedir())
+              .replace(/^~/, os.homedir());
       if (kind === 'command' && hasCmd(val)) return true;
       if (kind === 'dir' && fs.existsSync(val)) return true;
     }
@@ -307,7 +327,9 @@ const ClaudeProvider = {
     let raw = {};
     try {
       if (input && input.trim()) raw = JSON.parse(input);
-    } catch (_) { /* non-JSON stdin → use empty object */ }
+    } catch (_) {
+      /* non-JSON stdin → use empty object */
+    }
 
     return {
       sessionId: raw.session_id || '',
@@ -340,11 +362,13 @@ const ClaudeProvider = {
    */
   buildHookEntry(event, scriptPath, timeout) {
     return {
-      hooks: [{
-        type: 'command',
-        command: scriptPath,
-        timeout,
-      }],
+      hooks: [
+        {
+          type: 'command',
+          command: scriptPath,
+          timeout,
+        },
+      ],
     };
   },
 
@@ -379,8 +403,11 @@ const ClaudeProvider = {
     if (!fs.existsSync(targetDir)) {
       say('  → cloning AirPrompt repo');
       if (!opts.dryRun) {
-        const r = H.spawnXplat('git', ['clone', '--depth', '1', `https://github.com/${REPO}.git`, targetDir],
-          { stdio: 'inherit' });
+        const r = H.spawnXplat(
+          'git',
+          ['clone', '--depth', '1', `https://github.com/${REPO}.git`, targetDir],
+          { stdio: 'inherit' }
+        );
         if (!H.spawnOk(r)) {
           warn('  failed to clone repo');
           results.failed.push(['claude', 'git clone failed']);
@@ -398,8 +425,10 @@ const ClaudeProvider = {
     if (!fs.existsSync(nmDir) || !fs.existsSync(path.join(nmDir, 'express'))) {
       say('  → installing npm dependencies');
       if (!opts.dryRun) {
-        const r = H.spawnXplat('npm', ['install', '--no-audit', '--no-fund', '--omit=dev'],
-          { cwd: targetDir, stdio: 'inherit' });
+        const r = H.spawnXplat('npm', ['install', '--no-audit', '--no-fund', '--omit=dev'], {
+          cwd: targetDir,
+          stdio: 'inherit',
+        });
         if (!H.spawnOk(r)) {
           warn('  npm install failed — daemon will not start until deps are installed');
           results.failed.push(['claude', 'npm install failed']);
@@ -425,16 +454,16 @@ const ClaudeProvider = {
       const launchTarget = path.join(targetDir, 'bin', 'airprompt-launch');
 
       // ~/bin/ symlinks
-      const entries = [
-        { name: 'airprompt', target: path.join(targetDir, 'bin', 'airprompt') },
-      ];
+      const entries = [{ name: 'airprompt', target: path.join(targetDir, 'bin', 'airprompt') }];
 
       if (!opts.dryRun) {
         try {
           fs.mkdirSync(homeBin, { recursive: true });
           for (const { name, target } of entries) {
             const linkPath = path.join(homeBin, name);
-            try { fs.unlinkSync(linkPath); } catch (_) {}
+            try {
+              fs.unlinkSync(linkPath);
+            } catch (_) {}
             fs.symlinkSync(target, linkPath);
             process.stdout.write(`  symlink: ${linkPath} → ${target}\n`);
           }
@@ -479,8 +508,18 @@ const ClaudeProvider = {
     } else if (hasCmd('claude')) {
       say('  → installing Claude Code plugin');
       const pluginEnv = H.sameFilesystemTmpEnv(configDir);
-      const r1 = H.runSpawn('claude', ['plugin', 'marketplace', 'add', REPO], { env: pluginEnv }, opts.dryRun);
-      const r2 = H.runSpawn('claude', ['plugin', 'install', 'airprompt@airprompt'], { env: pluginEnv }, opts.dryRun);
+      const r1 = H.runSpawn(
+        'claude',
+        ['plugin', 'marketplace', 'add', REPO],
+        { env: pluginEnv },
+        opts.dryRun
+      );
+      const r2 = H.runSpawn(
+        'claude',
+        ['plugin', 'install', 'airprompt@airprompt'],
+        { env: pluginEnv },
+        opts.dryRun
+      );
       if (H.spawnOk(r1) && H.spawnOk(r2)) {
         results.installed.push('claude');
         pluginInstallSucceeded = true;
@@ -502,7 +541,9 @@ const ClaudeProvider = {
       if (settings) {
         const pruned = SETTINGS.pruneOrphanedManagedHooks(settings, configDir);
         if (pruned > 0) {
-          note(`  removed ${pruned} orphaned airprompt hook entr${pruned === 1 ? 'y' : 'ies'} from settings.json`);
+          note(
+            `  removed ${pruned} orphaned airprompt hook entr${pruned === 1 ? 'y' : 'ies'} from settings.json`
+          );
           if (!opts.dryRun) {
             SETTINGS.validateHookFields(settings);
             SETTINGS.writeSettings(settingsPath, settings);
@@ -546,7 +587,8 @@ const ClaudeProvider = {
     if (opts.withHooks !== false) {
       const r = await installStatusline(ctx, targetDir);
       if (r === 'ok') results.installed.push('claude-statusline');
-      else if (r === 'skip') results.skipped.push(['claude-statusline', 'statusline already configured or preserved']);
+      else if (r === 'skip')
+        results.skipped.push(['claude-statusline', 'statusline already configured or preserved']);
       else results.failed.push(['claude-statusline', r]);
     }
 
@@ -583,8 +625,12 @@ const ClaudeProvider = {
           const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
           process.kill(pid, 'SIGTERM');
           note('  stopped daemon');
-        } catch (_) { /* already dead */ }
-        try { fs.unlinkSync(pidFile); } catch (_) {}
+        } catch (_) {
+          /* already dead */
+        }
+        try {
+          fs.unlinkSync(pidFile);
+        } catch (_) {}
       }
     }
 
@@ -596,12 +642,17 @@ const ClaudeProvider = {
       if (settings) {
         const removed = SETTINGS.removeAirPromptHooks(settings);
         if (settings.statusLine) {
-          const cmd = typeof settings.statusLine === 'string' ? settings.statusLine : (settings.statusLine.command || '');
+          const cmd =
+            typeof settings.statusLine === 'string'
+              ? settings.statusLine
+              : settings.statusLine.command || '';
           if (cmd.includes('airprompt-statusline')) delete settings.statusLine;
         }
         SETTINGS.validateHookFields(settings);
         if (!opts.dryRun) SETTINGS.writeSettings(settingsPath, settings);
-        ok(`  removed ${removed} airprompt hook entr${removed === 1 ? 'y' : 'ies'} from settings.json`);
+        ok(
+          `  removed ${removed} airprompt hook entr${removed === 1 ? 'y' : 'ies'} from settings.json`
+        );
       }
     }
 
@@ -610,7 +661,11 @@ const ClaudeProvider = {
       for (const f of HOOK_FILES) {
         const p = path.join(hooksDir, f);
         if (!fs.existsSync(p)) continue;
-        if (!opts.dryRun) { try { fs.unlinkSync(p); } catch (_) {} }
+        if (!opts.dryRun) {
+          try {
+            fs.unlinkSync(p);
+          } catch (_) {}
+        }
         note(`  removed ${p}`);
       }
     }
@@ -630,7 +685,11 @@ const ClaudeProvider = {
       for (const name of entries) {
         const linkPath = path.join(homeBin, name);
         if (!fs.existsSync(linkPath)) continue;
-        if (!opts.dryRun) { try { fs.unlinkSync(linkPath); } catch (_) {} }
+        if (!opts.dryRun) {
+          try {
+            fs.unlinkSync(linkPath);
+          } catch (_) {}
+        }
         note(`  removed ${linkPath}`);
       }
     }
@@ -641,7 +700,11 @@ const ClaudeProvider = {
       for (const f of ['airprompt.md', 'airprompt.toml']) {
         const dest = path.join(commandsDir, f);
         if (fs.existsSync(dest)) {
-          if (!opts.dryRun) { try { fs.unlinkSync(dest); } catch (_) {} }
+          if (!opts.dryRun) {
+            try {
+              fs.unlinkSync(dest);
+            } catch (_) {}
+          }
           note(`  removed ${dest}`);
         }
       }
@@ -651,7 +714,12 @@ const ClaudeProvider = {
     if (hasCmd('claude')) {
       const probe = H.captureSpawn('claude', ['plugin', 'list']);
       if (probe.status === 0 && /airprompt/i.test(probe.stdout || '')) {
-        const r = H.runSpawn('claude', ['plugin', 'uninstall', 'airprompt@airprompt'], null, opts.dryRun);
+        const r = H.runSpawn(
+          'claude',
+          ['plugin', 'uninstall', 'airprompt@airprompt'],
+          null,
+          opts.dryRun
+        );
         if (H.spawnOk(r)) ok('  removed claude plugin');
       } else {
         note('  claude plugin not installed — skipping');
@@ -681,7 +749,7 @@ const ClaudeProvider = {
       if (!opts.dryRun) {
         try {
           for (const entry of fs.readdirSync(targetDir)) {
-            if (entry === 'state') continue;  // preserve user data
+            if (entry === 'state') continue; // preserve user data
             safeRmSync(path.join(targetDir, entry));
           }
         } catch (_) {}
@@ -698,9 +766,18 @@ const ClaudeProvider = {
     const hooksDir = this.hooksDir();
     const srcDir = path.join(installDir, 'src', 'hooks');
     return [
-      { src: path.join(srcDir, 'airprompt-activate.js'), dest: path.join(hooksDir, 'airprompt-activate.js') },
-      { src: path.join(srcDir, 'airprompt-deactivate.js'), dest: path.join(hooksDir, 'airprompt-deactivate.js') },
-      { src: path.join(srcDir, 'airprompt-statusline.sh'), dest: path.join(hooksDir, 'airprompt-statusline.sh') },
+      {
+        src: path.join(srcDir, 'airprompt-activate.js'),
+        dest: path.join(hooksDir, 'airprompt-activate.js'),
+      },
+      {
+        src: path.join(srcDir, 'airprompt-deactivate.js'),
+        dest: path.join(hooksDir, 'airprompt-deactivate.js'),
+      },
+      {
+        src: path.join(srcDir, 'airprompt-statusline.sh'),
+        dest: path.join(hooksDir, 'airprompt-statusline.sh'),
+      },
     ];
   },
 
@@ -716,8 +793,14 @@ const ClaudeProvider = {
     const installDir = resolveInstallDir();
     const commandsDir = this.commandsDir();
     return [
-      { src: path.join(installDir, 'commands', 'airprompt.md'), dest: path.join(commandsDir, 'airprompt.md') },
-      { src: path.join(installDir, 'commands', 'airprompt.toml'), dest: path.join(commandsDir, 'airprompt.toml') },
+      {
+        src: path.join(installDir, 'commands', 'airprompt.md'),
+        dest: path.join(commandsDir, 'airprompt.md'),
+      },
+      {
+        src: path.join(installDir, 'commands', 'airprompt.toml'),
+        dest: path.join(commandsDir, 'airprompt.toml'),
+      },
     ];
   },
 

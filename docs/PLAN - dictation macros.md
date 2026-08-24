@@ -10,10 +10,10 @@ AirPrompt's voice dictation uses the browser Web Speech API (`SpeechRecognition`
 
 Two macro types:
 
-| Type | Example | Behavior |
-|------|---------|----------|
-| **Inline** | "hola signo de pregunta" → `hola?` | Replaced in-place within a continuous fragment |
-| **Stateful/fragment** | say "entre comillas" as standalone fragment → next fragment wrapped in `"..."` | Affects subsequent text |
+| Type                  | Example                                                                        | Behavior                                       |
+| --------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
+| **Inline**            | "hola signo de pregunta" → `hola?`                                             | Replaced in-place within a continuous fragment |
+| **Stateful/fragment** | say "entre comillas" as standalone fragment → next fragment wrapped in `"..."` | Affects subsequent text                        |
 
 The entire pipeline is client-side (browser, `public/dictation.js`). No server changes needed. The transcribed text sits in the overlay until user taps Accept — we post-process before `_send()`.
 
@@ -39,11 +39,13 @@ Pure functions, zero DOM dependencies. Exposes via `window.DictationMacros`:
 5. Safeguard: `applyInline(text, currentLang)` run on the full text in `acceptDictation()`/`acceptAndSend()` before sending
 
 **New state** (added to existing state block, ~line 14):
+
 ```javascript
-let _pendingFormat = null;  // string|null — format to apply to next text fragment
+let _pendingFormat = null; // string|null — format to apply to next text fragment
 ```
 
 **Reset on START** in `toggleDictation()` (line 354 area):
+
 ```javascript
 _pendingFormat = null;
 ```
@@ -56,44 +58,44 @@ _pendingFormat = null;
 const DICTATION_MACROS = {
   'es-AR': {
     inline: [
-      { trigger: 'puntos suspensivos',  replace: '…' },
-      { trigger: 'abre paréntesis',     replace: '(' },
-      { trigger: 'cierra paréntesis',   replace: ')' },
-      { trigger: 'signo de pregunta',   replace: '?' },
-      { trigger: 'signo de exclamación',replace: '!' },
-      { trigger: 'punto y coma',        replace: ';' },
-      { trigger: 'dos puntos',          replace: ':' },
-      { trigger: 'nuevo párrafo',       replace: '\n\n' },
-      { trigger: 'nueva línea',         replace: '\n' },
-      { trigger: 'punto',               replace: '.' },
-      { trigger: 'coma',                replace: ',' },
-      { trigger: 'guion',               replace: '-' },
+      { trigger: 'puntos suspensivos', replace: '…' },
+      { trigger: 'abre paréntesis', replace: '(' },
+      { trigger: 'cierra paréntesis', replace: ')' },
+      { trigger: 'signo de pregunta', replace: '?' },
+      { trigger: 'signo de exclamación', replace: '!' },
+      { trigger: 'punto y coma', replace: ';' },
+      { trigger: 'dos puntos', replace: ':' },
+      { trigger: 'nuevo párrafo', replace: '\n\n' },
+      { trigger: 'nueva línea', replace: '\n' },
+      { trigger: 'punto', replace: '.' },
+      { trigger: 'coma', replace: ',' },
+      { trigger: 'guion', replace: '-' },
     ],
     stateful: [
-      { trigger: 'entre comillas',      format: 'quotes' },
-      { trigger: 'en mayúsculas',       format: 'uppercase' },
-      { trigger: 'todo mayúsculas',     format: 'allcaps' },
+      { trigger: 'entre comillas', format: 'quotes' },
+      { trigger: 'en mayúsculas', format: 'uppercase' },
+      { trigger: 'todo mayúsculas', format: 'allcaps' },
     ],
   },
   'en-US': {
     inline: [
-      { trigger: 'ellipsis',            replace: '…' },
-      { trigger: 'open parenthesis',    replace: '(' },
-      { trigger: 'close parenthesis',   replace: ')' },
-      { trigger: 'question mark',       replace: '?' },
-      { trigger: 'exclamation point',   replace: '!' },
-      { trigger: 'semicolon',           replace: ';' },
-      { trigger: 'colon',               replace: ':' },
-      { trigger: 'new paragraph',       replace: '\n\n' },
-      { trigger: 'new line',            replace: '\n' },
-      { trigger: 'period',              replace: '.' },
-      { trigger: 'comma',               replace: ',' },
-      { trigger: 'dash',                replace: '-' },
+      { trigger: 'ellipsis', replace: '…' },
+      { trigger: 'open parenthesis', replace: '(' },
+      { trigger: 'close parenthesis', replace: ')' },
+      { trigger: 'question mark', replace: '?' },
+      { trigger: 'exclamation point', replace: '!' },
+      { trigger: 'semicolon', replace: ';' },
+      { trigger: 'colon', replace: ':' },
+      { trigger: 'new paragraph', replace: '\n\n' },
+      { trigger: 'new line', replace: '\n' },
+      { trigger: 'period', replace: '.' },
+      { trigger: 'comma', replace: ',' },
+      { trigger: 'dash', replace: '-' },
     ],
     stateful: [
-      { trigger: 'in quotes',           format: 'quotes' },
-      { trigger: 'uppercase',           format: 'uppercase' },
-      { trigger: 'all caps',            format: 'allcaps' },
+      { trigger: 'in quotes', format: 'quotes' },
+      { trigger: 'uppercase', format: 'uppercase' },
+      { trigger: 'all caps', format: 'allcaps' },
     ],
   },
 };
@@ -103,12 +105,12 @@ Formats: `quotes` → `"${text}"`, `uppercase` → first char uppercase, `allcap
 
 ## Files changed
 
-| File | Action | Est. lines |
-|------|--------|-----------|
-| `public/dictation-macros.js` | **CREATE** | ~120 |
-| `public/dictation.js` | MODIFY | ~25 changed / added |
-| `public/index.html` | MODIFY | +1 `<script>` line |
-| `test/unit/dictation.test.js` | MODIFY | ~100 added |
+| File                          | Action     | Est. lines          |
+| ----------------------------- | ---------- | ------------------- |
+| `public/dictation-macros.js`  | **CREATE** | ~120                |
+| `public/dictation.js`         | MODIFY     | ~25 changed / added |
+| `public/index.html`           | MODIFY     | +1 `<script>` line  |
+| `test/unit/dictation.test.js` | MODIFY     | ~100 added          |
 
 ## Edge cases handled
 

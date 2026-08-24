@@ -14,22 +14,22 @@ bash .claude/skills/notification-test/send.sh [options]
 
 ## Options (all optional)
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--type` | `idle_prompt` | `idle_prompt`, `permission_prompt`, `agent_needs_input`, `agent_completed` |
-| `--message` | auto | Custom notification message text |
-| `--session-id` | first from API | AirPrompt session ID to attribute to |
-| `--cwd` | resolved from session | Working directory (shown in webUI label fallback) |
-| `--ai-title` | auto timestamp | Simulated Claude transcript `aiTitle` |
-| `--duration-ms` | random 500-5000 | Simulated turn duration in ms |
-| `--message-count` | random 1-20 | Simulated turn message count |
-| `--permission-mode` | `default` | `acceptEdits`, `bypassPermissions`, `default`, `plan` |
-| `--effort` | `medium` | `low`, `medium`, `high`, `xhigh`, `max` |
-| `--count` | `1` | Send N notifications |
-| `--delay` | `100` | Delay in ms between notifications (count > 1) |
-| `--auto-dismiss` | `0` | Set `1` for auto-dismiss after 6s, `0` for manual swipe |
-| `--dry-run` | off | Print JSON payload without sending |
-| `--help` | | Show usage |
+| Flag                | Default               | Description                                                                |
+| ------------------- | --------------------- | -------------------------------------------------------------------------- |
+| `--type`            | `idle_prompt`         | `idle_prompt`, `permission_prompt`, `agent_needs_input`, `agent_completed` |
+| `--message`         | auto                  | Custom notification message text                                           |
+| `--session-id`      | first from API        | AirPrompt session ID to attribute to                                       |
+| `--cwd`             | resolved from session | Working directory (shown in webUI label fallback)                          |
+| `--ai-title`        | auto timestamp        | Simulated Claude transcript `aiTitle`                                      |
+| `--duration-ms`     | random 500-5000       | Simulated turn duration in ms                                              |
+| `--message-count`   | random 1-20           | Simulated turn message count                                               |
+| `--permission-mode` | `default`             | `acceptEdits`, `bypassPermissions`, `default`, `plan`                      |
+| `--effort`          | `medium`              | `low`, `medium`, `high`, `xhigh`, `max`                                    |
+| `--count`           | `1`                   | Send N notifications                                                       |
+| `--delay`           | `100`                 | Delay in ms between notifications (count > 1)                              |
+| `--auto-dismiss`    | `0`                   | Set `1` for auto-dismiss after 6s, `0` for manual swipe                    |
+| `--dry-run`         | off                   | Print JSON payload without sending                                         |
+| `--help`            |                       | Show usage                                                                 |
 
 ## What it simulates
 

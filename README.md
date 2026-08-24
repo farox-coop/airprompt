@@ -26,20 +26,20 @@ AirPrompt lets you view and interact with remote IDE/CLI sessions running on you
 
 Every tmux feature AirPrompt depends on, where it's used, and why:
 
-| tmux command | Used in | Purpose |
-|---|---|---|
-| `new-session -d` | `on.sh`, `activate.js`, `server.js` | Create detached sessions (mirror + daemon + web proxy) |
-| `attach-session` | `server.js` | Web client connects to tmux session via node-pty |
-| `has-session` | `on.sh`, `restart.sh`, `activate.js`, `airprompt-launch`, `src/utils.js` | Check if session exists |
-| `kill-session` | `server.js`, `clean.sh`, `off.sh` | Destroy sessions (mirror, daemon, cleanup) |
-| `send-keys` | `server.js` | Inject `/airprompt off` into session without attaching |
-| `list-clients` | `server.js`, `src/utils.js` | Detect orphaned mirror sessions (no attached clients) |
-| `display-message` | `activate.js`, `server.js` | Read session name `#S`, group `#{session_group}`, cwd `#{pane_current_path}` |
-| `set-option` | `server.js`, `airprompt-launch` | Disable status bar in web sessions, enable focus-events |
-| `load-buffer` / `save-buffer` | `server.js` | Clipboard sync between web client and session |
-| `list-panes -F '#{pane_dead}'` | `airprompt-launch` | Detect zombie panes from previous `/exit` |
-| `respawn-pane -k` | `airprompt-launch`, `on.sh` | Revive zombie pane or restart daemon |
-| Session grouping (`-t parent`) | `server.js` | Web proxy sessions inherit from real session — kill parent, children die
+| tmux command                   | Used in                                                                  | Purpose                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `new-session -d`               | `on.sh`, `activate.js`, `server.js`                                      | Create detached sessions (mirror + daemon + web proxy)                       |
+| `attach-session`               | `server.js`                                                              | Web client connects to tmux session via node-pty                             |
+| `has-session`                  | `on.sh`, `restart.sh`, `activate.js`, `airprompt-launch`, `src/utils.js` | Check if session exists                                                      |
+| `kill-session`                 | `server.js`, `clean.sh`, `off.sh`                                        | Destroy sessions (mirror, daemon, cleanup)                                   |
+| `send-keys`                    | `server.js`                                                              | Inject `/airprompt off` into session without attaching                       |
+| `list-clients`                 | `server.js`, `src/utils.js`                                              | Detect orphaned mirror sessions (no attached clients)                        |
+| `display-message`              | `activate.js`, `server.js`                                               | Read session name `#S`, group `#{session_group}`, cwd `#{pane_current_path}` |
+| `set-option`                   | `server.js`, `airprompt-launch`                                          | Disable status bar in web sessions, enable focus-events                      |
+| `load-buffer` / `save-buffer`  | `server.js`                                                              | Clipboard sync between web client and session                                |
+| `list-panes -F '#{pane_dead}'` | `airprompt-launch`                                                       | Detect zombie panes from previous `/exit`                                    |
+| `respawn-pane -k`              | `airprompt-launch`, `on.sh`                                              | Revive zombie pane or restart daemon                                         |
+| Session grouping (`-t parent`) | `server.js`                                                              | Web proxy sessions inherit from real session — kill parent, children die     |
 
 ## Quick Start
 
@@ -85,19 +85,19 @@ node bin/install.js
 
 `node bin/install.js` accepts the following (each is also forwarded through `install.sh`):
 
-| Flag | Action |
-|---|---|
-| `--dry-run` | Print what would run, change nothing |
-| `--force` | Re-run even if already installed |
-| `--only <agent>` | Install only for the named agent (repeatable) |
-| `--with-hooks` | Wire standalone hooks alongside the plugin manifest |
-| `--no-hooks` | Skip settings.json hook wiring (plugin manifest handles hooks) |
-| `--uninstall, -u` | Remove AirPrompt from this machine |
-| `--config-dir <path>` | IDE config dir (default `~/.claude`) |
-| `--target-dir <path>` | Install dir (default `~/.airprompt/`) |
-| `--port <n>` | Daemon port (default 3210) |
-| `--non-interactive` | Never prompt; use defaults |
-| `--list` | Print supported agents and exit |
+| Flag                  | Action                                                         |
+| --------------------- | -------------------------------------------------------------- |
+| `--dry-run`           | Print what would run, change nothing                           |
+| `--force`             | Re-run even if already installed                               |
+| `--only <agent>`      | Install only for the named agent (repeatable)                  |
+| `--with-hooks`        | Wire standalone hooks alongside the plugin manifest            |
+| `--no-hooks`          | Skip settings.json hook wiring (plugin manifest handles hooks) |
+| `--uninstall, -u`     | Remove AirPrompt from this machine                             |
+| `--config-dir <path>` | IDE config dir (default `~/.claude`)                           |
+| `--target-dir <path>` | Install dir (default `~/.airprompt/`)                          |
+| `--port <n>`          | Daemon port (default 3210)                                     |
+| `--non-interactive`   | Never prompt; use defaults                                     |
+| `--list`              | Print supported agents and exit                                |
 
 ### What gets created
 
@@ -121,14 +121,14 @@ airprompt clean
 
 Environment variables (all optional):
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `AIRPROMPT_PORT` | `3210` | Daemon port |
-| `AIRPROMPT_STATE_DIR` | `~/.airprompt/state` | daemon.json, TLS cert/key, project names |
-| `AIRPROMPT_SESSIONS_DIR` | `~/.airprompt/sessions` | Per-session markers |
-| `AIRPROMPT_PID_FILE` | `/tmp/airprompt-server.pid` | Daemon PID file |
-| `AIRPROMPT_NO_TLS` | unset | `1` disables HTTPS (breaks pairing + voice dictation) |
-| `AIRPROMPT_DEBUG` | unset | `1` enables verbose logging |
+| Variable                 | Default                     | Purpose                                               |
+| ------------------------ | --------------------------- | ----------------------------------------------------- |
+| `AIRPROMPT_PORT`         | `3210`                      | Daemon port                                           |
+| `AIRPROMPT_STATE_DIR`    | `~/.airprompt/state`        | daemon.json, TLS cert/key, project names              |
+| `AIRPROMPT_SESSIONS_DIR` | `~/.airprompt/sessions`     | Per-session markers                                   |
+| `AIRPROMPT_PID_FILE`     | `/tmp/airprompt-server.pid` | Daemon PID file                                       |
+| `AIRPROMPT_NO_TLS`       | unset                       | `1` disables HTTPS (breaks pairing + voice dictation) |
+| `AIRPROMPT_DEBUG`        | unset                       | `1` enables verbose logging                           |
 
 ### TLS certificate
 
@@ -145,13 +145,13 @@ Daemon output goes to `/tmp/airprompt.log`. Tail it with `make logs` or `tail -f
 
 ## Provider status
 
-| Provider | Status | Notes |
-|---|---|---|
-| Claude Code (tmux) | ✅ Functional | Full install, hooks, badge, lifecycle |
-| Claude Code (VS Code) | ⚠️ Partial | Registers, but no `$TMUX` — phone shows an empty shell, not the live UI |
-| Codex | 🚧 Planned | Adapter not shipped yet |
-| Cursor | 🚧 Planned | Adapter not shipped yet |
-| Windsurf | 🚧 Planned | Adapter not shipped yet |
+| Provider              | Status        | Notes                                                                   |
+| --------------------- | ------------- | ----------------------------------------------------------------------- |
+| Claude Code (tmux)    | ✅ Functional | Full install, hooks, badge, lifecycle                                   |
+| Claude Code (VS Code) | ⚠️ Partial    | Registers, but no `$TMUX` — phone shows an empty shell, not the live UI |
+| Codex                 | 🚧 Planned    | Adapter not shipped yet                                                 |
+| Cursor                | 🚧 Planned    | Adapter not shipped yet                                                 |
+| Windsurf              | 🚧 Planned    | Adapter not shipped yet                                                 |
 
 ## Troubleshooting
 
@@ -171,18 +171,18 @@ Daemon output goes to `/tmp/airprompt.log`. Tail it with `make logs` or `tail -f
 
 All commands go through the unified dispatcher: `airprompt <command>` (`/airprompt <command>` inside Claude Code).
 
-| Command | Action |
-|---|---|
-| `on [<name>]` | Start daemon + register current session (optional display name) |
-| `on --name <name>` | Same, explicit flag form |
-| `off` | Unregister current session + hide statusline badge |
-| `status` | Show daemon status and all active sessions |
-| `name [<text>]` | Set display name for current session (empty or "" clears it) |
-| `clean` | Full teardown — kill daemon, remove all sessions/config. Preserves install files (~/.airprompt/server.js) so autostart hook target survives |
-| `restart` | Restart daemon — sessions survive via disk recovery |
-| `autostart on|off` | Auto-start AirPrompt on IDE session start |
-| `auth <cmd>` | Manage paired devices: `list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>`, `name <seq> <name>` |
-| `help` | Print usage |
+| Command            | Action                                                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `on [<name>]`      | Start daemon + register current session (optional display name)                                                                             |
+| `on --name <name>` | Same, explicit flag form                                                                                                                    |
+| `off`              | Unregister current session + hide statusline badge                                                                                          |
+| `status`           | Show daemon status and all active sessions                                                                                                  |
+| `name [<text>]`    | Set display name for current session (empty or "" clears it)                                                                                |
+| `clean`            | Full teardown — kill daemon, remove all sessions/config. Preserves install files (~/.airprompt/server.js) so autostart hook target survives |
+| `restart`          | Restart daemon — sessions survive via disk recovery                                                                                         |
+| `autostart on      | off`                                                                                                                                        | Auto-start AirPrompt on IDE session start |
+| `auth <cmd>`       | Manage paired devices: `list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>`, `name <seq> <name>`                           |
+| `help`             | Print usage                                                                                                                                 |
 
 **`/airprompt` with no arguments** runs `status` + `help` — shows daemon status followed by the command reference.
 
@@ -201,24 +201,24 @@ The daemon requires SSH-style device pairing: each browser holds an ECDSA P-256 
 
 ## Make Targets
 
-| Target | Action |
-|---|---|
-| `setup` | Install npm deps + generate TLS cert |
-| `cert` | Generate self-signed TLS certificate |
-| `start` | Start AirPrompt daemon in background |
-| `stop` | Stop daemon via PID file |
-| `refresh` | Stop, clean, setup, and start fresh |
-| `logs` | Tail daemon logs |
-| `lint` | Lint JS (ESLint) + shell (shellcheck) |
-| `format` | Reformat with Prettier |
-| `format-check` | Verify formatting with Prettier |
-| `test-all` | Run unit and integration tests |
-| `agnostic-check` | Audit codebase for hardcoded provider names (dev only) |
-| `test-unit` | Run Node.js unit tests |
-| `test-integration` | Run shell integration tests |
-| `install-plugin` | Install AirPrompt as an IDE plugin |
-| `uninstall-plugin` | Remove plugin registration |
-| `clean` | Remove PID, daemon.json, state, sessions, logs, node_modules |
+| Target             | Action                                                       |
+| ------------------ | ------------------------------------------------------------ |
+| `setup`            | Install npm deps + generate TLS cert                         |
+| `cert`             | Generate self-signed TLS certificate                         |
+| `start`            | Start AirPrompt daemon in background                         |
+| `stop`             | Stop daemon via PID file                                     |
+| `refresh`          | Stop, clean, setup, and start fresh                          |
+| `logs`             | Tail daemon logs                                             |
+| `lint`             | Lint JS (ESLint) + shell (shellcheck)                        |
+| `format-write`     | Reformat with Prettier                                       |
+| `format-check`     | Verify formatting with Prettier                              |
+| `test-all`         | Run lint, format-check, agnostic-check, unit, integration    |
+| `agnostic-check`   | Audit codebase for hardcoded provider names (dev only)       |
+| `test-unit`        | Run Node.js unit tests                                       |
+| `test-integration` | Run shell integration tests                                  |
+| `install-plugin`   | Install AirPrompt as an IDE plugin                           |
+| `uninstall-plugin` | Remove plugin registration                                   |
+| `clean`            | Remove PID, daemon.json, state, sessions, logs, node_modules |
 
 ## TLS & Voice Dictation
 
@@ -232,7 +232,7 @@ Voice macros let you control formatting and punctuation by speaking trigger phra
 
 - **Inline macros** — replaced in-place within a continuous fragment: "hola signo de pregunta" → `hola?`. Triggers are unambiguous multi-word commands: `abre/abrí` + `cierra/cerrá` `paréntesis` → `(`/`)`, `comillas` → `"`, `comillas simples` → `'`, `tics` → `` ` ``, and `signo de pregunta` → `?`, `signo de exclamación`/`signo de admiración` → `!` (es-AR) / equivalents in en-US.
 - **Fragment-level inserts** — a standalone fragment consisting ONLY of the trigger word/phrase inserts the character: `punto` → `.`, `coma` → `,`, `guion` → `-`, `punto y coma` → `;`, `dos puntos` → `:`, `puntos suspensivos` → `…`, `nueva línea` → newline, `nuevo párrafo` → blank line. These common words are NOT replaced when embedded in longer text ("se coma esto" stays literal).
-- **Stateful macros** — a standalone fragment that sets formatting for the *next* fragment: say "entre comillas" → next fragment wrapped in `"..."`. Also: "entre comillas simples" → `'...'`, "entre tics" → `` `...` ``, "entre paréntesis" → `(...)`, "en mayúsculas" (capitalize first letter), "todo mayúsculas" (ALL CAPS). Trigger phrases must be the *only* thing in their fragment to activate — embedded in longer speech they're treated as literal text.
+- **Stateful macros** — a standalone fragment that sets formatting for the _next_ fragment: say "entre comillas" → next fragment wrapped in `"..."`. Also: "entre comillas simples" → `'...'`, "entre tics" → `` `...` ``, "entre paréntesis" → `(...)`, "en mayúsculas" (capitalize first letter), "todo mayúsculas" (ALL CAPS). Trigger phrases must be the _only_ thing in their fragment to activate — embedded in longer speech they're treated as literal text.
 
 Both Spanish (es-AR, including voseo "abrí"/"cerrá") and English (en-US) supported with the same macro set. Accent-dropping by the recognizer is tolerated (e.g. "abri paréntesis" still matches).
 
@@ -243,6 +243,7 @@ Every macro can be toggled from the web UI: tap the ⚙ gear button in the heade
 AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter implementing a shared interface. Claude Code ships as the first provider.
 
 **Claude Code:**
+
 - `/airprompt on` — Register session and enable remote access
 - `/airprompt off` — Unregister session and hide statusline badge
 - `/airprompt status` — Show daemon status and all active sessions

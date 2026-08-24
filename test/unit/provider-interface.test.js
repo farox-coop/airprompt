@@ -59,21 +59,43 @@ test('provider.js — sessionDir handles empty session name', () => {
 // ── Interface contract: every provider ──────────────────────────────────────
 
 const REQUIRED_PROPS = [
-  'id', 'label', 'mech', 'detect', 'profile',
-  'hookEvents', 'commandPrefix',
-  'detectMatch', 'parseHookStdin', 'formatHookOutput',
+  'id',
+  'label',
+  'mech',
+  'detect',
+  'profile',
+  'hookEvents',
+  'commandPrefix',
+  'detectMatch',
+  'parseHookStdin',
+  'formatHookOutput',
   'buildHookEntry',
-  'install', 'uninstall',
-  'getHookFiles', 'getSkillFiles', 'getCommandFiles', 'getRuleFiles',
+  'install',
+  'uninstall',
+  'getHookFiles',
+  'getSkillFiles',
+  'getCommandFiles',
+  'getRuleFiles',
 ];
 
 const REQUIRED_METHODS = [
-  'configDir', 'sessionsDir', 'hooksDir', 'hooksConfigPath',
-  'skillsDir', 'commandsDir', 'rulesDir',
-  'detectMatch', 'parseHookStdin', 'formatHookOutput',
+  'configDir',
+  'sessionsDir',
+  'hooksDir',
+  'hooksConfigPath',
+  'skillsDir',
+  'commandsDir',
+  'rulesDir',
+  'detectMatch',
+  'parseHookStdin',
+  'formatHookOutput',
   'buildHookEntry',
-  'install', 'uninstall',
-  'getHookFiles', 'getSkillFiles', 'getCommandFiles', 'getRuleFiles',
+  'install',
+  'uninstall',
+  'getHookFiles',
+  'getSkillFiles',
+  'getCommandFiles',
+  'getRuleFiles',
 ];
 
 const OPTIONAL_PROPS = ['buildStatusLineEntry'];
@@ -90,7 +112,8 @@ for (const prov of providers) {
   test(`[${id}] all required methods are functions`, () => {
     for (const method of REQUIRED_METHODS) {
       assert.strictEqual(
-        typeof prov[method], 'function',
+        typeof prov[method],
+        'function',
         `${id}: "${method}" should be a function, got ${typeof prov[method]}`
       );
     }
@@ -102,25 +125,38 @@ for (const prov of providers) {
   });
 
   test(`[${id}] label is non-empty string`, () => {
-    assert.ok(typeof prov.label === 'string' && prov.label.length > 0, 'label must be non-empty string');
+    assert.ok(
+      typeof prov.label === 'string' && prov.label.length > 0,
+      'label must be non-empty string'
+    );
   });
 
   test(`[${id}] mech is non-empty string`, () => {
-    assert.ok(typeof prov.mech === 'string' && prov.mech.length > 0, 'mech must be non-empty string');
+    assert.ok(
+      typeof prov.mech === 'string' && prov.mech.length > 0,
+      'mech must be non-empty string'
+    );
   });
 
   test(`[${id}] detect is non-empty string`, () => {
-    assert.ok(typeof prov.detect === 'string' && prov.detect.length > 0, 'detect must be non-empty string');
+    assert.ok(
+      typeof prov.detect === 'string' && prov.detect.length > 0,
+      'detect must be non-empty string'
+    );
   });
 
   test(`[${id}] profile is string or null`, () => {
-    assert.ok(prov.profile === null || typeof prov.profile === 'string',
-      `profile must be null or string, got ${typeof prov.profile}`);
+    assert.ok(
+      prov.profile === null || typeof prov.profile === 'string',
+      `profile must be null or string, got ${typeof prov.profile}`
+    );
   });
 
   test(`[${id}] commandPrefix is non-empty string`, () => {
-    assert.ok(typeof prov.commandPrefix === 'string' && prov.commandPrefix.length > 0,
-      'commandPrefix must be non-empty string');
+    assert.ok(
+      typeof prov.commandPrefix === 'string' && prov.commandPrefix.length > 0,
+      'commandPrefix must be non-empty string'
+    );
   });
 
   // ── hookEvents shape ──────────────────────────────────────────────────
@@ -146,37 +182,58 @@ for (const prov of providers) {
 
   test(`[${id}] configDir() returns non-empty string`, () => {
     const result = prov.configDir();
-    assert.ok(typeof result === 'string' && result.length > 0, 'configDir() must return non-empty string');
+    assert.ok(
+      typeof result === 'string' && result.length > 0,
+      'configDir() must return non-empty string'
+    );
   });
 
   test(`[${id}] sessionsDir() returns non-empty string`, () => {
     const result = prov.sessionsDir();
-    assert.ok(typeof result === 'string' && result.length > 0, 'sessionsDir() must return non-empty string');
+    assert.ok(
+      typeof result === 'string' && result.length > 0,
+      'sessionsDir() must return non-empty string'
+    );
   });
 
   test(`[${id}] hooksDir() returns non-empty string`, () => {
     const result = prov.hooksDir();
-    assert.ok(typeof result === 'string' && result.length > 0, 'hooksDir() must return non-empty string');
+    assert.ok(
+      typeof result === 'string' && result.length > 0,
+      'hooksDir() must return non-empty string'
+    );
   });
 
   test(`[${id}] hooksConfigPath() returns non-empty string`, () => {
     const result = prov.hooksConfigPath();
-    assert.ok(typeof result === 'string' && result.length > 0, 'hooksConfigPath() must return non-empty string');
+    assert.ok(
+      typeof result === 'string' && result.length > 0,
+      'hooksConfigPath() must return non-empty string'
+    );
   });
 
   test(`[${id}] skillsDir() returns non-empty string`, () => {
     const result = prov.skillsDir();
-    assert.ok(typeof result === 'string' && result.length > 0, 'skillsDir() must return non-empty string');
+    assert.ok(
+      typeof result === 'string' && result.length > 0,
+      'skillsDir() must return non-empty string'
+    );
   });
 
   test(`[${id}] commandsDir() returns non-empty string`, () => {
     const result = prov.commandsDir();
-    assert.ok(typeof result === 'string' && result.length > 0, 'commandsDir() must return non-empty string');
+    assert.ok(
+      typeof result === 'string' && result.length > 0,
+      'commandsDir() must return non-empty string'
+    );
   });
 
   test(`[${id}] rulesDir() returns string or null`, () => {
     const result = prov.rulesDir();
-    assert.ok(result === null || typeof result === 'string', 'rulesDir() must return string or null');
+    assert.ok(
+      result === null || typeof result === 'string',
+      'rulesDir() must return string or null'
+    );
   });
 
   // ── Hook I/O ──────────────────────────────────────────────────────────
@@ -213,7 +270,10 @@ for (const prov of providers) {
   test(`[${id}] buildStatusLineEntry returns object or null (if defined)`, () => {
     if (typeof prov.buildStatusLineEntry === 'function') {
       const entry = prov.buildStatusLineEntry('/fake/statusline.sh');
-      assert.ok(entry === null || typeof entry === 'object', 'buildStatusLineEntry must return object or null');
+      assert.ok(
+        entry === null || typeof entry === 'object',
+        'buildStatusLineEntry must return object or null'
+      );
     }
     // Passing: not all providers need statusLine support
   });
@@ -224,8 +284,14 @@ for (const prov of providers) {
     const files = prov.getHookFiles();
     assert.ok(Array.isArray(files), 'getHookFiles must return array');
     for (const f of files) {
-      assert.ok(typeof f.src === 'string' && f.src.length > 0, 'each hook file must have src string');
-      assert.ok(typeof f.dest === 'string' && f.dest.length > 0, 'each hook file must have dest string');
+      assert.ok(
+        typeof f.src === 'string' && f.src.length > 0,
+        'each hook file must have src string'
+      );
+      assert.ok(
+        typeof f.dest === 'string' && f.dest.length > 0,
+        'each hook file must have dest string'
+      );
     }
   });
 
@@ -233,8 +299,14 @@ for (const prov of providers) {
     const files = prov.getSkillFiles();
     assert.ok(Array.isArray(files), 'getSkillFiles must return array');
     for (const f of files) {
-      assert.ok(typeof f.src === 'string' && f.src.length > 0, 'each skill file must have src string');
-      assert.ok(typeof f.dest === 'string' && f.dest.length > 0, 'each skill file must have dest string');
+      assert.ok(
+        typeof f.src === 'string' && f.src.length > 0,
+        'each skill file must have src string'
+      );
+      assert.ok(
+        typeof f.dest === 'string' && f.dest.length > 0,
+        'each skill file must have dest string'
+      );
     }
   });
 
@@ -242,8 +314,14 @@ for (const prov of providers) {
     const files = prov.getCommandFiles();
     assert.ok(Array.isArray(files), 'getCommandFiles must return array');
     for (const f of files) {
-      assert.ok(typeof f.src === 'string' && f.src.length > 0, 'each command file must have src string');
-      assert.ok(typeof f.dest === 'string' && f.dest.length > 0, 'each command file must have dest string');
+      assert.ok(
+        typeof f.src === 'string' && f.src.length > 0,
+        'each command file must have src string'
+      );
+      assert.ok(
+        typeof f.dest === 'string' && f.dest.length > 0,
+        'each command file must have dest string'
+      );
     }
   });
 
@@ -251,8 +329,14 @@ for (const prov of providers) {
     const files = prov.getRuleFiles();
     assert.ok(Array.isArray(files), 'getRuleFiles must return array');
     for (const f of files) {
-      assert.ok(typeof f.src === 'string' && f.src.length > 0, 'each rule file must have src string');
-      assert.ok(typeof f.dest === 'string' && f.dest.length > 0, 'each rule file must have dest string');
+      assert.ok(
+        typeof f.src === 'string' && f.src.length > 0,
+        'each rule file must have src string'
+      );
+      assert.ok(
+        typeof f.dest === 'string' && f.dest.length > 0,
+        'each rule file must have dest string'
+      );
     }
   });
 
@@ -320,10 +404,7 @@ test('registry — loadProvider("claude") returns ClaudeProvider', () => {
 
 test('registry — loadProvider throws for unknown provider', () => {
   registry.clearCache();
-  assert.throws(
-    () => registry.loadProvider('nonexistent-provider-999'),
-    /unknown provider/
-  );
+  assert.throws(() => registry.loadProvider('nonexistent-provider-999'), /unknown provider/);
 });
 
 test('registry — clearCache resets internal cache', () => {
@@ -331,7 +412,11 @@ test('registry — clearCache resets internal cache', () => {
   const first = registry.listProviders();
   registry.clearCache();
   const second = registry.listProviders();
-  assert.deepStrictEqual(first.sort(), second.sort(), 'providers should be the same after cache clear');
+  assert.deepStrictEqual(
+    first.sort(),
+    second.sort(),
+    'providers should be the same after cache clear'
+  );
 });
 
 test('registry — defaultProvider returns first detected provider', () => {

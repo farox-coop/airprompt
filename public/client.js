@@ -11,7 +11,9 @@ function log(level, msg, extra) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'debug', level, msg, extra, ts }));
     }
-  } catch (_) { /* ws may be in transient state */ }
+  } catch (_) {
+    /* ws may be in transient state */
+  }
 }
 
 // ── Terminal ─────────────────────────────────────────────────────────
@@ -62,34 +64,47 @@ fitAddon.fit();
   term.options.fontSize = currentZoom;
 
   const container = document.getElementById('terminal-container');
-  let startDist = 0, startZoom = 0, pinchActive = false;
+  let startDist = 0,
+    startZoom = 0,
+    pinchActive = false;
 
-  container.addEventListener('touchstart', function (e) {
-    if (e.touches.length !== 2) { pinchActive = false; return; }
-    pinchActive = true;
-    startDist = Math.hypot(
-      e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY
-    );
-    startZoom = currentZoom;
-  }, { passive: true });
+  container.addEventListener(
+    'touchstart',
+    function (e) {
+      if (e.touches.length !== 2) {
+        pinchActive = false;
+        return;
+      }
+      pinchActive = true;
+      startDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      startZoom = currentZoom;
+    },
+    { passive: true }
+  );
 
-  container.addEventListener('touchmove', function (e) {
-    if (!pinchActive || e.touches.length !== 2) return;
-    const dist = Math.hypot(
-      e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY
-    );
-    if (Math.abs(dist - startDist) < 10) return;
-    e.preventDefault();
-    const newSize = Math.round(startZoom * dist / startDist);
-    const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newSize));
-    if (clamped !== currentZoom) {
-      currentZoom = clamped;
-      term.options.fontSize = clamped;
-      fitAddon.fit();
-    }
-  }, { passive: false });
+  container.addEventListener(
+    'touchmove',
+    function (e) {
+      if (!pinchActive || e.touches.length !== 2) return;
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      if (Math.abs(dist - startDist) < 10) return;
+      e.preventDefault();
+      const newSize = Math.round((startZoom * dist) / startDist);
+      const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newSize));
+      if (clamped !== currentZoom) {
+        currentZoom = clamped;
+        term.options.fontSize = clamped;
+        fitAddon.fit();
+      }
+    },
+    { passive: false }
+  );
 
   container.addEventListener('touchend', function () {
     if (pinchActive) {
@@ -116,7 +131,9 @@ setTimeout(scheduleResize, 300);
 window.addEventListener('resize', scheduleResize);
 
 const Dictation = window.Dictation;
-function tr(key) { return Dictation.tr(key); }
+function tr(key) {
+  return Dictation.tr(key);
+}
 
 // ── DOM refs ────────────────────────────────────────────────────────
 const sessionBar = document.getElementById('session-bar');
@@ -134,13 +151,13 @@ function hideLoadSpinner() {
 const SESSION_STORAGE_KEY = 'airprompt-active-session';
 let sessions = [];
 let activeSessionId = localStorage.getItem(SESSION_STORAGE_KEY) || null;
-let _needPtySpawn = true;  // true when WS (re)connects — PTY not yet spawned
+let _needPtySpawn = true; // true when WS (re)connects — PTY not yet spawned
 
 // ── Input buffer: queue messages when WS not OPEN, prevent silent drops ──
 // Capped at MAX_PENDING to prevent unbounded memory on long disconnects.
-const MAX_PENDING = 200;  // matches server INPUT_QUEUE_MAX
+const MAX_PENDING = 200; // matches server INPUT_QUEUE_MAX
 let _pendingMessages = [];
-let _inputSeq = 0;  // monotonic counter for input messages
+let _inputSeq = 0; // monotonic counter for input messages
 
 // ── WebSocket with auto-reconnect ────────────────────────────────────
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -148,21 +165,29 @@ let ws = null;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 let pingTimer = null;
-const PING_INTERVAL_MS = 25_000;  // Keepalive — mobile browsers drop idle WS
+const PING_INTERVAL_MS = 25_000; // Keepalive — mobile browsers drop idle WS
 const MAX_RECONNECT_MS = 30_000;
 
-function wsUrl() { return `${protocol}//${window.location.host}`; }
+function wsUrl() {
+  return `${protocol}//${window.location.host}`;
+}
 
 // ── Device auth (pairing + handshake) ────────────────────────────────
-let _device = null;       // { publicKeyB64, privateKey } — loaded on init
-let _authed = false;      // true once the WS handshake verifies
-let _clientNonce = null;  // per-connection nonce the server signs over
-let _pairing = false;     // suppress reconnect while the pairing flow runs
+let _device = null; // { publicKeyB64, privateKey } — loaded on init
+let _authed = false; // true once the WS handshake verifies
+let _clientNonce = null; // per-connection nonce the server signs over
+let _pairing = false; // suppress reconnect while the pairing flow runs
 let _identityBlocked = false; // stop reconnect loop after an identity mismatch
-let _pendingFp = null;    // live server fingerprint from the last challenge (for Re-pair)
+let _pendingFp = null; // live server fingerprint from the last challenge (for Re-pair)
 
-function showOverlay(id) { const el = document.getElementById(id); if (el) el.classList.add('open'); }
-function hideOverlay(id) { const el = document.getElementById(id); if (el) el.classList.remove('open'); }
+function showOverlay(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('open');
+}
+function hideOverlay(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('open');
+}
 
 function showPairingOverlay(seq, fp) {
   const el = document.getElementById('pairing-seq');
@@ -173,7 +198,7 @@ function showPairingOverlay(seq, fp) {
 }
 
 function showIdentityOverlay(msg) {
-  _identityBlocked = true;  // dead-end: don't auto-reconnect into the mismatch
+  _identityBlocked = true; // dead-end: don't auto-reconnect into the mismatch
   const el = document.getElementById('identity-msg');
   if (el && msg) el.textContent = msg;
   const fpel = document.getElementById('identity-fp');
@@ -185,21 +210,36 @@ function showIdentityOverlay(msg) {
 (() => {
   const disc = document.getElementById('identity-disconnect');
   const repair = document.getElementById('identity-repair');
-  if (disc) disc.addEventListener('click', () => { _pendingFp = null; if (ws) ws.close(); hideOverlay('identity-overlay'); });
-  if (repair) repair.addEventListener('click', async () => {
-    if (!_pendingFp) return;  // overlay is only shown on a key mismatch, which always sets _pendingFp
-    // "Re-pair" = accept the current server key (SSH "accept new host key").
-    // Force the fingerprint in front of the user — a blind one-click accept
-    // is exactly the MITM weakness SSH's known_hosts prompt guards against.
-    if (!window.confirm('Accept new server key ' + _pendingFp + '?\nOnly if it matches the fingerprint shown on the host screen.')) return;
-    await window.AirPromptAuth.persistFingerprint(_pendingFp);
-    // Strip the stale #fp= from the URL, else it disagrees with the accepted key.
-    try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (_) {}
-    _pendingFp = null;
-    _identityBlocked = false;
-    hideOverlay('identity-overlay');
-    connect();  // reconnect — the handshake now pins + verifies against the accepted key
-  });
+  if (disc)
+    disc.addEventListener('click', () => {
+      _pendingFp = null;
+      if (ws) ws.close();
+      hideOverlay('identity-overlay');
+    });
+  if (repair)
+    repair.addEventListener('click', async () => {
+      if (!_pendingFp) return; // overlay is only shown on a key mismatch, which always sets _pendingFp
+      // "Re-pair" = accept the current server key (SSH "accept new host key").
+      // Force the fingerprint in front of the user — a blind one-click accept
+      // is exactly the MITM weakness SSH's known_hosts prompt guards against.
+      if (
+        !window.confirm(
+          'Accept new server key ' +
+            _pendingFp +
+            '?\nOnly if it matches the fingerprint shown on the host screen.'
+        )
+      )
+        return;
+      await window.AirPromptAuth.persistFingerprint(_pendingFp);
+      // Strip the stale #fp= from the URL, else it disagrees with the accepted key.
+      try {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      } catch (_) {}
+      _pendingFp = null;
+      _identityBlocked = false;
+      hideOverlay('identity-overlay');
+      connect(); // reconnect — the handshake now pins + verifies against the accepted key
+    });
 })();
 
 // ── Pairing notices (webUI) ───────────────────────────────────────────
@@ -214,43 +254,54 @@ function showPairNotice(id, seq, name) {
   el.textContent = `Device "${name}" (seq ${seq}) wants to pair — airprompt auth allow ${seq}`;
   // notify.js owns the lazily-created container; reuse it so the toast renders
   // even before the first notification has ever arrived.
-  const container = (typeof getNotifyContainer === 'function' ? getNotifyContainer() : null)
-    || document.getElementById('notify-container');
+  const container =
+    (typeof getNotifyContainer === 'function' ? getNotifyContainer() : null) ||
+    document.getElementById('notify-container');
   if (container) container.appendChild(el);
   _pairNotices.set(id, el);
 }
 
 function dismissPairNotice(id) {
   const el = _pairNotices.get(id);
-  if (el) { if (el.parentNode) el.remove(); _pairNotices.delete(id); }
+  if (el) {
+    if (el.parentNode) el.remove();
+    _pairNotices.delete(id);
+  }
 }
 
 // Runs once the WS handshake completes — the old ws.onopen body.
 function onAuthed() {
   _authed = true;
-  _needPtySpawn = true;  // new connection — PTY must be re-spawned
+  _needPtySpawn = true; // new connection — PTY must be re-spawned
   scheduleResize();
   _flushPending();
   pingTimer = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
+      try {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      } catch (_) {}
     }
   }, PING_INTERVAL_MS);
 }
 
 // Pair this device: POST /api/pair, show "waiting", poll until the host allows.
 async function doPairing() {
-  if (_pairing) return;  // already pairing — avoid duplicate /api/pair POSTs
+  if (_pairing) return; // already pairing — avoid duplicate /api/pair POSTs
   _pairing = true;
   try {
     const res = await window.AirPromptAuth.pair(_device.publicKeyB64);
-    if (res.paired) { _pairing = false; connect(); return; }  // already whitelisted
+    if (res.paired) {
+      _pairing = false;
+      connect();
+      return;
+    } // already whitelisted
     const fp = await window.AirPromptAuth.fingerprintOf(_device.publicKeyB64);
     showPairingOverlay(res.seq, fp);
     const status = await window.AirPromptAuth.waitForApproval(res.requestId);
     hideOverlay('pairing-overlay');
     _pairing = false;
-    if (status === 'allowed') connect();  // now whitelisted — retry handshake
+    if (status === 'allowed')
+      connect(); // now whitelisted — retry handshake
     else term.write('\r\n\x1b[31m[AirPrompt: pairing denied or expired]\x1b[0m\r\n');
   } catch (_) {
     hideOverlay('pairing-overlay');
@@ -263,7 +314,12 @@ function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
   // Detach handlers from the old socket so its late onclose can't clobber the
   // new connection's state (the handlers read the global `ws`).
-  if (ws) { ws.onopen = null; ws.onmessage = null; ws.onclose = null; ws.onerror = null; }
+  if (ws) {
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onclose = null;
+    ws.onerror = null;
+  }
   ws = new WebSocket(wsUrl());
   log('info', 'ws connecting', { url: wsUrl() });
 
@@ -282,27 +338,40 @@ function connect() {
     let nonceBin = '';
     for (const b of nonceBytes) nonceBin += String.fromCharCode(b);
     _clientNonce = btoa(nonceBin);
-    ws.send(JSON.stringify({ type: 'hello', publicKey: _device.publicKeyB64, nonce: _clientNonce }));
+    ws.send(
+      JSON.stringify({ type: 'hello', publicKey: _device.publicKeyB64, nonce: _clientNonce })
+    );
   };
 
   ws.onmessage = wsMessageHandler;
 
   ws.onclose = () => {
-    _authed = false;  // reset for the next handshake
+    _authed = false; // reset for the next handshake
     log('warn', 'ws disconnected');
-    hideLoadSpinner();  // spinner blocks banner at z-index 500 — must hide
+    hideLoadSpinner(); // spinner blocks banner at z-index 500 — must hide
     term.write('\r\n\x1b[31m[AirPrompt: disconnected]\x1b[0m\r\n');
     // Stop ping timer
-    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+    if (pingTimer) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
     // Overlay banner — stays until clicked or reconnected
     if (!window._airpromptDiscBanner) {
       const banner = document.createElement('div');
       banner.textContent = tr('disconnected');
       Object.assign(banner.style, {
-        position: 'fixed', top: '0', left: '0', right: '0',
-        background: '#dc2626', color: '#fff', textAlign: 'center',
-        padding: '14px 8px', fontSize: '16px', fontWeight: '700',
-        zIndex: '600', cursor: 'pointer',
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        right: '0',
+        background: '#dc2626',
+        color: '#fff',
+        textAlign: 'center',
+        padding: '14px 8px',
+        fontSize: '16px',
+        fontWeight: '700',
+        zIndex: '600',
+        cursor: 'pointer',
       });
       banner.addEventListener('click', () => {
         if (banner.parentNode) banner.remove();
@@ -311,10 +380,12 @@ function connect() {
       document.body.appendChild(banner);
       window._airpromptDiscBanner = banner;
     }
-    if (!_pairing && !_identityBlocked) scheduleReconnect();  // pairing/identity drive their own flow
+    if (!_pairing && !_identityBlocked) scheduleReconnect(); // pairing/identity drive their own flow
   };
 
-  ws.onerror = () => { /* onclose fires next; reconnect handled there */ };
+  ws.onerror = () => {
+    /* onclose fires next; reconnect handled there */
+  };
 }
 
 function scheduleReconnect() {
@@ -333,7 +404,9 @@ function scheduleReconnect() {
   // WebCrypto (crypto.subtle) is only available in secure contexts — HTTPS or
   // localhost. Over plain HTTP to a LAN IP, pairing simply cannot work.
   if (!window.isSecureContext) {
-    term.write('\r\n\x1b[31m[AirPrompt: device pairing requires HTTPS — crypto.subtle is unavailable over plain HTTP]\x1b[0m\r\n');
+    term.write(
+      '\r\n\x1b[31m[AirPrompt: device pairing requires HTTPS — crypto.subtle is unavailable over plain HTTP]\x1b[0m\r\n'
+    );
     return;
   }
   try {
@@ -351,7 +424,8 @@ function send(msg) {
     msg.seq = ++_inputSeq;
     // Cap input at 64KiB (matches the server's own guard) so a huge paste can't
     // exceed the 1MiB WS maxPayload and drop the connection.
-    if (typeof msg.data === 'string' && msg.data.length > 65536) msg.data = msg.data.slice(0, 65536);
+    if (typeof msg.data === 'string' && msg.data.length > 65536)
+      msg.data = msg.data.slice(0, 65536);
   }
   // Always enqueue so messages survive transient WS states and reconnects.
   _pendingMessages.push(msg);
@@ -367,8 +441,12 @@ function _flushPending() {
   // remaining messages stay in queue for next flush attempt.
   let sent = 0;
   for (let i = 0; i < _pendingMessages.length; i++) {
-    try { ws.send(JSON.stringify(_pendingMessages[i])); sent++; }
-    catch (e) { break; }
+    try {
+      ws.send(JSON.stringify(_pendingMessages[i]));
+      sent++;
+    } catch (e) {
+      break;
+    }
   }
   if (sent > 0) _pendingMessages.splice(0, sent);
 }
@@ -379,10 +457,15 @@ window._airpromptSend = send;
 // ── Message handler (detached for reconnect) ─────────────────────────
 async function wsMessageHandler(event) {
   let msg;
-  try { msg = JSON.parse(event.data); } catch (e) { return; }
+  try {
+    msg = JSON.parse(event.data);
+  } catch (e) {
+    return;
+  }
 
   // Before auth, only handshake messages are meaningful.
-  if (!_authed && msg.type !== 'challenge' && msg.type !== 'auth_ok' && msg.type !== 'auth_error') return;
+  if (!_authed && msg.type !== 'challenge' && msg.type !== 'auth_ok' && msg.type !== 'auth_error')
+    return;
 
   switch (msg.type) {
     case 'challenge': {
@@ -393,19 +476,31 @@ async function wsMessageHandler(event) {
       const { stored, qr } = await window.AirPromptAuth.getPinned();
 
       if (stored && qr && stored !== qr) {
-        _pendingFp = fp;  // allow Re-pair to accept the current key
-        showIdentityOverlay('The QR fingerprint differs from the one already pinned. Server identity may have changed.');
-        ws.close(); break;
+        _pendingFp = fp; // allow Re-pair to accept the current key
+        showIdentityOverlay(
+          'The QR fingerprint differs from the one already pinned. Server identity may have changed.'
+        );
+        ws.close();
+        break;
       }
       const expected = stored || qr;
       if (expected && fp !== expected) {
-        _pendingFp = fp;  // allow Re-pair to accept the current key
-        showIdentityOverlay('The server is presenting a different key than the one pinned. If you reinstalled or rotated the server key, re-pair; otherwise, someone may be impersonating the daemon.');
-        ws.close(); break;
+        _pendingFp = fp; // allow Re-pair to accept the current key
+        showIdentityOverlay(
+          'The server is presenting a different key than the one pinned. If you reinstalled or rotated the server key, re-pair; otherwise, someone may be impersonating the daemon.'
+        );
+        ws.close();
+        break;
       }
       const ok = await window.AirPromptAuth.verifyServerSignature(
-        msg.serverPublicKey, msg.nonce + _clientNonce, msg.signature);
-      if (!ok) { ws.close(); break; }
+        msg.serverPublicKey,
+        msg.nonce + _clientNonce,
+        msg.signature
+      );
+      if (!ok) {
+        ws.close();
+        break;
+      }
       // First pin (no stored pin, with or without a QR) — trust-on-first-use,
       // persisted only after the server signature verified.
       if (!stored) await window.AirPromptAuth.persistFingerprint(fp);
@@ -418,8 +513,9 @@ async function wsMessageHandler(event) {
       break;
     case 'auth_error':
       _authed = false;
-      if (msg.reason === 'unauthorized') doPairing();  // not whitelisted — pair
-      else ws.close();  // bad_auth / timeout — reconnect + retry
+      if (msg.reason === 'unauthorized')
+        doPairing(); // not whitelisted — pair
+      else ws.close(); // bad_auth / timeout — reconnect + retry
       break;
     case 'output':
       term.write(msg.data);
@@ -436,20 +532,27 @@ async function wsMessageHandler(event) {
     case 'kill_result':
       if (!msg.ok) {
         try {
-          const btn = document.querySelector('.session-kill[data-id="' + CSS.escape(msg.sessionId) + '"]');
-          if (btn) { btn.classList.remove('killing'); btn.textContent = '🗑️'; }
+          const btn = document.querySelector(
+            '.session-kill[data-id="' + CSS.escape(msg.sessionId) + '"]'
+          );
+          if (btn) {
+            btn.classList.remove('killing');
+            btn.textContent = '🗑️';
+          }
         } catch (_) {}
       }
       break;
     case 'session_list':
       sessions = msg.sessions || [];
-      hideLoadSpinner();  // Always hide spinner — even with zero sessions
+      hideLoadSpinner(); // Always hide spinner — even with zero sessions
       updateUI();
 
       // Valid active session with PTY already spawned — nothing to do.
       // Unless server-side PTY died (attachedClients=0) — re-spawn it.
       if (activeSessionId && sessions.some((s) => s.id === activeSessionId) && !_needPtySpawn) {
-        const cur = sessions.find(function(s) { return s.id === activeSessionId; });
+        const cur = sessions.find(function (s) {
+          return s.id === activeSessionId;
+        });
         if (cur && cur.attachedClients === 0) _needPtySpawn = true;
         else break;
       }
@@ -537,8 +640,11 @@ function updateUI() {
 
 function killSession(sessionId) {
   let btn;
-  try { btn = document.querySelector('.session-kill[data-id="' + CSS.escape(sessionId) + '"]'); }
-  catch (e) { return; }  // invalid sessionId chars → bail
+  try {
+    btn = document.querySelector('.session-kill[data-id="' + CSS.escape(sessionId) + '"]');
+  } catch (e) {
+    return;
+  } // invalid sessionId chars → bail
   if (!btn) return;
   btn.classList.add('killing');
   btn.textContent = '⏳';
@@ -552,7 +658,7 @@ function selectSession(id) {
   log('info', 'switching session', { from: activeSessionId, to: id });
   activeSessionId = id;
   localStorage.setItem(SESSION_STORAGE_KEY, id);
-  _needPtySpawn = false;  // switch_session will trigger server-side PTY spawn
+  _needPtySpawn = false; // switch_session will trigger server-side PTY spawn
   send({ type: 'switch_session', sessionId: id });
   closeModal();
   updateUI();
@@ -576,23 +682,40 @@ document.getElementById('keybar-toggle').addEventListener('click', function (e) 
   // Keybar has 0.2s CSS transition. Fit + scroll after it finishes.
   const keybarEl = document.getElementById('keybar-container');
   function refit() {
-    try { fitAddon.fit(); } catch (_) {}
+    try {
+      fitAddon.fit();
+    } catch (_) {}
     // Force xterm canvas repaint — prevents "black screen" after resize
-    try { term.refresh(0, term.rows - 1); } catch (_) {}
+    try {
+      term.refresh(0, term.rows - 1);
+    } catch (_) {}
     const vp = document.querySelector('#terminal-container .xterm-viewport');
-    if (vp) { vp.scrollTop = vp.scrollHeight; }
+    if (vp) {
+      vp.scrollTop = vp.scrollHeight;
+    }
     // Restore focus so native keyboard stays open on mobile.
     // fitAddon.fit() can blur xterm's hidden textarea, dismissing the
     // virtual keyboard. On mobile, focus the invisible input instead
     // of xterm's readonly textarea.
     const mi = document.getElementById('mobile-input');
-    if (mi && mi.classList.contains('visible')) { try { mi.focus(); } catch (_) {} }
-    else { try { term.focus(); } catch (_) {} }
+    if (mi && mi.classList.contains('visible')) {
+      try {
+        mi.focus();
+      } catch (_) {}
+    } else {
+      try {
+        term.focus();
+      } catch (_) {}
+    }
   }
   if (keybarEl) {
-    keybarEl.addEventListener('transitionend', function () {
-      refit();
-    }, { once: true });
+    keybarEl.addEventListener(
+      'transitionend',
+      function () {
+        refit();
+      },
+      { once: true }
+    );
   }
   // Fallback: also fit after next paint cycle in case transitionend
   // doesn't fire (e.g. prefers-reduced-motion disables transitions)
@@ -608,17 +731,17 @@ sessionModal.addEventListener('click', (e) => {
 // not when tapping Dictate/Refresh buttons inside it.
 // CSS :active propagates to ancestors — impossible to stop with JS.
 // We drive it manually instead.
-sessionBar.addEventListener('pointerdown', function(e) {
+sessionBar.addEventListener('pointerdown', function (e) {
   if (e.target === sessionBar || sessionBar.contains(e.target)) {
     // Only show if the touch landed on the bar label/spacer, not a button
     if (e.target.closest('button')) return;
     sessionBar.classList.add('bar-active');
   }
 });
-document.addEventListener('pointerup', function() {
+document.addEventListener('pointerup', function () {
   sessionBar.classList.remove('bar-active');
 });
-sessionBar.addEventListener('pointerleave', function() {
+sessionBar.addEventListener('pointerleave', function () {
   sessionBar.classList.remove('bar-active');
 });
 
@@ -645,7 +768,7 @@ term.onData((data) => {
     if (data === 'c') {
       // Copy: grab xterm.js selection, send to server → tmux load-buffer
       const sel = term.getSelection();
-      if (sel) send({ type: 'copy_buffer', data: sel.slice(0, 128 * 1024) });  // cap: worst-case JSON/UTF-8 expansion (~6x) stays < 1MiB maxPayload
+      if (sel) send({ type: 'copy_buffer', data: sel.slice(0, 128 * 1024) }); // cap: worst-case JSON/UTF-8 expansion (~6x) stays < 1MiB maxPayload
     } else if (data === 'v') {
       // Paste: server reads tmux save-buffer → writes to PTY
       send({ type: 'paste_buffer' });
@@ -686,14 +809,17 @@ if (window.visualViewport) {
       const barH = sessionBar ? sessionBar.offsetHeight : 44;
       const overlayH = Dictation.getOverlayHeight();
       const keybarEl = document.getElementById('keybar-container');
-      const keybarH = (keybarEl && !keybarEl.classList.contains('keybar-hidden')) ? keybarEl.offsetHeight : 0;
+      const keybarH =
+        keybarEl && !keybarEl.classList.contains('keybar-hidden') ? keybarEl.offsetHeight : 0;
 
       // Only react to significant height drops (keyboard open)
       if (kbHeight > 80) {
         const termH = vh - window.visualViewport.offsetTop - barH - overlayH - keybarH;
         termContainer.style.height = termH + 'px';
         termContainer.style.flex = 'none';
-        try { fitAddon.fit(); } catch (_) {}
+        try {
+          fitAddon.fit();
+        } catch (_) {}
         if (viewport && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 100) {
           viewport.scrollTop = viewport.scrollHeight;
         }
@@ -701,7 +827,9 @@ if (window.visualViewport) {
         // Keyboard dismissed: restore natural layout
         termContainer.style.height = '';
         termContainer.style.flex = '';
-        try { fitAddon.fit(); } catch (_) {}
+        try {
+          fitAddon.fit();
+        } catch (_) {}
       }
       _vvhPrev = window.visualViewport.height;
     });
@@ -709,9 +837,16 @@ if (window.visualViewport) {
 }
 
 // ── Dictation — delegated to dictation.js ─────────────────────────────
-Dictation.init({ send: function(m) { send(m); }, log: log, blurInput: function() {
-  if (window._airpromptBlurMobileInput) window._airpromptBlurMobileInput();
-}, sessionLabel: sessionLabel });
+Dictation.init({
+  send: function (m) {
+    send(m);
+  },
+  log: log,
+  blurInput: function () {
+    if (window._airpromptBlurMobileInput) window._airpromptBlurMobileInput();
+  },
+  sessionLabel: sessionLabel,
+});
 
 // ── Mobile input bar ──────────────────────────────────────────────────
 // On touch devices, a real <input> captures keyboard input instead of
@@ -727,16 +862,20 @@ Dictation.init({ send: function(m) { send(m); }, log: log, blurInput: function()
 (function () {
   const inputEl = document.getElementById('mobile-input');
   let isMobile = false;
-  try { isMobile = window.matchMedia('(pointer: coarse)').matches; } catch (_) {}
+  try {
+    isMobile = window.matchMedia('(pointer: coarse)').matches;
+  } catch (_) {}
 
   if (!isMobile || !inputEl) return;
 
   inputEl.classList.add('visible');
   // Expose for dictation: blur to dismiss native keyboard before voice input.
-  window._airpromptBlurMobileInput = function () { inputEl.blur(); };
-  let _prev = '';                // tracks input value as code-point array
-  let _enterTimer = null;        // debounce timer — resolves single vs double tap
-  const DOUBLE_ENTER_MS = 400;   // max gap between Enter taps to submit
+  window._airpromptBlurMobileInput = function () {
+    inputEl.blur();
+  };
+  let _prev = ''; // tracks input value as code-point array
+  let _enterTimer = null; // debounce timer — resolves single vs double tap
+  const DOUBLE_ENTER_MS = 400; // max gap between Enter taps to submit
 
   // Prevent xterm.js textarea from stealing focus — we manage input
   // ourselves. Hide it visually (still in DOM for xterm internals).
@@ -815,7 +954,6 @@ Dictation.init({ send: function(m) { send(m); }, log: log, blurInput: function()
     }
   });
 
-
   // ── Helpers: code-point-aware string ops (emoji-safe) ─────────────
 
   // Route mobile input through keybar modifier pipeline so one-shot
@@ -827,7 +965,7 @@ Dictation.init({ send: function(m) { send(m); }, log: log, blurInput: function()
     if (kb && kb.isCopyPasteCombo && kb.isCopyPasteCombo(data)) {
       if (data === 'c') {
         const sel = term.getSelection();
-        if (sel) send({ type: 'copy_buffer', data: sel.slice(0, 128 * 1024) });  // cap: worst-case JSON/UTF-8 expansion (~6x) stays < 1MiB maxPayload
+        if (sel) send({ type: 'copy_buffer', data: sel.slice(0, 128 * 1024) }); // cap: worst-case JSON/UTF-8 expansion (~6x) stays < 1MiB maxPayload
       } else if (data === 'v') {
         send({ type: 'paste_buffer' });
       }
@@ -843,9 +981,15 @@ Dictation.init({ send: function(m) { send(m); }, log: log, blurInput: function()
     }
   }
 
-  function _toArray(s) { return Array.from(s); }
-  function _join(a)   { return a.join(''); }
-  function _prevArr() { return _toArray(_prev); }
+  function _toArray(s) {
+    return Array.from(s);
+  }
+  function _join(a) {
+    return a.join('');
+  }
+  function _prevArr() {
+    return _toArray(_prev);
+  }
 
   inputEl.addEventListener('input', function () {
     // Any real input cancels the pending Enter \n timer — user is editing.
@@ -858,9 +1002,9 @@ Dictation.init({ send: function(m) { send(m); }, log: log, blurInput: function()
     if (cur === _prev) return;
 
     const prevArr = _prevArr();
-    const curArr  = _toArray(cur);
+    const curArr = _toArray(cur);
     const prevLen = prevArr.length;
-    const curLen  = curArr.length;
+    const curLen = curArr.length;
 
     if (curLen > prevLen) {
       // Characters added — route through keybar modifier pipeline

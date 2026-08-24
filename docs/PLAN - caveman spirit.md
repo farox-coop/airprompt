@@ -19,6 +19,7 @@ install.ps1 ──→ bin/install.js (unified Node installer)
 ```
 
 Key design decisions that make this work:
+
 1. **Shell shims are thin** — only check Node version, detect "local clone vs curl-pipe", delegate to Node.
 2. **Single Node installer** (`bin/install.js`) — all logic in one place. Pure stdlib, zero npm deps. Works on macOS, Linux, Windows.
 3. **Provider matrix** — one data structure defines all supported agents, their detection rules, and install mechanisms.
@@ -39,6 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/diegomanuel/airprompt/main/install.
 ```
 
 After this single command:
+
 - Repo cloned to `~/.airprompt/` (or `npm install -g airprompt` path)
 - `npm install` run
 - Claude Code plugin installed (`claude plugin install airprompt@airprompt`)
@@ -79,30 +81,30 @@ bin/install.js (unified installer, pure stdlib)
 
 ## New Files to Create
 
-| File | Source | Purpose |
-|------|--------|---------|
-| `install.sh` | **Copied from caveman** (3 changes) | Shell shim — curl-pipe entry point |
-| `install.ps1` | **Copied from caveman** (3 changes) | PowerShell shim — Windows entry point |
-| `bin/install.js` | **Adapted from caveman** (keep structure, swap install/uninstall logic) | Unified Node installer. All logic. Pure stdlib. |
-| `bin/lib/settings.js` | **Copied verbatim from caveman** (only MANAGED_HOOK_BASENAMES changed) | JSONC-tolerant settings.json read/write/validate |
-| `.claude-plugin/plugin.json` | New (pattern from caveman's) | Claude Code plugin manifest — hooks definition |
-| `.claude-plugin/marketplace.json` | New (pattern from caveman's) | Marketplace entry so `claude plugin install` finds it |
-| `src/hooks/airprompt-activate.js` | New (replaces `bin/airprompt-register.sh` core logic) | SessionStart hook. Ensures daemon running, registers session |
-| `src/hooks/airprompt-deactivate.js` | New (replaces `bin/airprompt-unregister.sh` core logic) | Stop hook. Unregisters session from daemon |
-| `src/hooks/airprompt-statusline.sh` | **Moved** from `~/.claude/hooks/` into repo | Statusline badge |
-| `src/hooks/package.json` | New | Empty `{}` for Node module resolution |
+| File                                | Source                                                                  | Purpose                                                      |
+| ----------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `install.sh`                        | **Copied from caveman** (3 changes)                                     | Shell shim — curl-pipe entry point                           |
+| `install.ps1`                       | **Copied from caveman** (3 changes)                                     | PowerShell shim — Windows entry point                        |
+| `bin/install.js`                    | **Adapted from caveman** (keep structure, swap install/uninstall logic) | Unified Node installer. All logic. Pure stdlib.              |
+| `bin/lib/settings.js`               | **Copied verbatim from caveman** (only MANAGED_HOOK_BASENAMES changed)  | JSONC-tolerant settings.json read/write/validate             |
+| `.claude-plugin/plugin.json`        | New (pattern from caveman's)                                            | Claude Code plugin manifest — hooks definition               |
+| `.claude-plugin/marketplace.json`   | New (pattern from caveman's)                                            | Marketplace entry so `claude plugin install` finds it        |
+| `src/hooks/airprompt-activate.js`   | New (replaces `bin/airprompt-register.sh` core logic)                   | SessionStart hook. Ensures daemon running, registers session |
+| `src/hooks/airprompt-deactivate.js` | New (replaces `bin/airprompt-unregister.sh` core logic)                 | Stop hook. Unregisters session from daemon                   |
+| `src/hooks/airprompt-statusline.sh` | **Moved** from `~/.claude/hooks/` into repo                             | Statusline badge                                             |
+| `src/hooks/package.json`            | New                                                                     | Empty `{}` for Node module resolution                        |
 
 ---
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `bin/airprompt-register.sh` | Refactor: extract core logic into `airprompt-activate.js`. Shell script becomes thin wrapper. |
-| `bin/airprompt-unregister.sh` | Refactor: extract core logic into `airprompt-deactivate.js`. Shell script becomes thin wrapper. |
-| `package.json` | Add `"bin": { "airprompt": "./bin/install.js" }`, add `"files": [...]` for npm publish. |
-| `.claude/skills/airprompt.md` | Update to document automatic hook behavior alongside manual `/airprompt on/off`. |
-| `.claude/commands/airprompt.md` | Same — document auto-register via hooks. |
+| File                            | Change                                                                                          |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `bin/airprompt-register.sh`     | Refactor: extract core logic into `airprompt-activate.js`. Shell script becomes thin wrapper.   |
+| `bin/airprompt-unregister.sh`   | Refactor: extract core logic into `airprompt-deactivate.js`. Shell script becomes thin wrapper. |
+| `package.json`                  | Add `"bin": { "airprompt": "./bin/install.js" }`, add `"files": [...]` for npm publish.         |
+| `.claude/skills/airprompt.md`   | Update to document automatic hook behavior alongside manual `/airprompt on/off`.                |
+| `.claude/commands/airprompt.md` | Same — document auto-register via hooks.                                                        |
 
 ---
 
@@ -110,11 +112,11 @@ bin/install.js (unified installer, pure stdlib)
 
 **Strategy**: Copy caveman's `install.sh` verbatim (54 lines, extremely well-tested across macOS/Linux/WSL/Git Bash). Only 3 changes needed:
 
-| Line | Caveman original | AirPrompt change |
-|------|-----------------|------------------|
-| `REPO="JuliusBrussee/caveman"` | Caveman repo | `REPO="diegomanuel/airprompt"` |
+| Line                              | Caveman original               | AirPrompt change                                                                                                                                                 |
+| --------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REPO="JuliusBrussee/caveman"`    | Caveman repo                   | `REPO="diegomanuel/airprompt"`                                                                                                                                   |
 | `exec npx -y "github:$REPO" "$@"` | npx delegation (zero npm deps) | `git clone --depth 1 "https://github.com/${REPO}.git" "$TMP_DIR" && exec node "$TMP_DIR/bin/install.js" "$@"` (clone then exec — airprompt has runtime npm deps) |
-| Error messages say `caveman:` | Brand prefix | `airprompt:` |
+| Error messages say `caveman:`     | Brand prefix                   | `airprompt:`                                                                                                                                                     |
 
 **Why npx doesn't work for curl-pipe path**: Caveman has zero runtime npm deps (`bin/install.js` is pure stdlib), so `npx -y github:...` works instantly. AirPrompt HAS runtime deps (`express`, `ws`, `node-pty`, `qrcode-terminal`). `npx` would download the package but NOT run `npm install` for its dependencies. So curl-pipe path must shallow-clone the repo + let `bin/install.js` handle `npm install`.
 
@@ -176,11 +178,11 @@ exec node "$TMP_DIR/bin/install.js" "$@"
 
 Same strategy as `install.sh`. Copy caveman's `install.ps1` verbatim (79 lines). Same 3 change points:
 
-| Element | Caveman original | AirPrompt change |
-|---------|-----------------|------------------|
-| `$Repo` | `"JuliusBrussee/caveman"` | `"diegomanuel/airprompt"` |
+| Element            | Caveman original                         | AirPrompt change                                                                                       |
+| ------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `$Repo`            | `"JuliusBrussee/caveman"`                | `"diegomanuel/airprompt"`                                                                              |
 | Curl-pipe fallback | `& npx -y "github:$Repo" @InstallerArgs` | `git clone --depth 1 "https://github.com/$Repo.git" $tmp; & node "$tmp/bin/install.js" @InstallerArgs` |
-| Error messages | `caveman:` prefix | `airprompt:` |
+| Error messages     | `caveman:` prefix                        | `airprompt:`                                                                                           |
 
 ---
 
@@ -189,6 +191,7 @@ Same strategy as `install.sh`. Copy caveman's `install.ps1` verbatim (79 lines).
 Reuses caveman's `bin/install.js` structure (1531 lines, battle-tested). Pure stdlib (`fs`, `path`, `os`, `child_process`, `crypto`). No npm deps.
 
 **What we keep from caveman verbatim**:
+
 - `parseArgs()` — CLI flag parsing with identical flags (`--dry-run`, `--force`, `--only`, `--list`, `--no-color`, `--non-interactive`, `--uninstall`, `-h/--help`, `--`)
 - `die()`, `makeChalk()`, `checkWslWindowsNode()`, `checkNodeVersion()` — env guards
 - `hasCmd()`, `shellEscape()`, `expandHome()`, `detectMatch()`, `safeStat()` — detection functions
@@ -198,6 +201,7 @@ Reuses caveman's `bin/install.js` structure (1531 lines, battle-tested). Pure st
 - `main()` — entry point with detection loop, per-provider dispatch, summary
 
 **What we adapt**:
+
 - `REPO` → `'diegomanuel/airprompt'`
 - `PROVIDERS` → starts with just `claude` (extensible for future agents)
 - `HOOK_FILES` → airprompt hook files
@@ -209,20 +213,20 @@ Reuses caveman's `bin/install.js` structure (1531 lines, battle-tested). Pure st
 
 ### Flags
 
-| Flag | Action |
-|------|--------|
-| `--dry-run` | Print what would happen, do nothing. |
-| `--force` | Re-install even if already installed. |
-| `--uninstall`, `-u` | Remove airprompt from this machine. |
-| `--no-hooks` | Skip hooks wiring (plugin manifest handles it). |
-| `--with-hooks` | Force hooks wiring even if plugin installed. |
-| `--only <agent>` | Install only for named agent. Repeatable. |
-| `--list` | Print supported agents and exit. |
-| `--no-color` | Disable ANSI colors. |
-| `--config-dir <path>` | Override Claude Code config dir. |
+| Flag                  | Action                                                     |
+| --------------------- | ---------------------------------------------------------- |
+| `--dry-run`           | Print what would happen, do nothing.                       |
+| `--force`             | Re-install even if already installed.                      |
+| `--uninstall`, `-u`   | Remove airprompt from this machine.                        |
+| `--no-hooks`          | Skip hooks wiring (plugin manifest handles it).            |
+| `--with-hooks`        | Force hooks wiring even if plugin installed.               |
+| `--only <agent>`      | Install only for named agent. Repeatable.                  |
+| `--list`              | Print supported agents and exit.                           |
+| `--no-color`          | Disable ANSI colors.                                       |
+| `--config-dir <path>` | Override Claude Code config dir.                           |
 | `--target-dir <path>` | Where to clone/install the repo. Default: `~/.airprompt/`. |
-| `--port <n>` | Daemon port. Default: 3210. |
-| `-h`, `--help` | Print help. |
+| `--port <n>`          | Daemon port. Default: 3210.                                |
+| `-h`, `--help`        | Print help.                                                |
 
 ### Install Steps
 
@@ -290,22 +294,23 @@ function detectMatch(spec) // parse ||-separated detection rules
 
 Caveman's `bin/lib/settings.js` (361 lines) is a standalone library with zero caveman-specific business logic. It's pure JSONC-tolerant settings I/O. We copy it verbatim with one change:
 
-| Change | Caveman | AirPrompt |
-|--------|---------|-----------|
+| Change                   | Caveman                                                                                                                 | AirPrompt                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `MANAGED_HOOK_BASENAMES` | `caveman-activate.js`, `caveman-mode-tracker.js`, `caveman-stats.js`, `caveman-statusline.sh`, `caveman-statusline.ps1` | `airprompt-activate.js`, `airprompt-deactivate.js`, `airprompt-statusline.sh` |
 
 Same API surface:
 
-| Function | Purpose |
-|----------|---------|
-| `readSettings(path)` | JSONC-tolerant read. Returns object, `{}`, or `null` on hard failure. |
-| `writeSettings(path, obj)` | Atomic write (tmp + rename, mode 0600). |
-| `validateHookFields(settings)` | Drop malformed hook entries so Zod doesn't discard entire file. |
-| `addCommandHook(settings, event, opts)` | Idempotent push of `{hooks: [{type:'command', command:'...'}]}`. |
-| `removeManagedHooks(settings, basenames)` | Strip entries whose command references our managed scripts. |
-| `pruneOrphanedHooks(settings, configDir)` | Remove entries pointing at scripts that no longer exist on disk. |
+| Function                                  | Purpose                                                               |
+| ----------------------------------------- | --------------------------------------------------------------------- |
+| `readSettings(path)`                      | JSONC-tolerant read. Returns object, `{}`, or `null` on hard failure. |
+| `writeSettings(path, obj)`                | Atomic write (tmp + rename, mode 0600).                               |
+| `validateHookFields(settings)`            | Drop malformed hook entries so Zod doesn't discard entire file.       |
+| `addCommandHook(settings, event, opts)`   | Idempotent push of `{hooks: [{type:'command', command:'...'}]}`.      |
+| `removeManagedHooks(settings, basenames)` | Strip entries whose command references our managed scripts.           |
+| `pruneOrphanedHooks(settings, configDir)` | Remove entries pointing at scripts that no longer exist on disk.      |
 
 Managed hook basenames for airprompt:
+
 - `airprompt-activate.js`
 - `airprompt-deactivate.js`
 - `airprompt-statusline.sh`
@@ -322,22 +327,30 @@ Managed hook basenames for airprompt:
   "description": "Remote control and voice dictation for Claude Code via web terminal",
   "author": { "name": "Farox", "url": "https://github.com/diegomanuel" },
   "hooks": {
-    "SessionStart": [{
-      "hooks": [{
-        "type": "command",
-        "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/airprompt-activate.js\"",
-        "timeout": 10,
-        "statusMessage": "Registering AirPrompt session..."
-      }]
-    }],
-    "Stop": [{
-      "hooks": [{
-        "type": "command",
-        "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/airprompt-deactivate.js\"",
-        "timeout": 5,
-        "statusMessage": "Unregistering AirPrompt session..."
-      }]
-    }]
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/airprompt-activate.js\"",
+            "timeout": 10,
+            "statusMessage": "Registering AirPrompt session..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/airprompt-deactivate.js\"",
+            "timeout": 5,
+            "statusMessage": "Unregistering AirPrompt session..."
+          }
+        ]
+      }
+    ]
   }
 }
 ```
@@ -350,12 +363,14 @@ Managed hook basenames for airprompt:
   "name": "airprompt",
   "description": "Remote control and voice dictation for Claude Code. Control sessions from your phone.",
   "owner": { "name": "Farox", "url": "https://github.com/diegomanuel" },
-  "plugins": [{
-    "name": "airprompt",
-    "description": "Watch and control Claude Code sessions from mobile with voice dictation",
-    "source": "./",
-    "category": "productivity"
-  }]
+  "plugins": [
+    {
+      "name": "airprompt",
+      "description": "Watch and control Claude Code sessions from mobile with voice dictation",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
 }
 ```
 
@@ -402,22 +417,30 @@ After install, `~/.claude/settings.json` gains:
 ```json
 {
   "hooks": {
-    "SessionStart": [{
-      "hooks": [{
-        "type": "command",
-        "command": "node \"${HOME}/.airprompt/src/hooks/airprompt-activate.js\"",
-        "timeout": 10,
-        "statusMessage": "Registering AirPrompt session..."
-      }]
-    }],
-    "Stop": [{
-      "hooks": [{
-        "type": "command",
-        "command": "node \"${HOME}/.airprompt/src/hooks/airprompt-deactivate.js\"",
-        "timeout": 5,
-        "statusMessage": "Unregistering AirPrompt session..."
-      }]
-    }]
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${HOME}/.airprompt/src/hooks/airprompt-activate.js\"",
+            "timeout": 10,
+            "statusMessage": "Registering AirPrompt session..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${HOME}/.airprompt/src/hooks/airprompt-deactivate.js\"",
+            "timeout": 5,
+            "statusMessage": "Unregistering AirPrompt session..."
+          }
+        ]
+      }
+    ]
   },
   "statusLine": {
     "type": "command",
@@ -433,6 +456,7 @@ Plugin manifest also wires `SessionStart` + `Stop`. When plugin install succeeds
 ## User-Facing Changes
 
 ### Before (current)
+
 ```
 # Manual multi-step install
 git clone <repo>
@@ -446,6 +470,7 @@ make setup
 ```
 
 ### After
+
 ```
 # One command
 curl -fsSL https://raw.githubusercontent.com/diegomanuel/airprompt/main/install.sh | bash
@@ -462,6 +487,7 @@ npm install -g airprompt && airprompt install
 ```
 
 ### Session Behavior Change
+
 - **Before**: User must type `/airprompt on` in each session to register.
 - **After**: SessionStart hook auto-registers. `/airprompt on` / `/airprompt off` still work as manual toggle for turning it off mid-session.
 
@@ -483,16 +509,19 @@ npm install -g airprompt && airprompt install
 ## Implementation Steps (Ordered)
 
 ### Step 1: Copy `install.sh` + `install.ps1` from caveman
+
 - Copy `../caveman/install.sh` → `install.sh`
 - Copy `../caveman/install.ps1` → `install.ps1`
 - Change 3 things in each: `REPO`/`$Repo`, curl-pipe fallback (npx → git clone + exec), error prefix (`caveman:` → `airprompt:`)
 
 ### Step 2: Copy `bin/lib/settings.js` from caveman
+
 - Copy `../caveman/bin/lib/settings.js` → `bin/lib/settings.js`
 - Change `MANAGED_HOOK_BASENAMES` Set to airprompt's hook filenames
 - Everything else stays verbatim — JSONC parser, atomic writes, validateHookFields, pruneOrphanedManagedHooks. All already tested.
 
 ### Step 3: Create `bin/install.js` (adapt caveman's structure)
+
 - Start from caveman's `bin/install.js` skeleton (parseArgs, helpers, detection, provider loop, main)
 - Replace `installClaude()` with airprompt version: clone/npm-install/plugin/hooks/statusline
 - Replace `uninstall()` with airprompt version: hooks/settings/plugin/daemon cleanup
@@ -502,38 +531,46 @@ npm install -g airprompt && airprompt install
 - Tests: `test/unit/installer.test.js` for arg parsing, detection, provider matrix
 
 ### Step 4: Create Hook Scripts
+
 - `src/hooks/airprompt-activate.js` — SessionStart auto-register. Pure Node.
 - `src/hooks/airprompt-deactivate.js` — Stop auto-unregister. Pure Node.
 - `src/hooks/airprompt-statusline.sh` — statusline badge (move from `~/.claude/hooks/` to repo).
 - `src/hooks/package.json` — `{}`
 
 ### Step 5: Refactor Shell Scripts
+
 - `bin/airprompt-register.sh` → thin wrapper around `airprompt-activate.js` core logic.
 - `bin/airprompt-unregister.sh` → thin wrapper around `airprompt-deactivate.js` core logic.
 - Both keep current CLI for backward compat (`/airprompt on` calls register.sh).
 
 ### Step 6: Create Claude Code Plugin Manifests
+
 - `.claude-plugin/plugin.json` — SessionStart + Stop hooks with `${CLAUDE_PLUGIN_ROOT}` paths
 - `.claude-plugin/marketplace.json` — plugin listing pointing to `diegomanuel/airprompt`
 
 ### Step 7: Update `package.json`
+
 - Add `"bin": { "airprompt": "./bin/install.js" }`.
 - Add `"files": [...]` for future npm publish.
 
 ### Step 8: Update Skill + Command Files
+
 - Document auto-register behavior (SessionStart hook).
 - Document new install path (one command).
 - Keep `/airprompt on|off|status` commands.
 
 ### Step 9: Update `Makefile`
+
 - Add `install` target: `node bin/install.js`.
 - Add `uninstall` target: `node bin/install.js --uninstall`.
 
 ### Step 10: Add Installer Tests
+
 - `test/unit/installer.test.js`: settings.js functions, arg parsing, detection
 - `test/integration/install.sh`: full `install.sh --dry-run` then uninstall dry-run
 
 ### Step 11: Update `README.md`
+
 - One-command install at top.
 - Document all install paths (curl-pipe, local clone, plugin).
 - Document auto-register behavior.
@@ -544,12 +581,12 @@ npm install -g airprompt && airprompt install
 
 Provider matrix already designed for it. After Claude Code is solid:
 
-| Agent | Install Mechanism | Detection |
-|-------|-------------------|-----------|
-| Codex CLI | `npx skills add` | `command:codex` |
-| Cursor | `npx skills add` | `command:cursor` |
-| Windsurf | `npx skills add` | `command:windsurf` |
-| Gemini CLI | `gemini extensions install` | `command:gemini` |
+| Agent      | Install Mechanism           | Detection          |
+| ---------- | --------------------------- | ------------------ |
+| Codex CLI  | `npx skills add`            | `command:codex`    |
+| Cursor     | `npx skills add`            | `command:cursor`   |
+| Windsurf   | `npx skills add`            | `command:windsurf` |
+| Gemini CLI | `gemini extensions install` | `command:gemini`   |
 
 Each would get its own skill/command files adapted to that agent's format. The installer's provider loop already handles this — caveman's pattern scales to 30+ agents.
 

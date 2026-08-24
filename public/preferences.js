@@ -2,7 +2,7 @@
 // Owns the gear button + modal. Macro data comes from DictationMacros and
 // i18n labels from Dictation.
 
-(function() {
+(function () {
   'use strict';
 
   const Dictation = window.Dictation;
@@ -16,7 +16,9 @@
   const macroList = document.getElementById('pref-macro-list');
   const closeBtn = document.getElementById('pref-close');
 
-  function tr(key) { return Dictation.tr(key); }
+  function tr(key) {
+    return Dictation.tr(key);
+  }
 
   // One macro row: [checkbox] trigger text … value.
   function buildRow(item) {

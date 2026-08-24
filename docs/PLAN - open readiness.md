@@ -2,7 +2,7 @@
 
 > Derived from the audit in [REPORT - open readiness.md](<REPORT - open readiness.md>). Read the report for the full findings (blockers, should-fix, provider matrix); this plan sequences those fixes into stages.
 
-> **Status: Phase 1 complete, Phase 2 in progress** — Stages 1.1–2.3 done, all blockers resolved. Stage 2.4 (linter/formatter) and Phase 3 remain.
+> **Status: Phases 1 and 2 complete** — all 5 blockers resolved, contributor-ready (governance + test/CI integrity + linter/formatter). Phase 3 (wider platform) remains.
 
 ## How to use this plan
 
@@ -162,7 +162,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] `engines.node >=18`
 - [x] Node version matrix (18/20/24)
 - [x] `agnostic-check` into `test-all`/CI
-- [ ] real linter + formatter + one-time format pass
+- [x] real linter + formatter + one-time format pass
 
 #### Notes / Out of Scope
 
@@ -230,20 +230,20 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 ## Traceability — stage → report
 
-| Stage | Report blockers / findings |
-|---|---|
-| 1.1 | Blockers #1 (zero auth → LAN RCE) + #2 (Node `fs.rmSync` unguarded) |
-| 1.2 | Blockers #3 (no LICENSE) + #4 (personal identity) |
-| 1.3 | Onboarding/docs section + statusline badge missing |
-| 1.4 | Blocker #5 (only `claude` provider) |
-| 2.1 | Contributor/PR readiness section |
-| 2.2 | Test/CI integrity section (silent-skip tests + engines) |
-| 2.3 | Test/CI integrity section (agnostic-check gate) |
-| 2.4 | Polish/later section (lint is syntax-only) |
-| 3.1 | macOS breaks section |
-| 3.2 | Portability/install correctness section |
-| 3.3 | Provider readiness matrix (Codex/Cursor/Windsurf) |
-| 3.4 | Polish/later section |
+| Stage | Report blockers / findings                                          |
+| ----- | ------------------------------------------------------------------- |
+| 1.1   | Blockers #1 (zero auth → LAN RCE) + #2 (Node `fs.rmSync` unguarded) |
+| 1.2   | Blockers #3 (no LICENSE) + #4 (personal identity)                   |
+| 1.3   | Onboarding/docs section + statusline badge missing                  |
+| 1.4   | Blocker #5 (only `claude` provider)                                 |
+| 2.1   | Contributor/PR readiness section                                    |
+| 2.2   | Test/CI integrity section (silent-skip tests + engines)             |
+| 2.3   | Test/CI integrity section (agnostic-check gate)                     |
+| 2.4   | Polish/later section (lint is syntax-only)                          |
+| 3.1   | macOS breaks section                                                |
+| 3.2   | Portability/install correctness section                             |
+| 3.3   | Provider readiness matrix (Codex/Cursor/Windsurf)                   |
+| 3.4   | Polish/later section                                                |
 
 ## Final checklist (one item per stage)
 
@@ -254,7 +254,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] 2.1 Contributing + repo governance
 - [x] 2.2 Test/CI integrity (silent-skip tests + engines)
 - [x] 2.3 Test/CI integrity (agnostic-check gate)
-- [ ] 2.4 Lint/format normalization
+- [x] 2.4 Lint/format normalization
 - [ ] 3.1 macOS portability
 - [ ] 3.2 Install robustness
 - [ ] 3.3 Ship remaining providers

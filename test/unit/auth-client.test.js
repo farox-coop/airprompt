@@ -53,5 +53,8 @@ test('client rejects a signature from the wrong key', async () => {
   const server = nodeKeyPair();
   const attacker = nodeKeyPair();
   const sig = serverAuth.signNonce('nonce', attacker.privateKey);
-  assert.strictEqual(await clientAuth.verifyServerSignature(server.publicKeyB64, 'nonce', sig), false);
+  assert.strictEqual(
+    await clientAuth.verifyServerSignature(server.publicKeyB64, 'nonce', sig),
+    false
+  );
 });

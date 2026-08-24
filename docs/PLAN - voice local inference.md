@@ -7,7 +7,7 @@ AirPrompt's dictation currently uses the browser's **Web Speech API** (`SpeechRe
 - **Pause/utterance segmentation** — the engine decides where fragments start and end, and it is unpredictable across Chrome desktop, Chrome Android, and iOS Safari. This directly hurts our dictation macros: a "fragment-level" macro (e.g. say `coma` standalone → `,`) only fires when the engine happens to segment it as its own utterance.
 - **Word-level timestamps** — not available. We cannot detect real silences (e.g. silence > 500 ms = pause), only whatever the engine reports as final/partial results.
 - **The audio path** — on Chrome the audio goes to a Google cloud endpoint; it never stays local.
-- **Built-in dictation commands** — the recognizer pre-converts phrases into punctuation/newlines on its own (e.g. "nuevo párrafo" → `\n\n`, "nueva línea" → `\n`), inconsistently even mid-sentence. Our macro engine has to *revert* these back to the literal words (`revertSttNewlines` in `public/dictation-macros.js`) so its own isolated-only macros decide — a workaround for behavior we can't disable.
+- **Built-in dictation commands** — the recognizer pre-converts phrases into punctuation/newlines on its own (e.g. "nuevo párrafo" → `\n\n`, "nueva línea" → `\n`), inconsistently even mid-sentence. Our macro engine has to _revert_ these back to the literal words (`revertSttNewlines` in `public/dictation-macros.js`) so its own isolated-only macros decide — a workaround for behavior we can't disable.
 
 This document explores replacing the Web Speech API with **local inference** so AirPrompt owns the audio, the segmentation, and the timestamps. It is research/planning only — no implementation is scheduled.
 
@@ -53,17 +53,17 @@ Because we control VAD, segmentation becomes deterministic (tunable threshold) i
 
 ## Quick comparison
 
-| | Web Speech API (today) | Vosk | whisper.cpp | faster-whisper | sherpa-onnx / ox-whisper |
-|---|---|---|---|---|---|
-| Local/offline | No (Chrome → cloud) | Yes | Yes | Yes | Yes |
-| Streaming | Yes (black box) | Yes (native) | Via stream example | Via wrappers | Yes |
-| Word timestamps | No | Yes | segment (word via whisperX) | via whisperX | Yes |
-| Pause control | No | Yes (own VAD) | Basic VAD (`-vth`) | via Silero VAD | Silero VAD built-in |
-| Accuracy | Good | Average | High | High | High |
-| Punctuation | Auto | No | Yes | Yes | Yes |
-| CPU latency | n/a | Low | High (small 2–5 s) | Lower (int8) | Low-mid |
-| Languages | ~all | ~20 | 99 | 99 | multi |
-| License | n/a | Apache 2.0 | MIT | MIT | varies |
+|                 | Web Speech API (today) | Vosk          | whisper.cpp                 | faster-whisper | sherpa-onnx / ox-whisper |
+| --------------- | ---------------------- | ------------- | --------------------------- | -------------- | ------------------------ |
+| Local/offline   | No (Chrome → cloud)    | Yes           | Yes                         | Yes            | Yes                      |
+| Streaming       | Yes (black box)        | Yes (native)  | Via stream example          | Via wrappers   | Yes                      |
+| Word timestamps | No                     | Yes           | segment (word via whisperX) | via whisperX   | Yes                      |
+| Pause control   | No                     | Yes (own VAD) | Basic VAD (`-vth`)          | via Silero VAD | Silero VAD built-in      |
+| Accuracy        | Good                   | Average       | High                        | High           | High                     |
+| Punctuation     | Auto                   | No            | Yes                         | Yes            | Yes                      |
+| CPU latency     | n/a                    | Low           | High (small 2–5 s)          | Lower (int8)   | Low-mid                  |
+| Languages       | ~all                   | ~20           | 99                          | 99             | multi                    |
+| License         | n/a                    | Apache 2.0    | MIT                         | MIT            | varies                   |
 
 ## Architecture options
 

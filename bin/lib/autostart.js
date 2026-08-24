@@ -13,7 +13,9 @@ const cmd = process.argv[2];
 const settingsPath = process.argv[3];
 
 if (!cmd || !settingsPath || (cmd !== 'on' && cmd !== 'off')) {
-  process.stderr.write('Usage: node autostart.js <on|off> <settings_path> [activate_script] <settings_lib>\n');
+  process.stderr.write(
+    'Usage: node autostart.js <on|off> <settings_path> [activate_script] <settings_lib>\n'
+  );
   process.exit(1);
 }
 
@@ -22,7 +24,9 @@ if (cmd === 'on') {
   const activateScript = process.argv[4];
   settingsLib = process.argv[5];
   if (!activateScript || !settingsLib) {
-    process.stderr.write('Usage: node autostart.js on <settings_path> <activate_script> <settings_lib>\n');
+    process.stderr.write(
+      'Usage: node autostart.js on <settings_path> <activate_script> <settings_lib>\n'
+    );
     process.exit(1);
   }
 

@@ -13,8 +13,8 @@ function langToFlag(code) {
   if (!region || region.length !== 2) return code.toUpperCase();
   try {
     return String.fromCodePoint(
-      0x1F1E6 + region.charCodeAt(0) - 65,
-      0x1F1E6 + region.charCodeAt(1) - 65
+      0x1f1e6 + region.charCodeAt(0) - 65,
+      0x1f1e6 + region.charCodeAt(1) - 65
     );
   } catch {
     return code.toUpperCase();
@@ -23,9 +23,18 @@ function langToFlag(code) {
 
 function normalizeLang(code) {
   if (!code || !code.includes('-')) {
-    const map = { en: 'en-US', es: 'es-AR', fr: 'fr-FR', de: 'de-DE',
-                  pt: 'pt-BR', it: 'it-IT', ja: 'ja-JP', zh: 'zh-CN', ko: 'ko-KR' };
-    code = map[code] || (code || 'en-US');
+    const map = {
+      en: 'en-US',
+      es: 'es-AR',
+      fr: 'fr-FR',
+      de: 'de-DE',
+      pt: 'pt-BR',
+      it: 'it-IT',
+      ja: 'ja-JP',
+      zh: 'zh-CN',
+      ko: 'ko-KR',
+    };
+    code = map[code] || code || 'en-US';
   }
   return code;
 }
@@ -38,12 +47,12 @@ const BASE_LANGS = [
 function resolveLanguageList(currentLang, browserLang) {
   const langs = [...BASE_LANGS];
   const addIfMissing = (code) => {
-    if (!langs.some(l => l.code === code)) {
+    if (!langs.some((l) => l.code === code)) {
       langs.unshift({ code, name: code + ' (browser)' });
     }
   };
   if (browserLang) addIfMissing(normalizeLang(browserLang));
-  if (currentLang && !langs.some(l => l.code === currentLang)) {
+  if (currentLang && !langs.some((l) => l.code === currentLang)) {
     langs.unshift({ code: currentLang, name: currentLang + ' (saved)' });
   }
   return langs;
@@ -186,8 +195,8 @@ test('resolveLanguageList — BASE_LANGS always present', async (t) => {
   await t.test('always returns at least BASE_LANGS', () => {
     const list = resolveLanguageList('en-US', 'en-US');
     assert.ok(list.length >= BASE_LANGS.length);
-    assert.ok(list.some(l => l.code === 'en-US'));
-    assert.ok(list.some(l => l.code === 'es-AR'));
+    assert.ok(list.some((l) => l.code === 'en-US'));
+    assert.ok(list.some((l) => l.code === 'es-AR'));
   });
 });
 
@@ -200,7 +209,7 @@ test('resolveLanguageList — browser lang prepended when new', async (t) => {
 
   await t.test('"es-AR" already in BASE_LANGS → NOT duplicated', () => {
     const list = resolveLanguageList('es-AR', 'es-AR');
-    const count = list.filter(l => l.code === 'es-AR').length;
+    const count = list.filter((l) => l.code === 'es-AR').length;
     assert.strictEqual(count, 1);
   });
 
@@ -208,7 +217,7 @@ test('resolveLanguageList — browser lang prepended when new', async (t) => {
     const list = resolveLanguageList('en-US', 'es');
     // es → es-AR which is already in BASE_LANGS → no duplicate
     assert.strictEqual(list[0].code, 'en-US'); // order: en-US, es-AR (no new prepend)
-    const count = list.filter(l => l.code === 'es-AR').length;
+    const count = list.filter((l) => l.code === 'es-AR').length;
     assert.strictEqual(count, 1);
   });
 });
@@ -216,7 +225,7 @@ test('resolveLanguageList — browser lang prepended when new', async (t) => {
 test('resolveLanguageList — saved currentLang from localStorage', async (t) => {
   await t.test('saved "fr-FR" not in BASE or browser → prepended as "(saved)"', () => {
     const list = resolveLanguageList('fr-FR', 'en');
-    const saved = list.find(l => l.code === 'fr-FR');
+    const saved = list.find((l) => l.code === 'fr-FR');
     assert.ok(saved);
     assert.ok(saved.name.includes('saved'));
   });
@@ -225,13 +234,13 @@ test('resolveLanguageList — saved currentLang from localStorage', async (t) =>
     // currentLang = 'fr-FR', browserLang = 'fr' → normalized = 'fr-FR'
     // browser prepend adds 'fr-FR (browser)', saved check finds it already exists
     const list = resolveLanguageList('fr-FR', 'fr');
-    const count = list.filter(l => l.code === 'fr-FR').length;
+    const count = list.filter((l) => l.code === 'fr-FR').length;
     assert.strictEqual(count, 1);
   });
 
   await t.test('saved lang same as BASE_LANGS entry → no duplicate', () => {
     const list = resolveLanguageList('es-AR', 'fr');
-    const count = list.filter(l => l.code === 'es-AR').length;
+    const count = list.filter((l) => l.code === 'es-AR').length;
     assert.strictEqual(count, 1);
   });
 });
@@ -249,7 +258,7 @@ test('resolveLanguageList — null/empty browser lang handled', async (t) => {
 
   await t.test('null currentLang → no saved entry', () => {
     const list = resolveLanguageList(null, 'en-US');
-    const saved = list.filter(l => l.name.includes('saved'));
+    const saved = list.filter((l) => l.name.includes('saved'));
     assert.strictEqual(saved.length, 0);
   });
 });
@@ -257,7 +266,7 @@ test('resolveLanguageList — null/empty browser lang handled', async (t) => {
 test('resolveLanguageList — no duplicates ever', async (t) => {
   await t.test('all codes unique', () => {
     const list = resolveLanguageList('pt-BR', 'it');
-    const codes = list.map(l => l.code);
+    const codes = list.map((l) => l.code);
     assert.strictEqual(new Set(codes).size, codes.length);
   });
 });
@@ -277,9 +286,14 @@ test('setLang _langSwitchGen — prevents stale race restart', async (t) => {
       // Simulate second setLang call arriving before first timeout fires
       const gen2 = ++gen; // second call increments to 2
       // second call's timeout fires first (races)
-      if (gen2 === gen) { restarted++; isListening = true; }
+      if (gen2 === gen) {
+        restarted++;
+        isListening = true;
+      }
       // first call's timeout fires later — should NOT restart
-      if (myGen !== gen) { /* skipped — correct! */ }
+      if (myGen !== gen) {
+        /* skipped — correct! */
+      }
     }
   }
 
@@ -316,8 +330,6 @@ test('setLang _langSwitchGen — prevents stale race restart', async (t) => {
 
 // ── toggleDictation pending interim text logic ────────────────────────
 
-
-
 // ── onresult isFinal vs interim flow ──────────────────────────────────
 
 // ── Scroll to bottom ─────────────────────────────────────────────────
@@ -329,7 +341,7 @@ test('overlay scroll — always scrolled to bottom after update', async (t) => {
     let scrollTop = 0;
     const scrollHeight = 500;
     // Simulate: text grows, scrollHeight increases, scrollTop follows
-    scrollTop = scrollHeight;  // Always pegged to bottom
+    scrollTop = scrollHeight; // Always pegged to bottom
     assert.ok(scrollTop >= 0);
     assert.strictEqual(scrollTop, scrollHeight);
   });
@@ -386,8 +398,6 @@ test('longTap handler — decision tree', async (t) => {
   });
 });
 
-
-
 // ── language-not-supported fallback ───────────────────────────────────
 
 test('onerror language-not-supported → falls back to en-US', async (t) => {
@@ -415,7 +425,6 @@ test('onerror language-not-supported → falls back to en-US', async (t) => {
   });
 });
 
-
 // ── Dictate button click isolation ─────────────────────────────────────
 
 test('dictateBtn click isolation — test intent', async (t) => {
@@ -425,15 +434,21 @@ test('dictateBtn click isolation — test intent', async (t) => {
     // Without stopPropagation, clicking dictateBtn would open the modal.
     // Test: verify the intent — clicking dictateBtn should NOT call openModal.
     let modalOpened = false;
-    function openModal() { modalOpened = true; }
-    function dictateBtnClick(e) { e.stopPropagation(); }  // Real API call
+    function openModal() {
+      modalOpened = true;
+    }
+    function dictateBtnClick(e) {
+      e.stopPropagation();
+    } // Real API call
 
     // Simulate: sessionBar catches only non-stopped clicks
     function simulateClick(onDictate, onSession) {
       const event = { _stopped: false };
-      event.stopPropagation = function() { this._stopped = true; };
+      event.stopPropagation = function () {
+        this._stopped = true;
+      };
       onDictate(event);
-      if (!event._stopped) onSession();  // sessionBar only sees non-stopped clicks
+      if (!event._stopped) onSession(); // sessionBar only sees non-stopped clicks
     }
 
     simulateClick(dictateBtnClick, openModal);
@@ -443,8 +458,12 @@ test('dictateBtn click isolation — test intent', async (t) => {
   await t.test('sessionBar click directly → modal opens', () => {
     // Clicking the bar label (not a button) should open modal
     let modalOpened = false;
-    function openModal() { modalOpened = true; }
-    function sessionBarLabelClick() { openModal(); }  // no stopPropagation
+    function openModal() {
+      modalOpened = true;
+    }
+    function sessionBarLabelClick() {
+      openModal();
+    } // no stopPropagation
     sessionBarLabelClick();
     assert.strictEqual(modalOpened, true);
   });
@@ -452,8 +471,25 @@ test('dictateBtn click isolation — test intent', async (t) => {
 // i18n - translation map and tr() function
 
 const T_TEST = {
-  'en-US': { dictate: 'Dictate', recording: 'Recording', paused: 'Paused', cancel: 'Cancel', accept: 'Accept', send: 'Send', noSession: 'No session', unknown: 'Testing' },
-  'es-AR': { dictate: 'Dictar', recording: 'Grabando', paused: 'Pausado', cancel: 'Cancelar', accept: 'Aceptar', send: 'Enviar', noSession: 'Sin sesi\u00f3n' },
+  'en-US': {
+    dictate: 'Dictate',
+    recording: 'Recording',
+    paused: 'Paused',
+    cancel: 'Cancel',
+    accept: 'Accept',
+    send: 'Send',
+    noSession: 'No session',
+    unknown: 'Testing',
+  },
+  'es-AR': {
+    dictate: 'Dictar',
+    recording: 'Grabando',
+    paused: 'Pausado',
+    cancel: 'Cancelar',
+    accept: 'Aceptar',
+    send: 'Enviar',
+    noSession: 'Sin sesi\u00f3n',
+  },
 };
 
 function trTest(key, lang) {
@@ -554,10 +590,13 @@ test('toggleDictation — _stopPending guard and state transitions', async (t) =
     assert.strictEqual(r.action, 'start');
   });
 
-  await t.test('paused + no guard → start (production toggleDictation has no isPaused branch)', () => {
-    const r = simulateToggleState(false, true, false);
-    assert.strictEqual(r.action, 'start');
-  });
+  await t.test(
+    'paused + no guard → start (production toggleDictation has no isPaused branch)',
+    () => {
+      const r = simulateToggleState(false, true, false);
+      assert.strictEqual(r.action, 'start');
+    }
+  );
 });
 
 // ── Pause / Resume state transitions ──────────────────────────────────
@@ -646,7 +685,7 @@ function simulateOnstart(isListening, hasRecordingClass, wasPaused) {
     isPaused = false;
     fixed = true;
   }
-  return { isPaused, fixed, classNow: isListening ? 'recording' : (isPaused ? 'paused' : 'none') };
+  return { isPaused, fixed, classNow: isListening ? 'recording' : isPaused ? 'paused' : 'none' };
 }
 
 test('recognition.onstart — UI state sync', async (t) => {
@@ -730,7 +769,7 @@ test('acceptAndSend — split write behavior', async (t) => {
 // Simulates the fragment-detection + macro-processing loop added to
 // dictation.js onresult handler. Uses the real production module.
 
-const M_INT = (function() {
+const M_INT = (function () {
   global.window = global.window || {};
   require('../../public/dictation-macros.js');
   return global.window.DictationMacros;
@@ -785,11 +824,7 @@ function simulateMacroOnresult(fragments, lang) {
 
 test('dictation macros integration — onresult fragment flow', async (t) => {
   await t.test('text → macro → text: quotes next fragment (es-AR)', () => {
-    const r = simulateMacroOnresult([
-      'este feature',
-      'entre comillas',
-      'lindo',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['este feature', 'entre comillas', 'lindo'], 'es-AR');
 
     assert.strictEqual(r.displayText, 'este feature "lindo"');
     assert.strictEqual(r.finalText, 'este feature "lindo"');
@@ -797,19 +832,13 @@ test('dictation macros integration — onresult fragment flow', async (t) => {
   });
 
   await t.test('text → macro → text (en-US)', () => {
-    const r = simulateMacroOnresult([
-      'this feature',
-      'in quotes',
-      'nice',
-    ], 'en-US');
+    const r = simulateMacroOnresult(['this feature', 'in quotes', 'nice'], 'en-US');
 
     assert.strictEqual(r.displayText, 'this feature "nice"');
   });
 
   await t.test('macro consumed — not shown in display', () => {
-    const r = simulateMacroOnresult([
-      'entre comillas',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['entre comillas'], 'es-AR');
 
     assert.strictEqual(r.displayText, '');
     assert.strictEqual(r.segments.length, 0);
@@ -817,78 +846,52 @@ test('dictation macros integration — onresult fragment flow', async (t) => {
   });
 
   await t.test('uppercase format applies to next fragment', () => {
-    const r = simulateMacroOnresult([
-      'en mayúsculas',
-      'casa',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['en mayúsculas', 'casa'], 'es-AR');
 
     assert.strictEqual(r.displayText, 'Casa');
   });
 
   await t.test('allcaps format applies to next fragment', () => {
-    const r = simulateMacroOnresult([
-      'todo mayúsculas',
-      'gritar',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['todo mayúsculas', 'gritar'], 'es-AR');
 
     assert.strictEqual(r.displayText, 'GRITAR');
   });
 
   await t.test('consecutive macros → last wins', () => {
-    const r = simulateMacroOnresult([
-      'entre comillas',
-      'en mayúsculas',
-      'hola',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['entre comillas', 'en mayúsculas', 'hola'], 'es-AR');
 
     assert.strictEqual(r.displayText, 'Hola');
     assert.strictEqual(r.pendingFormat, null);
   });
 
   await t.test('macro + text with inline → both processed', () => {
-    const r = simulateMacroOnresult([
-      'entre comillas',
-      'hola signo de pregunta',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['entre comillas', 'hola signo de pregunta'], 'es-AR');
 
     assert.strictEqual(r.finalText, '"hola?"');
   });
 
   await t.test('uppercase + inline → format first, then inline', () => {
-    const r = simulateMacroOnresult([
-      'en mayúsculas',
-      'hola signo de pregunta',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['en mayúsculas', 'hola signo de pregunta'], 'es-AR');
 
     assert.strictEqual(r.finalText, 'Hola?');
   });
 
   await t.test('no macros → plain passthrough', () => {
-    const r = simulateMacroOnresult([
-      'hola mundo',
-      'cómo estás',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['hola mundo', 'cómo estás'], 'es-AR');
 
     assert.strictEqual(r.displayText, 'hola mundo cómo estás');
     assert.strictEqual(r.segments.length, 2);
   });
 
   await t.test('embedded macro phrase in longer text → NOT treated as macro', () => {
-    const r = simulateMacroOnresult([
-      'dije entre comillas ayer',
-      'lindo',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['dije entre comillas ayer', 'lindo'], 'es-AR');
 
     assert.strictEqual(r.displayText, 'dije entre comillas ayer lindo');
     assert.strictEqual(r.pendingFormat, null);
   });
 
   await t.test('empty fragment after macro → skipped, format applies to next', () => {
-    const r = simulateMacroOnresult([
-      'entre comillas',
-      '   ',
-      'real text',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['entre comillas', '   ', 'real text'], 'es-AR');
 
     assert.strictEqual(r.displayText, '"real text"');
   });
@@ -903,21 +906,14 @@ test('dictation macros integration — onresult fragment flow', async (t) => {
   });
 
   await t.test('parens: text → macro → text wraps in parentheses', () => {
-    const r = simulateMacroOnresult([
-      'este',
-      'entre paréntesis',
-      'feature',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['este', 'entre paréntesis', 'feature'], 'es-AR');
 
     assert.strictEqual(r.displayText, 'este (feature)');
     assert.strictEqual(r.pendingFormat, null);
   });
 
   await t.test('single-quote stateful (entre comillas simples)', () => {
-    const r = simulateMacroOnresult([
-      'entre comillas simples',
-      'hola',
-    ], 'es-AR');
+    const r = simulateMacroOnresult(['entre comillas simples', 'hola'], 'es-AR');
 
     assert.strictEqual(r.displayText, "'hola'");
   });
@@ -950,8 +946,9 @@ test('dictation macros integration — onresult fragment flow', async (t) => {
     const state = { segments: [], pendingFormat: null, lastTranscripts: [] };
     // fragment loop over finalized parts
     const m1 = M_INT.processFragment('algo', 'es-AR');
-    if (m1.type === 'macro') { state.pendingFormat = m1.format; }
-    else state.segments.push(M_INT.applyInline('algo', 'es-AR'));
+    if (m1.type === 'macro') {
+      state.pendingFormat = m1.format;
+    } else state.segments.push(M_INT.applyInline('algo', 'es-AR'));
     const m2 = M_INT.processFragment('entre comillas', 'es-AR');
     if (m2.type === 'macro') state.pendingFormat = m2.format;
 
@@ -1030,6 +1027,4 @@ test('dictation macros integration — onresult fragment flow', async (t) => {
     const r = simulateMacroOnresult(['esto va en un \n\n y sigue'], 'es-AR');
     assert.strictEqual(r.displayText, 'esto va en un nuevo párrafo y sigue');
   });
-
 });
-

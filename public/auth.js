@@ -34,7 +34,9 @@
   function openDb() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(IDB_NAME, 1);
-      req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore(IDB_STORE);
+      };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
@@ -49,7 +51,9 @@
         req.onsuccess = () => resolve(req.result || null);
         req.onerror = () => reject(req.error);
       });
-    } catch (_) { return null; }
+    } catch (_) {
+      return null;
+    }
   }
 
   async function idbSet(key, value) {
@@ -73,12 +77,16 @@
 
     const kp = await crypto.subtle.generateKey(
       { name: 'ECDSA', namedCurve: 'P-256' },
-      false,            // non-extractable
+      false, // non-extractable
       ['sign', 'verify']
     );
     const spki = await crypto.subtle.exportKey('spki', kp.publicKey);
     const device = { publicKeyB64: bytesToB64(new Uint8Array(spki)), privateKey: kp.privateKey };
-    try { await idbSet(KEY_DEVICE, device); } catch (_) { /* private mode — key is per-session */ }
+    try {
+      await idbSet(KEY_DEVICE, device);
+    } catch (_) {
+      /* private mode — key is per-session */
+    }
     return device;
   }
 
@@ -99,15 +107,21 @@
   async function verifyServerSignature(serverPublicKeyB64, dataStr, signatureB64) {
     try {
       const key = await crypto.subtle.importKey(
-        'spki', b64ToBytes(serverPublicKeyB64).buffer,
-        { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']
+        'spki',
+        b64ToBytes(serverPublicKeyB64).buffer,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        false,
+        ['verify']
       );
       return await crypto.subtle.verify(
         { name: 'ECDSA', hash: 'SHA-256' },
-        key, b64ToBytes(signatureB64),
+        key,
+        b64ToBytes(signatureB64),
         new TextEncoder().encode(dataStr)
       );
-    } catch (_) { return false; }
+    } catch (_) {
+      return false;
+    }
   }
 
   // SHA-256 of the server public key (SPKI DER), colon-hex (first 16 bytes) —
@@ -125,13 +139,17 @@
   // The caller verifies against the live challenge, and only then persists.
   async function getPinned() {
     let qr = null;
-    try { qr = new URLSearchParams(window.location.hash.slice(1)).get('fp'); } catch (_) {}
+    try {
+      qr = new URLSearchParams(window.location.hash.slice(1)).get('fp');
+    } catch (_) {}
     const stored = await idbGet(KEY_FP);
     return { stored: stored || null, qr: qr || null };
   }
 
   async function persistFingerprint(fp) {
-    try { await idbSet(KEY_FP, fp); } catch (_) {}
+    try {
+      await idbSet(KEY_FP, fp);
+    } catch (_) {}
   }
 
   async function clearFingerprint() {
@@ -173,7 +191,9 @@
         const data = await res.json().catch(() => ({}));
         if (data.status === 'allowed') return 'allowed';
         if (data.status === 'closed') return 'closed';
-      } catch (_) { /* daemon unreachable — keep polling */ }
+      } catch (_) {
+        /* daemon unreachable — keep polling */
+      }
     }
     return 'closed';
   }

@@ -1,4 +1,4 @@
-.PHONY: setup cert start stop clean refresh logs lint format format-check test-unit test-integration test-all agnostic-check install-plugin uninstall-plugin
+.PHONY: setup cert start stop clean refresh logs lint format-write format-check test-unit test-integration test-all agnostic-check install-plugin uninstall-plugin
 
 LOG_FILE := /tmp/airprompt.log
 PID_FILE := /tmp/airprompt-server.pid
@@ -40,7 +40,7 @@ lint:
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck $$(git ls-files '*.sh') bin/airprompt bin/airprompt-launch; else echo "  shellcheck not installed — skipping"; fi
 	@npm run lint
 
-format:
+format-write:
 	@npm run format
 
 format-check:
@@ -55,7 +55,7 @@ test-unit:
 test-integration:
 	@bash test/integration/run.sh
 
-test-all: lint agnostic-check test-unit test-integration
+test-all: lint format-check agnostic-check test-unit test-integration
 
 agnostic-check:
 	@bash bin/airprompt-agnostic-check.sh

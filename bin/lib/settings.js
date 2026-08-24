@@ -37,23 +37,56 @@ function stripJsonComments(src) {
     const c = src[i];
     const next = i + 1 < n ? src[i + 1] : '';
     if (inLine) {
-      if (c === '\n') { inLine = false; out += c; }
-      i++; continue;
+      if (c === '\n') {
+        inLine = false;
+        out += c;
+      }
+      i++;
+      continue;
     }
     if (inBlock) {
-      if (c === '*' && next === '/') { inBlock = false; i += 2; continue; }
-      i++; continue;
+      if (c === '*' && next === '/') {
+        inBlock = false;
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
     }
     if (inString) {
       out += c;
-      if (c === '\\') { if (i + 1 < n) { out += src[i + 1]; i += 2; continue; } }
-      if (c === stringChar) { inString = false; }
-      i++; continue;
+      if (c === '\\') {
+        if (i + 1 < n) {
+          out += src[i + 1];
+          i += 2;
+          continue;
+        }
+      }
+      if (c === stringChar) {
+        inString = false;
+      }
+      i++;
+      continue;
     }
-    if (c === '"' || c === "'") { inString = true; stringChar = c; out += c; i++; continue; }
-    if (c === '/' && next === '/') { inLine = true; i += 2; continue; }
-    if (c === '/' && next === '*') { inBlock = true; i += 2; continue; }
-    out += c; i++;
+    if (c === '"' || c === "'") {
+      inString = true;
+      stringChar = c;
+      out += c;
+      i++;
+      continue;
+    }
+    if (c === '/' && next === '/') {
+      inLine = true;
+      i += 2;
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      inBlock = true;
+      i += 2;
+      continue;
+    }
+    out += c;
+    i++;
   }
   return stripTrailingCommas(out);
 }
@@ -69,17 +102,34 @@ function stripTrailingCommas(src) {
     const c = src[i];
     if (inString) {
       out += c;
-      if (c === '\\') { if (i + 1 < n) { out += src[i + 1]; i += 2; continue; } }
+      if (c === '\\') {
+        if (i + 1 < n) {
+          out += src[i + 1];
+          i += 2;
+          continue;
+        }
+      }
       if (c === stringChar) inString = false;
-      i++; continue;
+      i++;
+      continue;
     }
-    if (c === '"' || c === "'") { inString = true; stringChar = c; out += c; i++; continue; }
+    if (c === '"' || c === "'") {
+      inString = true;
+      stringChar = c;
+      out += c;
+      i++;
+      continue;
+    }
     if (c === ',') {
       let j = i + 1;
       while (j < n && /\s/.test(src[j])) j++;
-      if (j < n && (src[j] === '}' || src[j] === ']')) { i++; continue; }
+      if (j < n && (src[j] === '}' || src[j] === ']')) {
+        i++;
+        continue;
+      }
     }
-    out += c; i++;
+    out += c;
+    i++;
   }
   return out;
 }
@@ -88,8 +138,9 @@ function stripTrailingCommas(src) {
 function readSettings(p) {
   if (!fs.existsSync(p)) return {};
   let raw;
-  try { raw = fs.readFileSync(p, 'utf8'); }
-  catch (e) {
+  try {
+    raw = fs.readFileSync(p, 'utf8');
+  } catch (e) {
     process.stderr.write(`airprompt: cannot read ${p}: ${e.message}\n`);
     return null;
   }
@@ -99,20 +150,25 @@ function readSettings(p) {
     // Guard: valid JSON that isn't an object (array, string, number) is corrupted.
     // Return null so callers refuse to overwrite — prevents data loss (cf. autostart.js null check).
     if (typeof v !== 'object' || v === null || Array.isArray(v)) {
-      process.stderr.write('airprompt: settings.json is not an object — corrupted, refusing to modify\n');
+      process.stderr.write(
+        'airprompt: settings.json is not an object — corrupted, refusing to modify\n'
+      );
       return null;
     }
     return v;
-  } catch (_) { /* fall through to JSONC */ }
+  } catch (_) {
+    /* fall through to JSONC */
+  }
   try {
     const v = JSON.parse(stripJsonComments(raw));
     if (typeof v !== 'object' || v === null || Array.isArray(v)) {
-      process.stderr.write('airprompt: settings.json is not an object — corrupted, refusing to modify\n');
+      process.stderr.write(
+        'airprompt: settings.json is not an object — corrupted, refusing to modify\n'
+      );
       return null;
     }
     return v;
-  }
-  catch (e) {
+  } catch (e) {
     process.stderr.write(`airprompt: warning — ${p} is not valid JSON or JSONC: ${e.message}\n`);
     return null;
   }
@@ -123,7 +179,10 @@ function readSettings(p) {
 function writeSettings(p, obj) {
   const dir = path.dirname(p);
   fs.mkdirSync(dir, { recursive: true });
-  const tmp = path.join(dir, `.${path.basename(p)}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`);
+  const tmp = path.join(
+    dir,
+    `.${path.basename(p)}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`
+  );
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', { mode: 0o600 });
   fs.renameSync(tmp, p);
 }
@@ -134,14 +193,17 @@ function validateHookFields(settings) {
   if (!settings.hooks || typeof settings.hooks !== 'object') return settings;
   for (const ev of Object.keys(settings.hooks)) {
     const arr = settings.hooks[ev];
-    if (!Array.isArray(arr)) { delete settings.hooks[ev]; continue; }
-    settings.hooks[ev] = arr.filter(entry => {
+    if (!Array.isArray(arr)) {
+      delete settings.hooks[ev];
+      continue;
+    }
+    settings.hooks[ev] = arr.filter((entry) => {
       if (!entry || typeof entry !== 'object') return false;
       if (!Array.isArray(entry.hooks)) return false;
-      entry.hooks = entry.hooks.filter(h => {
+      entry.hooks = entry.hooks.filter((h) => {
         if (!h || typeof h !== 'object') return false;
         if (h.type === 'command') return typeof h.command === 'string' && h.command.length > 0;
-        if (h.type === 'agent')   return typeof h.prompt === 'string' && h.prompt.length > 0;
+        if (h.type === 'agent') return typeof h.prompt === 'string' && h.prompt.length > 0;
         return false;
       });
       return entry.hooks.length > 0;
@@ -156,9 +218,11 @@ function validateHookFields(settings) {
 function hasAirPromptHook(settings, event, marker = 'airprompt') {
   const arr = settings && settings.hooks && settings.hooks[event];
   if (!Array.isArray(arr)) return false;
-  return arr.some(e =>
-    e && Array.isArray(e.hooks) &&
-    e.hooks.some(h => h && typeof h.command === 'string' && h.command.includes(marker))
+  return arr.some(
+    (e) =>
+      e &&
+      Array.isArray(e.hooks) &&
+      e.hooks.some((h) => h && typeof h.command === 'string' && h.command.includes(marker))
   );
 }
 
@@ -193,9 +257,12 @@ function tokenizeCommand(command) {
 function referencesManagedScript(command) {
   try {
     for (const tok of tokenizeCommand(command)) {
-      if (tok && typeof tok === 'string' && MANAGED_HOOK_BASENAMES.has(path.basename(tok))) return true;
+      if (tok && typeof tok === 'string' && MANAGED_HOOK_BASENAMES.has(path.basename(tok)))
+        return true;
     }
-  } catch (_) { /* malformed command — treat as not ours */ }
+  } catch (_) {
+    /* malformed command — treat as not ours */
+  }
   return false;
 }
 
@@ -206,7 +273,10 @@ function removeAirPromptHooks(settings) {
   if (!settings.hooks) return 0;
   let removed = 0;
   for (const ev of Object.keys(settings.hooks)) {
-    if (!Array.isArray(settings.hooks[ev])) { delete settings.hooks[ev]; continue; }
+    if (!Array.isArray(settings.hooks[ev])) {
+      delete settings.hooks[ev];
+      continue;
+    }
     const before = settings.hooks[ev].length;
     // Filter managed hooks from each entry individually — preserve unrelated
     // hooks sharing the same entry (both agent-type and third-party commands).
@@ -214,14 +284,14 @@ function removeAirPromptHooks(settings) {
       const entry = settings.hooks[ev][ei];
       if (!entry || !Array.isArray(entry.hooks)) continue;
       const origLen = entry.hooks.length;
-      entry.hooks = entry.hooks.filter(h => {
+      entry.hooks = entry.hooks.filter((h) => {
         if (!h || typeof h.command !== 'string') return true; // preserve agent hooks, etc.
         return !referencesManagedScript(h.command);
       });
       removed += origLen - entry.hooks.length;
     }
     // Remove entries that became empty after filtering
-    settings.hooks[ev] = settings.hooks[ev].filter(entry => {
+    settings.hooks[ev] = settings.hooks[ev].filter((entry) => {
       if (!entry || !Array.isArray(entry.hooks)) return true;
       return entry.hooks.length > 0;
     });
@@ -269,7 +339,9 @@ function pruneOrphanedManagedHooks(settings, configDir) {
         const scriptPath = path.isAbsolute(tok) ? tok : path.join(baseDir, tok);
         return !fs.existsSync(scriptPath);
       }
-    } catch (_) { /* silent-fail */ }
+    } catch (_) {
+      /* silent-fail */
+    }
     return false;
   };
 
@@ -278,21 +350,24 @@ function pruneOrphanedManagedHooks(settings, configDir) {
   }
   if (settings.hooks && typeof settings.hooks === 'object') {
     for (const ev of Object.keys(settings.hooks)) {
-      if (!Array.isArray(settings.hooks[ev])) { delete settings.hooks[ev]; continue; }
+      if (!Array.isArray(settings.hooks[ev])) {
+        delete settings.hooks[ev];
+        continue;
+      }
       // Per-hook filtering: only remove individual orphaned hooks
       // within each entry — preserve co-located non-managed hooks.
       for (let ei = 0; ei < settings.hooks[ev].length; ei++) {
         const entry = settings.hooks[ev][ei];
         if (!entry || typeof entry !== 'object' || !Array.isArray(entry.hooks)) continue;
         const origLen = entry.hooks.length;
-        entry.hooks = entry.hooks.filter(h => {
+        entry.hooks = entry.hooks.filter((h) => {
           if (!h || typeof h.command !== 'string') return true; // agent hooks
           return !targetMissing(h.command);
         });
         removed += origLen - entry.hooks.length;
       }
       // Remove entries that became empty after filtering
-      settings.hooks[ev] = settings.hooks[ev].filter(entry => {
+      settings.hooks[ev] = settings.hooks[ev].filter((entry) => {
         if (!entry || !Array.isArray(entry.hooks)) return true;
         return entry.hooks.length > 0;
       });
@@ -301,8 +376,11 @@ function pruneOrphanedManagedHooks(settings, configDir) {
     if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
   }
 
-  if (settings.statusLine && typeof settings.statusLine.command === 'string'
-      && targetMissing(settings.statusLine.command)) {
+  if (
+    settings.statusLine &&
+    typeof settings.statusLine.command === 'string' &&
+    targetMissing(settings.statusLine.command)
+  ) {
     delete settings.statusLine;
     removed++;
   }

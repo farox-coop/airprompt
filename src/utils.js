@@ -61,7 +61,11 @@ function isSafeRmTarget(target) {
 // Canonicalize a root (resolve its own symlink too) with a lexical fallback.
 function canonicalRoot(p) {
   const resolved = path.resolve(p);
-  try { return fs.realpathSync(resolved); } catch (_) { return resolved; }
+  try {
+    return fs.realpathSync(resolved);
+  } catch (_) {
+    return resolved;
+  }
 }
 
 // Canonicalize a delete target: resolve the parent's symlinks, keep the
@@ -82,8 +86,12 @@ function canonicalTarget(p) {
 // Returns true if the directory was deleted, false if blocked or errored.
 function safeRmSync(dir) {
   if (!isSafeRmTarget(dir)) return false;
-  try { fs.rmSync(dir, { recursive: true, force: true }); return true; }
-  catch (_) { return false; }
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 // ── Tmux helpers ──────────────────────────────────────────────────────────
@@ -92,7 +100,9 @@ function tmuxExists(sessionName) {
   try {
     const r = spawnSync('tmux', ['has-session', '-t', sessionName], { timeout: 2000 });
     return r.status === 0;
-  } catch (_) { return false; }
+  } catch (_) {
+    return false;
+  }
 }
 
 // ── sessionToJSON — canonical serialisation ───────────────────────────────
@@ -109,24 +119,28 @@ function sessionToJSON(entry, sessionsDirOverride) {
   const markerDir = path.join(sessionsDirOverride || getSessionsDir(), dirName);
 
   const json = {
-    id:              entry.sessionId,
-    cwd:             entry.cwd,
-    name:            entry.name || null,
-    tmuxSession:     entry.tmuxSession,
-    providerId:      entry.providerId || null,
-    createdAt:       entry.createdAt,
-    isMirror:        false,
-    isActive:        false,
-    tmuxAlive:       false,
+    id: entry.sessionId,
+    cwd: entry.cwd,
+    name: entry.name || null,
+    tmuxSession: entry.tmuxSession,
+    providerId: entry.providerId || null,
+    createdAt: entry.createdAt,
+    isMirror: false,
+    isActive: false,
+    tmuxAlive: false,
     attachedClients: 0,
-    lastActivity:    entry.lastActivity || null,
+    lastActivity: entry.lastActivity || null,
   };
 
   // Mirror marker
-  try { if (fs.existsSync(path.join(markerDir, 'mirror'))) json.isMirror = true; } catch (_) {}
+  try {
+    if (fs.existsSync(path.join(markerDir, 'mirror'))) json.isMirror = true;
+  } catch (_) {}
 
   // Active marker
-  try { if (fs.existsSync(path.join(markerDir, 'active'))) json.isActive = true; } catch (_) {}
+  try {
+    if (fs.existsSync(path.join(markerDir, 'active'))) json.isActive = true;
+  } catch (_) {}
 
   // Tmux liveness
   json.tmuxAlive = tmuxExists(entry.tmuxSession);
@@ -134,7 +148,11 @@ function sessionToJSON(entry, sessionsDirOverride) {
   // Attached clients
   if (json.tmuxAlive) {
     try {
-      const clients = spawnSync('tmux', ['list-clients', '-t', entry.tmuxSession, '-F', '#{client_name}'], { timeout: 2000, encoding: 'utf8' });
+      const clients = spawnSync(
+        'tmux',
+        ['list-clients', '-t', entry.tmuxSession, '-F', '#{client_name}'],
+        { timeout: 2000, encoding: 'utf8' }
+      );
       if (clients.status === 0 && clients.stdout.trim()) {
         json.attachedClients = clients.stdout.trim().split('\n').length;
       }

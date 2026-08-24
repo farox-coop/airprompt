@@ -11,16 +11,16 @@ const assert = require('node:assert');
 // ═══════════════════════════════════════════════════════════════════════
 
 const NOTIFY_EMOJIS = {
-  idle_prompt:       '⏳',
+  idle_prompt: '⏳',
   permission_prompt: '✋',
   agent_needs_input: '📥',
-  agent_completed:   '✅',
+  agent_completed: '✅',
 };
 const NOTIFY_SUMMARIES = {
-  idle_prompt:       'Done — ready for input',
+  idle_prompt: 'Done — ready for input',
   permission_prompt: 'User action needed',
   agent_needs_input: 'Background agent needs input',
-  agent_completed:   'Background agent finished',
+  agent_completed: 'Background agent finished',
 };
 
 // ── Suppression guard (notify.js:41-42) ──────────────────────────────
@@ -41,7 +41,9 @@ function buildSessionLabel(n, sessions) {
 
   // Priority 2: lookup in sessions array by id
   if (!label && sid && sessions) {
-    const match = sessions.find(function (s) { return s.id === sid; });
+    const match = sessions.find(function (s) {
+      return s.id === sid;
+    });
     if (match) {
       label = match.name || (match.cwd ? String(match.cwd).split('/').pop() : '');
     }
@@ -49,9 +51,8 @@ function buildSessionLabel(n, sessions) {
 
   // Priority 3: cwd basename → session_id prefix
   if (!label) {
-    const cwd = (n.cwd != null && n.cwd !== 'null' && typeof n.cwd === 'string')
-      ? n.cwd.split('/').pop()
-      : '';
+    const cwd =
+      n.cwd != null && n.cwd !== 'null' && typeof n.cwd === 'string' ? n.cwd.split('/').pop() : '';
     label = cwd || (sid ? sid.slice(0, 8) : '');
   }
 
@@ -123,16 +124,22 @@ test('shouldSuppressToast — session matches active session → suppress', asyn
     assert.strictEqual(shouldSuppressToast('claude-123', 'claude-123'), true);
   });
 
-  await t.test('activeSessionId string, notification session_id number, ids different → no match', function () {
-    // Server may send session_id as number or string depending on JSON path
-    // 'claude-123' vs 123 — String(123)='123' ≠ 'claude-123'
-    assert.strictEqual(shouldSuppressToast('claude-123', 123), false);
-  });
+  await t.test(
+    'activeSessionId string, notification session_id number, ids different → no match',
+    function () {
+      // Server may send session_id as number or string depending on JSON path
+      // 'claude-123' vs 123 — String(123)='123' ≠ 'claude-123'
+      assert.strictEqual(shouldSuppressToast('claude-123', 123), false);
+    }
+  );
 
-  await t.test('activeSessionId string, notification session_id number same value → coerced match', function () {
-    // String('123') === String(123) → '123' === '123' → suppress
-    assert.strictEqual(shouldSuppressToast('123', 123), true);
-  });
+  await t.test(
+    'activeSessionId string, notification session_id number same value → coerced match',
+    function () {
+      // String('123') === String(123) → '123' === '123' → suppress
+      assert.strictEqual(shouldSuppressToast('123', 123), true);
+    }
+  );
 
   await t.test('activeSessionId string, notification session_id matching string', function () {
     assert.strictEqual(shouldSuppressToast('session-abc', 'session-abc'), true);
@@ -150,7 +157,7 @@ test('shouldSuppressToast — different session → show toast', async (t) => {
 
   await t.test('watching session A, notification from session B', function () {
     const activeSessionId = 'claude-42';
-    const notifySessionId  = 'claude-43';
+    const notifySessionId = 'claude-43';
     assert.strictEqual(shouldSuppressToast(activeSessionId, notifySessionId), false);
   });
 });
@@ -182,30 +189,45 @@ test('shouldSuppressToast — notification with null/undefined session_id', asyn
     assert.strictEqual(shouldSuppressToast('claude-123', undefined), false);
   });
 
-  await t.test('notification session_id is empty string → does NOT match non-empty active', function () {
-    assert.strictEqual(shouldSuppressToast('claude-123', ''), false);
-  });
+  await t.test(
+    'notification session_id is empty string → does NOT match non-empty active',
+    function () {
+      assert.strictEqual(shouldSuppressToast('claude-123', ''), false);
+    }
+  );
 
-  await t.test('both empty string → activeSessionId falsy → show toast (guard short-circuits)', function () {
-    // Guard: !activeSessionId catches '' → returns false → toast SHOWN, not suppressed
-    assert.strictEqual(shouldSuppressToast('', ''), false);
-  });
+  await t.test(
+    'both empty string → activeSessionId falsy → show toast (guard short-circuits)',
+    function () {
+      // Guard: !activeSessionId catches '' → returns false → toast SHOWN, not suppressed
+      assert.strictEqual(shouldSuppressToast('', ''), false);
+    }
+  );
 
-  await t.test('both null → activeSessionId null is falsy → guard returns false before comparison', function () {
-    assert.strictEqual(shouldSuppressToast(null, null), false);
-  });
+  await t.test(
+    'both null → activeSessionId null is falsy → guard returns false before comparison',
+    function () {
+      assert.strictEqual(shouldSuppressToast(null, null), false);
+    }
+  );
 
-  await t.test('notification session_id omitted → String(undefined) = "undefined" — unlikely match', function () {
-    // In practice, String(undefined) === 'undefined', which won't match any real session ID
-    assert.strictEqual(String(undefined), 'undefined');
-    assert.strictEqual(shouldSuppressToast('claude-123', undefined), false);
-  });
+  await t.test(
+    'notification session_id omitted → String(undefined) = "undefined" — unlikely match',
+    function () {
+      // In practice, String(undefined) === 'undefined', which won't match any real session ID
+      assert.strictEqual(String(undefined), 'undefined');
+      assert.strictEqual(shouldSuppressToast('claude-123', undefined), false);
+    }
+  );
 
-  await t.test('String(null) = "null" — collision would suppress if activeSessionId is literally "null"', function () {
-    // Defensive: String(null) === 'null'. If activeSessionId is the string 'null',
-    // suppression would fire. Unlikely in practice but worth pinning.
-    assert.strictEqual(shouldSuppressToast('null', null), true);
-  });
+  await t.test(
+    'String(null) = "null" — collision would suppress if activeSessionId is literally "null"',
+    function () {
+      // Defensive: String(null) === 'null'. If activeSessionId is the string 'null',
+      // suppression would fire. Unlikely in practice but worth pinning.
+      assert.strictEqual(shouldSuppressToast('null', null), true);
+    }
+  );
 
   await t.test('String(undefined) = "undefined" — collision with literal "undefined"', function () {
     assert.strictEqual(shouldSuppressToast('undefined', undefined), true);

@@ -1,57 +1,76 @@
 // public/dictation.js — Voice dictation with i18n, extracted from client.js.
 // Exports window.Dictation with init/toggle/tr/updateAllLabels/getOverlayHeight.
 
-(function() {
+(function () {
   'use strict';
 
   // ── State ────────────────────────────────────────────────────────────
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recognition = null;
   let isListening = false;
-  let isPaused = false;          // Long-tap while recording → pause
-  let _stopPending = false;     // Guard: ignore taps while stop is in-flight
-  let _onendGen = 0;            // Prevents stale onend from pauseDictation() restarting
-  let _pendingFormat = null;     // 'quotes'|'uppercase'|'allcaps' — set by stateful macro fragment
-  let _segments = [];            // Array of display strings, one per accepted fragment
-  let _lastTranscripts = [];     // Per-index transcript tracking for delta extraction
-  let _latestInterim = '';       // Current interim transcript (survives across onresult)
+  let isPaused = false; // Long-tap while recording → pause
+  let _stopPending = false; // Guard: ignore taps while stop is in-flight
+  let _onendGen = 0; // Prevents stale onend from pauseDictation() restarting
+  let _pendingFormat = null; // 'quotes'|'uppercase'|'allcaps' — set by stateful macro fragment
+  let _segments = []; // Array of display strings, one per accepted fragment
+  let _lastTranscripts = []; // Per-index transcript tracking for delta extraction
+  let _latestInterim = ''; // Current interim transcript (survives across onresult)
 
   // ── Dependencies (injected by client.js init) ─────────────────────────
   let _send, _log, _blurInput, _sessionLabel;
 
   // ── Dictation overlay DOM ────────────────────────────────────────────
-  const dictateBtn      = document.getElementById('dictate-btn');
-  const dictateIcon     = document.getElementById('dictate-icon');
-  const dictateLabel    = document.getElementById('dictate-label');
-  const dictateOverlay  = document.getElementById('dictate-overlay');
-  const dictateText     = document.getElementById('dictate-text');
-  const dictateAccept   = document.getElementById('dictate-accept');
+  const dictateBtn = document.getElementById('dictate-btn');
+  const dictateIcon = document.getElementById('dictate-icon');
+  const dictateLabel = document.getElementById('dictate-label');
+  const dictateOverlay = document.getElementById('dictate-overlay');
+  const dictateText = document.getElementById('dictate-text');
+  const dictateAccept = document.getElementById('dictate-accept');
   const dictateAcceptSend = document.getElementById('dictate-accept-send');
-  const dictateCancel   = document.getElementById('dictate-cancel');
-  const micError        = document.getElementById('mic-error');
+  const dictateCancel = document.getElementById('dictate-cancel');
+  const micError = document.getElementById('mic-error');
 
   // ── i18n: labels change with selected language ────────────────────────
   const T = {
     'en-US': {
-      dictate: 'Dictate', recording: 'Recording', paused: 'Paused',
-      cancel: 'Cancel', accept: 'Accept', send: 'Send',
-      listening: 'Listening…', speaking: '● Speaking…',
-      noSession: 'No session selected', noActive: 'No active sessions',
-      activeSessions: 'Active Sessions', close: 'Close',
+      dictate: 'Dictate',
+      recording: 'Recording',
+      paused: 'Paused',
+      cancel: 'Cancel',
+      accept: 'Accept',
+      send: 'Send',
+      listening: 'Listening…',
+      speaking: '● Speaking…',
+      noSession: 'No session selected',
+      noActive: 'No active sessions',
+      activeSessions: 'Active Sessions',
+      close: 'Close',
       preferences: 'Preferences',
-      enableAllMacros: 'Enable all dictation macros', inline: 'Inline', stateful: 'Stateful',
-      micHttps: 'Voice needs HTTPS or localhost. Chrome blocks mic on HTTP LAN IP. Use keyboard below.',
+      enableAllMacros: 'Enable all dictation macros',
+      inline: 'Inline',
+      stateful: 'Stateful',
+      micHttps:
+        'Voice needs HTTPS or localhost. Chrome blocks mic on HTTP LAN IP. Use keyboard below.',
       langFallback: 'Language not supported. Falling back to English.',
       disconnected: '⚠️ DISCONNECTED — Tap to dismiss',
     },
     'es-AR': {
-      dictate: 'Dictar', recording: 'Grabando', paused: 'Pausado',
-      cancel: 'Cancelar', accept: 'Aceptar', send: 'Enviar',
-      listening: 'Escuchando…', speaking: '● Hablando…',
-      noSession: 'Sin sesión', noActive: 'Sin sesiones activas',
-      activeSessions: 'Sesiones Activas', close: 'Cerrar',
+      dictate: 'Dictar',
+      recording: 'Grabando',
+      paused: 'Pausado',
+      cancel: 'Cancelar',
+      accept: 'Aceptar',
+      send: 'Enviar',
+      listening: 'Escuchando…',
+      speaking: '● Hablando…',
+      noSession: 'Sin sesión',
+      noActive: 'Sin sesiones activas',
+      activeSessions: 'Sesiones Activas',
+      close: 'Cerrar',
       preferences: 'Preferencias',
-      enableAllMacros: 'Activar todas las macros de dictado', inline: 'Inline', stateful: 'Stateful',
+      enableAllMacros: 'Activar todas las macros de dictado',
+      inline: 'Inline',
+      stateful: 'Stateful',
       micHttps: 'El micrófono requiere HTTPS o localhost. Chrome bloquea el mic en IPs LAN HTTP.',
       langFallback: 'Idioma no soportado. Cambiando a inglés.',
       disconnected: '⚠️ DESCONECTADO — Tocar para cerrar',
@@ -59,8 +78,14 @@
   };
 
   let currentLang = normalizeLang(
-    (function() { try { return localStorage.getItem('airprompt-lang'); } catch (_) {} return ''; })()
-    || navigator.language || 'en-US'
+    (function () {
+      try {
+        return localStorage.getItem('airprompt-lang');
+      } catch (_) {}
+      return '';
+    })() ||
+      navigator.language ||
+      'en-US'
   );
 
   function tr(key) {
@@ -104,7 +129,8 @@
 
   // Update CSS placeholder texts via custom properties
   const _i18nStyle = document.createElement('style');
-  _i18nStyle.textContent = '\n' +
+  _i18nStyle.textContent =
+    '\n' +
     '#dictate-text:empty::after { content: var(--listen-text, "Listening\\2026"); }\n' +
     '#dictate-overlay.speaking #dictate-text:empty::after { content: var(--speak-text, "\\25cf Speaking\\2026"); }\n';
   document.head.appendChild(_i18nStyle);
@@ -115,10 +141,10 @@
     { code: 'es-AR', name: 'Español (AR)' },
   ];
 
-  const dictateFlag   = document.getElementById('dictate-flag');
-  const langDropdown  = document.getElementById('lang-dropdown');
-  const langList      = document.getElementById('lang-list');
-  const langCancel    = document.getElementById('lang-cancel');
+  const dictateFlag = document.getElementById('dictate-flag');
+  const langDropdown = document.getElementById('lang-dropdown');
+  const langList = document.getElementById('lang-list');
+  const langCancel = document.getElementById('lang-cancel');
 
   function langToFlag(code) {
     const parts = code.split('-');
@@ -126,8 +152,8 @@
     if (!region || region.length !== 2) return code.toUpperCase();
     try {
       return String.fromCodePoint(
-        0x1F1E6 + region.charCodeAt(0) - 65,
-        0x1F1E6 + region.charCodeAt(1) - 65
+        0x1f1e6 + region.charCodeAt(0) - 65,
+        0x1f1e6 + region.charCodeAt(1) - 65
       );
     } catch (_) {
       return code.toUpperCase();
@@ -136,23 +162,41 @@
 
   function normalizeLang(code) {
     if (!code || !code.includes('-')) {
-      const map = { en: 'en-US', es: 'es-AR', fr: 'fr-FR', de: 'de-DE',
-                  pt: 'pt-BR', it: 'it-IT', ja: 'ja-JP', zh: 'zh-CN', ko: 'ko-KR' };
-      code = map[code] || (code || 'en-US');
+      const map = {
+        en: 'en-US',
+        es: 'es-AR',
+        fr: 'fr-FR',
+        de: 'de-DE',
+        pt: 'pt-BR',
+        it: 'it-IT',
+        ja: 'ja-JP',
+        zh: 'zh-CN',
+        ko: 'ko-KR',
+      };
+      code = map[code] || code || 'en-US';
     }
     return code;
   }
 
   function resolveLanguageList() {
     const langs = BASE_LANGS.slice();
-    const addIfMissing = function(code) {
-      if (!langs.some(function(l) { return l.code === code; })) {
+    const addIfMissing = function (code) {
+      if (
+        !langs.some(function (l) {
+          return l.code === code;
+        })
+      ) {
         langs.unshift({ code: code, name: code + ' (browser)' });
       }
     };
     const browserLang = navigator.language;
     if (browserLang) addIfMissing(normalizeLang(browserLang));
-    if (currentLang && !langs.some(function(l) { return l.code === currentLang; })) {
+    if (
+      currentLang &&
+      !langs.some(function (l) {
+        return l.code === currentLang;
+      })
+    ) {
       langs.unshift({ code: currentLang, name: currentLang + ' (saved)' });
     }
     return langs;
@@ -161,12 +205,11 @@
   function buildLangList() {
     const langs = resolveLanguageList();
     langList.innerHTML = '';
-    langs.forEach(function(lang) {
+    langs.forEach(function (lang) {
       const el = document.createElement('div');
       el.className = 'lang-option' + (lang.code === currentLang ? ' active' : '');
-      el.innerHTML = '<span class="lang-flag">' + langToFlag(lang.code) +
-                     '</span> ' + lang.name;
-      el.addEventListener('click', function(e) {
+      el.innerHTML = '<span class="lang-flag">' + langToFlag(lang.code) + '</span> ' + lang.name;
+      el.addEventListener('click', function (e) {
         e.stopPropagation();
         setLang(lang.code);
         hideLangDropdown();
@@ -183,7 +226,9 @@
 
   function setLang(code) {
     currentLang = code;
-    try { localStorage.setItem('airprompt-lang', code); } catch (_) {}
+    try {
+      localStorage.setItem('airprompt-lang', code);
+    } catch (_) {}
     const wasListening = isListening;
     const gen = ++_langSwitchGen;
     if (wasListening) {
@@ -197,9 +242,9 @@
     // Always schedule restart — gen check below ensures only the last
     // call's restart fires, even across rapid switches where intermediate
     // calls see isListening already false.
-    setTimeout(function() {
+    setTimeout(function () {
       if (gen !== _langSwitchGen) return;
-      if (!wasListening) return;  // only restart if recording before switch
+      if (!wasListening) return; // only restart if recording before switch
       isListening = true;
       _safeRecognitionStart();
       dictateBtn.classList.add('recording');
@@ -219,8 +264,10 @@
 
   // ── Safe recognition start — guards against InvalidStateError ─────────
   function _safeRecognitionStart() {
-    try { recognition.start(); return true; }
-    catch (e) {
+    try {
+      recognition.start();
+      return true;
+    } catch (e) {
       isListening = false;
       isPaused = false;
       dictateBtn.classList.remove('recording', 'paused');
@@ -246,7 +293,7 @@
     recognition.interimResults = true;
     recognition.continuous = true;
 
-    recognition.onresult = function(event) {
+    recognition.onresult = function (event) {
       let latestInterim = '';
 
       for (let i = 0; i < event.results.length; i++) {
@@ -303,7 +350,8 @@
       if (displayText && DictationMacros) {
         // Revert the STT's newlines in the live interim (segments were already
         // reverted in the fragment loop).
-        if (_latestInterim) displayText = DictationMacros.revertSttNewlines(displayText, currentLang);
+        if (_latestInterim)
+          displayText = DictationMacros.revertSttNewlines(displayText, currentLang);
         displayText = DictationMacros.applyInline(displayText, currentLang);
       }
       dictateText.textContent = displayText;
@@ -315,14 +363,14 @@
       }
     };
 
-    recognition.onspeechstart = function() {
+    recognition.onspeechstart = function () {
       dictateOverlay.classList.add('speaking');
     };
-    recognition.onspeechend = function() {
+    recognition.onspeechend = function () {
       dictateOverlay.classList.remove('speaking');
     };
 
-    recognition.onstart = function() {
+    recognition.onstart = function () {
       // Reset result-index tracking so new session results get processed.
       // _segments and _pendingFormat survive across Android restarts.
       _lastTranscripts = [];
@@ -336,7 +384,7 @@
       }
     };
 
-    recognition.onerror = function(e) {
+    recognition.onerror = function (e) {
       if (e.error === 'not-allowed') {
         isListening = false;
         _stopPending = false;
@@ -351,13 +399,15 @@
         setLang('en-US');
         micError.style.display = 'block';
         micError.textContent = tr('langFallback');
-        setTimeout(function() { micError.style.display = 'none'; }, 3000);
+        setTimeout(function () {
+          micError.style.display = 'none';
+        }, 3000);
       }
       // Transient errors — onend will restart
     };
 
     const onendExpectedGen = _onendGen;
-    recognition.onend = function() {
+    recognition.onend = function () {
       dictateOverlay.classList.remove('speaking');
       if (isListening && onendExpectedGen === _onendGen && !_stopPending) _safeRecognitionStart();
     };
@@ -373,7 +423,10 @@
   // ── Core dictation actions ──────────────────────────────────────────
 
   function toggleDictation(e) {
-    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (!recognition) return;
     hideLangDropdown();
 
@@ -384,7 +437,10 @@
       dictateBtn.classList.remove('recording');
       dictateIcon.textContent = '🎤';
       dictateLabel.textContent = tr('dictate');
-      setTimeout(function() { _stopPending = false; acceptDictation(); }, 150);
+      setTimeout(function () {
+        _stopPending = false;
+        acceptDictation();
+      }, 150);
     } else if (_stopPending) {
       return; // Ignore taps during stop → accept transition
     } else {
@@ -419,7 +475,9 @@
       _pendingFormat = null;
     }
     // Strip leading/trailing spaces only — keep intentional \n from nueva línea/nuevo párrafo.
-    const rawText = DictationMacros.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
+    const rawText = DictationMacros.trimSpaces(
+      segmentsText + (interimText ? ' ' + interimText : '')
+    );
     const text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
     if (isListening) {
       isListening = false;
@@ -476,7 +534,9 @@
       _pendingFormat = null;
     }
     // Strip leading/trailing spaces only — keep intentional \n from nueva línea/nuevo párrafo.
-    const rawText = DictationMacros.trimSpaces(segmentsText + (interimText ? ' ' + interimText : ''));
+    const rawText = DictationMacros.trimSpaces(
+      segmentsText + (interimText ? ' ' + interimText : '')
+    );
     const text = DictationMacros ? DictationMacros.applyInline(rawText, currentLang) : rawText;
     if (isListening) {
       isListening = false;
@@ -487,7 +547,7 @@
     }
     if (text) {
       _send({ type: 'input', data: text });
-      setTimeout(function() {
+      setTimeout(function () {
         _send({ type: 'input', data: '\r' });
       }, 200);
     }
@@ -552,30 +612,34 @@
   }
 
   function _wireListeners() {
-    dictateAccept.addEventListener('click', function(e) {
+    dictateAccept.addEventListener('click', function (e) {
       e.stopPropagation();
       acceptDictation();
     });
 
-    dictateAcceptSend.addEventListener('click', function(e) {
+    dictateAcceptSend.addEventListener('click', function (e) {
       e.stopPropagation();
       acceptAndSend();
     });
 
-    dictateCancel.addEventListener('click', function(e) {
+    dictateCancel.addEventListener('click', function (e) {
       e.stopPropagation();
       cancelDictation();
     });
 
     // Block click from bubbling to session-bar (would open modal)
-    dictateBtn.addEventListener('click', function(e) { e.stopPropagation(); });
+    dictateBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+    });
 
     let _useTouch = false;
-    try { _useTouch = window.matchMedia('(pointer: coarse)').matches; } catch (_) {}
+    try {
+      _useTouch = window.matchMedia('(pointer: coarse)').matches;
+    } catch (_) {}
 
     if (_useTouch) {
       let _touchStartT = 0;
-      dictateBtn.addEventListener('touchstart', function(e) {
+      dictateBtn.addEventListener('touchstart', function (e) {
         e.stopPropagation();
         longTapFired = false;
         _touchStartT = Date.now();
@@ -583,56 +647,58 @@
         longTapTimer = setTimeout(onLongTap, 500);
       });
 
-      dictateBtn.addEventListener('touchend', function(e) {
+      dictateBtn.addEventListener('touchend', function (e) {
         e.stopPropagation();
         if (longTapFired) return;
         clearTimeout(longTapTimer);
         onShortTap(e);
       });
 
-      dictateBtn.addEventListener('touchcancel', function() {
+      dictateBtn.addEventListener('touchcancel', function () {
         if (!longTapFired && Date.now() - _touchStartT < 500) {
           clearTimeout(longTapTimer);
         }
       });
 
-      dictateBtn.addEventListener('contextmenu', function(e) {
+      dictateBtn.addEventListener('contextmenu', function (e) {
         e.preventDefault();
       });
     } else {
-      dictateBtn.addEventListener('pointerdown', function(e) {
+      dictateBtn.addEventListener('pointerdown', function (e) {
         e.stopPropagation();
         longTapFired = false;
         clearTimeout(longTapTimer);
         longTapTimer = setTimeout(onLongTap, 500);
       });
 
-      dictateBtn.addEventListener('pointerup', function(e) {
+      dictateBtn.addEventListener('pointerup', function (e) {
         e.stopPropagation();
         if (longTapFired) return;
         clearTimeout(longTapTimer);
         onShortTap(e);
       });
 
-      dictateBtn.addEventListener('pointerleave', function() {
+      dictateBtn.addEventListener('pointerleave', function () {
         clearTimeout(longTapTimer);
       });
-      dictateBtn.addEventListener('pointercancel', function() {
+      dictateBtn.addEventListener('pointercancel', function () {
         clearTimeout(longTapTimer);
       });
     }
 
     // Close dropdown on outside click
-    document.addEventListener('click', function(e) {
-      if (!langDropdown.classList.contains('dropdown-hidden') &&
-          !dictateBtn.contains(e.target) &&
-          !langDropdown.contains(e.target)) {
+    document.addEventListener('click', function (e) {
+      if (
+        !langDropdown.classList.contains('dropdown-hidden') &&
+        !dictateBtn.contains(e.target) &&
+        !langDropdown.contains(e.target)
+      ) {
         hideLangDropdown();
       }
     });
 
     if (langCancel) {
-      langCancel.addEventListener('click', function(e) {
+      langCancel.addEventListener('click', function (e) {
         e.stopPropagation();
         hideLangDropdown();
       });
@@ -642,7 +708,7 @@
   // ── Public API ──────────────────────────────────────────────────────
 
   window.Dictation = {
-    init: function(deps) {
+    init: function (deps) {
       _send = deps.send;
       _log = deps.log;
       _blurInput = deps.blurInput || null;
@@ -652,10 +718,11 @@
     toggle: toggleDictation,
     tr: tr,
     updateAllLabels: updateAllLabels,
-    getLang: function() { return currentLang; },
-    getOverlayHeight: function() {
+    getLang: function () {
+      return currentLang;
+    },
+    getOverlayHeight: function () {
       return dictateOverlay.classList.contains('dictate-hidden') ? 0 : dictateOverlay.offsetHeight;
     },
   };
-
 })();

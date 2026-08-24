@@ -61,19 +61,20 @@ via Expo Go — scan QR code, app loads instantly, no browser needed.
 
 From the proven Expo monorepo pattern (see [[expo-reference-project]] for details):
 
-| Element | Reference Project | AirPrompt (our version) |
-|---------|---------|------------------------|
-| Monorepo tool | `pnpm` workspace | `pnpm` workspace (simple) |
-| App structure | `apps/webapp/` + `apps/mobileapp/` | `webapp/` + `mobileapp/` |
-| Mobile framework | Expo SDK 54 + expo-router | Expo SDK 54 + expo-router |
-| Config | `app.config.js` | `app.config.js` |
-| Navigation | expo-router file-based, Stack + Tabs | expo-router file-based, Tabs |
-| TypeScript | Yes (`tsconfig.json` extends root) | Yes |
-| Root Makefile | `make expo` / `make expo-clean` | Same |
-| Dev workflow | `make expo-clean` → QR code → Expo Go | Same |
-| ESLint/Prettier | Per-app config | Start minimal (no config yet) |
+| Element          | Reference Project                     | AirPrompt (our version)       |
+| ---------------- | ------------------------------------- | ----------------------------- |
+| Monorepo tool    | `pnpm` workspace                      | `pnpm` workspace (simple)     |
+| App structure    | `apps/webapp/` + `apps/mobileapp/`    | `webapp/` + `mobileapp/`      |
+| Mobile framework | Expo SDK 54 + expo-router             | Expo SDK 54 + expo-router     |
+| Config           | `app.config.js`                       | `app.config.js`               |
+| Navigation       | expo-router file-based, Stack + Tabs  | expo-router file-based, Tabs  |
+| TypeScript       | Yes (`tsconfig.json` extends root)    | Yes                           |
+| Root Makefile    | `make expo` / `make expo-clean`       | Same                          |
+| Dev workflow     | `make expo-clean` → QR code → Expo Go | Same                          |
+| ESLint/Prettier  | Per-app config                        | Start minimal (no config yet) |
 
 What we do NOT copy from reference project (overkill for airprompt):
+
 - Firebase / notifications / EAS builds — not needed yet
 - Shared packages (`@<project>/api`, `@<project>/hooks`, etc.) — airprompt is simpler, no shared package layer needed
 - Complex auth / onboarding flows
@@ -84,18 +85,18 @@ What we do NOT copy from reference project (overkill for airprompt):
 
 ## Mobile App Feature Map (What `client.js` Does → Expo Equivalent)
 
-| Web (`client.js`) | Mobile (Expo) | Notes |
-|---|---|---|
-| `new Terminal()` from xterm.js | `<TerminalView>` component | Custom component: parses ANSI escape codes, renders colored `<Text>` lines in `<ScrollView>`. No native xterm.js for RN exists. |
-| `term.onData()` → sends keystrokes | Direct `ws.send()` on keyboard input | No PTY mode — mobile sends typed text + `\r` same as web text input |
-| `term.write(msg.data)` on `output` | Update React state, append to output buffer | Accumulate raw ANSI string, parse, render |
-| `new WebSocket(...)` | Same `new WebSocket(...)` | React Native has built-in WebSocket API |
-| `session_list` message → `updateUI()` | Same → React state updates SessionBar + SessionModal | |
-| `switch_session` message | Same → `send({ type: 'switch_session', sessionId })` | |
-| Modal with session items | `<SessionModal>` as `<Modal>` or bottom sheet | |
-| Microphone: `SpeechRecognition` API | `expo-speech-recognition` or `@react-native-voice/voice` | Push-to-talk: hold button = record, release = send transcript + `\r` |
-| Text input row | `<TextInput>` + `<Pressable>` send button | |
-| Pull-to-refresh | `<RefreshControl>` on `<ScrollView>` | Reloads session list |
+| Web (`client.js`)                     | Mobile (Expo)                                            | Notes                                                                                                                           |
+| ------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `new Terminal()` from xterm.js        | `<TerminalView>` component                               | Custom component: parses ANSI escape codes, renders colored `<Text>` lines in `<ScrollView>`. No native xterm.js for RN exists. |
+| `term.onData()` → sends keystrokes    | Direct `ws.send()` on keyboard input                     | No PTY mode — mobile sends typed text + `\r` same as web text input                                                             |
+| `term.write(msg.data)` on `output`    | Update React state, append to output buffer              | Accumulate raw ANSI string, parse, render                                                                                       |
+| `new WebSocket(...)`                  | Same `new WebSocket(...)`                                | React Native has built-in WebSocket API                                                                                         |
+| `session_list` message → `updateUI()` | Same → React state updates SessionBar + SessionModal     |                                                                                                                                 |
+| `switch_session` message              | Same → `send({ type: 'switch_session', sessionId })`     |                                                                                                                                 |
+| Modal with session items              | `<SessionModal>` as `<Modal>` or bottom sheet            |                                                                                                                                 |
+| Microphone: `SpeechRecognition` API   | `expo-speech-recognition` or `@react-native-voice/voice` | Push-to-talk: hold button = record, release = send transcript + `\r`                                                            |
+| Text input row                        | `<TextInput>` + `<Pressable>` send button                |                                                                                                                                 |
+| Pull-to-refresh                       | `<RefreshControl>` on `<ScrollView>`                     | Reloads session list                                                                                                            |
 
 ---
 
@@ -134,6 +135,7 @@ What we do NOT copy from reference project (overkill for airprompt):
 ```
 
 Minimal deps. Only what's needed:
+
 - `expo` + `expo-router` — framework + navigation
 - `react-native-safe-area-context` + `react-native-screens` — required by expo-router
 - `@react-native-voice/voice` — voice dictation (or `expo-speech-recognition` if available)
@@ -157,7 +159,7 @@ module.exports = {
       serverPort: process.env.AIRPROMPT_PORT || '3210',
     },
   },
-}
+};
 ```
 
 ### `tsconfig.json`
@@ -178,25 +180,26 @@ module.exports = {
 ### `app/_layout.tsx` — Root layout
 
 ```tsx
-import { Stack } from 'expo-router'
+import { Stack } from 'expo-router';
 
 export default function RootLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
     </Stack>
-  )
+  );
 }
 ```
 
 ### `app/(tabs)/_layout.tsx` — Tab bar
 
 Two tabs:
+
 1. **Terminal** — main screen, connects WebSocket, shows terminal output
 2. **Sessions** — session list with switch capability
 
 ```tsx
-import { Tabs } from 'expo-router'
+import { Tabs } from 'expo-router';
 
 export default function TabLayout() {
   return (
@@ -204,13 +207,14 @@ export default function TabLayout() {
       <Tabs.Screen name="terminal" options={{ title: 'Terminal' }} />
       <Tabs.Screen name="sessions" options={{ title: 'Sessions' }} />
     </Tabs>
-  )
+  );
 }
 ```
 
 ### `app/(tabs)/terminal.tsx` — Main terminal screen
 
 Replicates `index.html` terminal + controls:
+
 - Top: `<SessionBar>` — shows current session, "Switch" button
 - Middle: `<TerminalView>` — ANSI-colored terminal output in ScrollView with auto-scroll
 - Bottom: `<TextInputRow>` + `<MicButton>` — text input + voice dictation
@@ -233,6 +237,7 @@ Replicates `index.html` terminal + controls:
 ### `app/(tabs)/sessions.tsx` — Session list screen
 
 Replicates the session modal from web:
+
 - Lists all sessions from `session_list` WebSocket messages
 - Shows CWD + timestamp
 - Tap to switch (sends `switch_session` message)
@@ -254,11 +259,12 @@ Most critical component. xterm.js doesn't exist for React Native. Build minimal 
 // Auto-scrolls to bottom on new output
 
 interface TerminalViewProps {
-  outputBuffer: string     // accumulated raw ANSI output
+  outputBuffer: string; // accumulated raw ANSI output
 }
 ```
 
 ANSI parser handles:
+
 - Colors: 16 standard + bright variants (same palette as web xterm.js theme)
 - `\x1b[0m` — reset
 - `\x1b[31m` etc. — foreground colors
@@ -269,6 +275,7 @@ ANSI parser handles:
 - Cursor movements (basic: `\x1b[nA`, `\x1b[nB`, `\x1b[nC`, `\x1b[nD`)
 
 Not implementing:
+
 - Mouse events, bracketed paste, true color (256/16M), cursor positioning beyond basic movements
 
 Implementation approach: maintain `lines: string[]` state. Each ANSI output chunk updates lines. Render as `<ScrollView>` with `<Text style={lineStyle}>` per line.
@@ -317,24 +324,25 @@ Central state management for WebSocket connection. Provides React context to all
 ```ts
 interface AirPromptContext {
   // Connection
-  ws: WebSocket | null
-  connected: boolean
+  ws: WebSocket | null;
+  connected: boolean;
 
   // Sessions
-  sessions: Session[]
-  activeSessionId: string | null
+  sessions: Session[];
+  activeSessionId: string | null;
 
   // Terminal output (raw ANSI string, accumulated)
-  outputBuffer: string
+  outputBuffer: string;
 
   // Actions
-  sendInput(data: string): void
-  switchSession(sessionId: string): void
-  requestSessionList(): void
+  sendInput(data: string): void;
+  switchSession(sessionId: string): void;
+  requestSessionList(): void;
 }
 ```
 
 On mount:
+
 1. Read server URL from `expo-constants` `expoConfig.extra` (AIRPROMPT_HOST + AIRPROMPT_PORT)
 2. Connect WebSocket to `ws://<host>:<port>`
 3. Parse incoming JSON messages: `output` → append to buffer, `session_list` → update state, `error` → show alert
@@ -347,6 +355,7 @@ On mount:
 Same JSON protocol as `docs/PLAN.md` section 4:
 
 **Client → Server:**
+
 ```json
 {"type": "input", "data": "ls -la\r"}
 {"type": "switch_session", "sessionId": "1720000000-myproject"}
@@ -354,6 +363,7 @@ Same JSON protocol as `docs/PLAN.md` section 4:
 ```
 
 **Server → Client:**
+
 ```json
 {"type": "output", "data": "\x1b[32m...terminal output...\x1b[0m"}
 {"type": "session_list", "sessions": [{"id": "...", "cwd": "...", "createdAt": "..."}]}
@@ -396,29 +406,31 @@ But since airprompt is simple (server at root, no shared packages), workspace ma
 
 ## What Stays Unchanged
 
-| File | Why |
-|------|-----|
-| `server.js` | WebSocket protocol + REST API unchanged. Both webapp and mobileapp use same server. |
-| `webapp/public/index.html` | Only moves location. Content unchanged. |
-| `webapp/public/client.js` | Same. |
-| `bin/airprompt-register.sh` | Unchanged. |
-| `bin/airprompt-unregister.sh` | Unchanged. |
-| `.claude/skills/airprompt.md` | Unchanged. |
-| `.claude/commands/airprompt.md` | Unchanged. |
-| `package.json` (root, deps: express, ws, node-pty, qrcode-terminal) | Unchanged. |
-| `test/` suite | Unchanged. |
+| File                                                                | Why                                                                                 |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `server.js`                                                         | WebSocket protocol + REST API unchanged. Both webapp and mobileapp use same server. |
+| `webapp/public/index.html`                                          | Only moves location. Content unchanged.                                             |
+| `webapp/public/client.js`                                           | Same.                                                                               |
+| `bin/airprompt-register.sh`                                         | Unchanged.                                                                          |
+| `bin/airprompt-unregister.sh`                                       | Unchanged.                                                                          |
+| `.claude/skills/airprompt.md`                                       | Unchanged.                                                                          |
+| `.claude/commands/airprompt.md`                                     | Unchanged.                                                                          |
+| `package.json` (root, deps: express, ws, node-pty, qrcode-terminal) | Unchanged.                                                                          |
+| `test/` suite                                                       | Unchanged.                                                                          |
 
 ---
 
 ## Implementation Steps (Ordered)
 
 ### Step 1: Move `public/` into `webapp/public/`
+
 - Create `webapp/` directory
 - Move `public/` → `webapp/public/`
 - Update `server.js` static path: `app.use(express.static(path.join(__dirname, 'webapp', 'public')))`
 - Verify `npm start` still serves web app at `http://localhost:3210`
 
 ### Step 2: Create `mobileapp/` Expo project
+
 - `cd mobileapp && npx create-expo-app@latest . --template blank-typescript`
 - Or manually: create `package.json`, `app.config.js`, `tsconfig.json` from plan above
 - Install deps: `expo-router`, `react-native-safe-area-context`, `react-native-screens`, `@react-native-voice/voice`
@@ -427,6 +439,7 @@ But since airprompt is simple (server at root, no shared packages), workspace ma
 - Verify `npx expo start` launches Expo Go with working app shell
 
 ### Step 3: Build `useWebSocket` hook
+
 - Create `src/hooks/useWebSocket.ts`
 - WebSocket connection to server (read host/port from expo-constants extra)
 - Parse JSON messages: `output`, `session_list`, `error`
@@ -437,6 +450,7 @@ But since airprompt is simple (server at root, no shared packages), workspace ma
 - Reconnect on disconnect with backoff
 
 ### Step 4: Build `<TerminalView>` component
+
 - Create `src/lib/ansi.ts` — minimal ANSI parser
 - Create `src/components/TerminalView.tsx`
 - `ScrollView` with auto-scroll to bottom (`onContentSizeChange`)
@@ -445,11 +459,13 @@ But since airprompt is simple (server at root, no shared packages), workspace ma
 - Efficient: only re-render when new output arrives (use `React.memo`)
 
 ### Step 5: Build `<SessionBar>` + `<SessionModal>`
+
 - `SessionBar.tsx`: shows active session CWD, "Switch" button
 - `SessionModal.tsx`: React Native `<Modal>`, FlatList of sessions, tap to switch, close button
 - Empty state: "No active sessions" message
 
 ### Step 6: Build `<TextInputRow>` + `<MicButton>`
+
 - `TextInputRow.tsx`: `<TextInput>` + `<Pressable>` send button, Enter key support
 - `MicButton.tsx`: PressIn/PressOut gesture, `@react-native-voice/voice` integration
 - Recording state visual feedback (red background, pulsing)
@@ -457,22 +473,26 @@ But since airprompt is simple (server at root, no shared packages), workspace ma
 - On result: send transcript + `\r` via WebSocket
 
 ### Step 7: Wire `terminal.tsx` screen
+
 - Compose all components: SessionBar + TerminalView + TextInputRow + MicButton
 - Connect to useWebSocket context
 - Handle keyboard avoidance (keyboard pushes terminal up)
 
 ### Step 8: Wire `sessions.tsx` screen
+
 - FlatList of sessions from useWebSocket context
 - Active session highlighted
 - Tap to switch
 - Pull-to-refresh: RefreshControl calls `requestSessionList()`
 
 ### Step 9: Update root `Makefile`
+
 - Add `expo` target: `cd mobileapp && npx expo start -c --go`
 - Add `expo-clean` target: `clean setup expo`
 - Update `.PHONY` line
 
 ### Step 10: Update `README.md`
+
 - Document new directory structure
 - Document `make expo-clean` for mobile dev
 - Show Expo Go QR code workflow
