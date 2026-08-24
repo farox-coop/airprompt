@@ -4,7 +4,7 @@ Snapshot: 2026-08-18. Deep audit across 7 dimensions (architecture, providers, d
 
 > Implementation plan (stages + commits): [PLAN - open readiness.md](<PLAN - open readiness.md>)
 
-> **Status (2026-08-23): Phase 1 complete, Phase 2 in progress** — all 5 blockers resolved (device pairing + WS origin check, Node `rm -rf` guard, MIT LICENSE, identity re-home to `farox-coop`, provider scope honesty), plus contributor governance (CONTRIBUTING, PR/issue templates, CODEOWNERS, editorconfig, gitattributes). Stage 2.2 (test/CI integrity) and Phase 3 remain.
+> **Status (2026-08-23): Phase 1 complete, Phase 2 in progress** — all 5 blockers resolved (device pairing + WS origin check, Node `rm -rf` guard, MIT LICENSE, identity re-home to `farox-coop`, provider scope honesty), plus contributor governance (CONTRIBUTING, PR/issue templates, CODEOWNERS, editorconfig, gitattributes) and test integrity (silent-skip shell tests fixed, `engines.node >=18`, Node matrix 18/20/24). Remaining: agnostic-check gate, then Phase 3.
 
 ## Verdict
 
@@ -53,7 +53,7 @@ Bottom line: Linux/WSL ready, macOS not ready, native Windows unsupported (despi
 - ~~No `CONTRIBUTING.md`, no PR/issue templates, no `CODEOWNERS`, no `.editorconfig`/`.gitattributes` (CRLF risk for shell scripts).~~ — resolved in Stage 2.1.
 - Two shell tests silently skip on a fresh clone: `statusline.test.sh:5-7`, `status-formatter.test.sh:5-8` (one hardcodes `$HOME/projects/airprompt`) → green CI that tested nothing.
 - `agnostic-check` (the repo's own "no provider names in core" guard) is dev-only, not in `test-all`/CI — a PR can violate the architecture rule and stay green.
-- No `engines` field (Node ≥18 enforced only at install time); CI single Node 24, no matrix.
+- ~~No `engines` field (Node ≥18 enforced only at install time); CI single Node 24, no matrix.~~ — resolved in Stage 2.2 (`engines.node >=18` + Node matrix 18/20/24).
 
 ## Polish / later
 
@@ -93,8 +93,10 @@ High-level summary only. The full staged/commit breakdown lives in [PLAN - open 
 
 - [x] `CONTRIBUTING.md` (prereqs, dev run with `AIRPROMPT_DEBUG=1`, `make test-all`, add-a-provider path, no-hardcoded-paths rule, commit convention).
 - [x] PR + issue templates, `.editorconfig`, `.gitattributes`, `CODEOWNERS`.
-- [ ] Fix the 2 silent-skip shell tests; wire `agnostic-check` into `test-all`/CI.
-- [ ] `engines` field + Node CI matrix (18/20/24).
+- [x] Fix the 2 silent-skip shell tests (resolve from repo root, fail instead of `exit 0`).
+- [x] `engines` field (`node >=18`).
+- [x] Node CI matrix (18/20/24).
+- [ ] Wire `agnostic-check` into `test-all`/CI (deferred — needs the 265-ref report categorized first).
 
 ### Phase 3 — wider platform (before "anyone can use it")
 

@@ -1,11 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-# Try deployed hook first, fall back to source
-HOOK="${HOME}/.claude/hooks/airprompt-statusline.sh"
+# Resolve the source hook from the repo root (works on a fresh clone, no deployment needed).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+REPO_ROOT="$(repo_root)"
+HOOK="$REPO_ROOT/src/hooks/airprompt-statusline.sh"
 if [ ! -f "$HOOK" ]; then
-  echo "Warning: deployed hook not found, this test requires a deployed airprompt-statusline.sh" >&2
-  exit 0
+  echo "Error: $HOOK not found" >&2
+  exit 1
 fi
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT

@@ -2,7 +2,7 @@
 
 > Derived from the audit in [REPORT - open readiness.md](<REPORT - open readiness.md>). Read the report for the full findings (blockers, should-fix, provider matrix); this plan sequences those fixes into stages.
 
-> **Status (2026-08-23): Phase 1 complete, Phase 2 in progress** — Stages 1.1–2.1 done, all blockers resolved. Stage 2.2 (test/CI integrity) and Phase 3 remain.
+> **Status (2026-08-23): Phase 1 complete, Phase 2 in progress** — Stages 1.1–2.2 done, all blockers resolved. Stage 2.3 (agnostic-check gate) and Phase 3 remain.
 
 ## How to use this plan
 
@@ -109,15 +109,27 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
   - PR template (test-all checklist, provider-adapter scope, no-hardcoded-paths), bug/feature issue templates, `CODEOWNERS` for review routing, `.gitattributes` (`* text=auto`, `*.sh text eol=lf`), `.editorconfig`.
 - Acceptance: a new contributor can set up, test, and submit a change following only `CONTRIBUTING.md`; opening a PR/issue shows a template; shell scripts stay LF.
 
-### Stage 2.2 — Test/CI integrity
+### Stage 2.2 — Test/CI integrity (silent-skip tests, engines, Node matrix)
 
-- **Commit message:** `ci(tests): fix silent-skip shell tests, gate agnostic-check, node matrix`
+- **Commit message:** `ci(test): un-skip silent shell suites, add Node matrix, declare engines.node >=18`
 
-- Files: `test/unit/statusline.test.sh`, `test/unit/status-formatter.test.sh`, `Makefile`, `.github/workflows/test.yml`, `package.json`.
+- Files: `test/unit/common.sh` (new), `test/unit/statusline.test.sh`, `test/unit/status-formatter.test.sh`, `test/unit/sync.test.sh`, `.github/workflows/test.yml`, `package.json`.
 - Scope:
-  - Fix the two silent-skip shell tests: resolve the hook/formatter from the repo root (`dirname "$0"` / `git rev-parse --show-toplevel`) instead of the deployed path or `$HOME/projects/airprompt`; fail rather than silently `exit 0`.
-  - Wire `agnostic-check` into `test-all` and the CI gate; add `"engines": { "node": ">=18" }`; add a Node version matrix (18/20/24).
-- Acceptance: on a fresh clone, `make test-all` genuinely exercises both shell suites; a PR hardcoding a provider name in core fails CI; CI runs on multiple Node versions.
+  - Fix the two silent-skip shell tests: resolve the hook/formatter from the repo root (shared `repo_root()` helper in `test/unit/common.sh`) instead of the deployed path or `$HOME/projects/airprompt`; fail (`exit 1`) rather than silently `exit 0`.
+  - Add `"engines": { "node": ">=18" }` to `package.json`.
+  - Add a Node version matrix (18/20/24) to `.github/workflows/test.yml`.
+- Acceptance: on a fresh clone, `make test-all` genuinely exercises both shell suites (assertions run, not skipped); CI runs on multiple Node versions.
+- Deferred (→ Stage 2.3): wiring `agnostic-check` into `test-all`/CI.
+
+### Stage 2.3 — Test/CI integrity (agnostic-check gate)
+
+- **Commit message:** `ci(tests): gate agnostic-check`
+
+- Files: `bin/airprompt-agnostic-check.sh`, `Makefile`.
+- Scope:
+  - Categorize the current `agnostic-check` report (265 refs / 19 files: test noise, the intentional `bin/` detection loop, a `public/` audit) and add exemptions so the check is green on main.
+  - Wire `agnostic-check` into the `test-all` target (CI runs `make test-all`, so this gates it).
+- Acceptance: `make test-all` runs `agnostic-check`; a PR hardcoding a provider name in core fails CI.
 
 ### Proposed PR description — Phase 2
 
@@ -126,19 +138,23 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - add `CONTRIBUTING.md` covering setup, testing, add-a-provider, and conventions
 - add PR/issue templates, `CODEOWNERS`, `.editorconfig`, and `.gitattributes` (LF enforcement)
 - fix two shell tests that silently skipped on a fresh clone
-- enforce `agnostic-check` in CI, declare `engines.node >=18`, and add a Node version matrix
+- declare `engines.node >=18` and add a Node version matrix (18/20/24)
+- gate `agnostic-check` in CI (Stage 2.3)
 
 #### Tasks
 
 - [x] `CONTRIBUTING.md` (prereqs, dev run, `make test-all`, add-a-provider, commit convention)
 - [x] PR template + issue templates + `CODEOWNERS` + `.editorconfig` + `.gitattributes`
-- [ ] fix `statusline.test.sh` / `status-formatter.test.sh` silent-skip
-- [ ] `agnostic-check` into `test-all`/CI + `engines` + Node matrix
+- [x] fix `statusline.test.sh` / `status-formatter.test.sh` silent-skip
+- [x] `engines.node >=18`
+- [x] Node version matrix (18/20/24)
+- [ ] `agnostic-check` into `test-all`/CI
 
 #### Notes / Out of Scope
 
 - no feature work — governance + test/CI only
 - real linter deferred to Phase 3 (lint is syntax-only today)
+- `agnostic-check` gate deferred to Stage 2.3 (needs 265-ref categorization)
 
 ---
 
@@ -209,7 +225,8 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 | 1.3 | Onboarding/docs section + statusline badge missing |
 | 1.4 | Blocker #5 (only `claude` provider) |
 | 2.1 | Contributor/PR readiness section |
-| 2.2 | Test/CI integrity section |
+| 2.2 | Test/CI integrity section (silent-skip tests + engines) |
+| 2.3 | Test/CI integrity section (agnostic-check gate) |
 | 3.1 | macOS breaks section |
 | 3.2 | Portability/install correctness section |
 | 3.3 | Provider readiness matrix (Codex/Cursor/Windsurf) |
@@ -222,7 +239,8 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] 1.3 Docs + install path (README + statusline badge)
 - [x] 1.4 Provider scope honesty
 - [x] 2.1 Contributing + repo governance
-- [ ] 2.2 Test/CI integrity
+- [x] 2.2 Test/CI integrity (silent-skip tests + engines)
+- [ ] 2.3 Test/CI integrity (agnostic-check gate)
 - [ ] 3.1 macOS portability
 - [ ] 3.2 Install robustness
 - [ ] 3.3 Ship remaining providers

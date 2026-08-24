@@ -1,14 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-# Resolve formatter location
-FORMATTER=""
-for d in "${AIRPROMPT_INSTALL_DIR:-}" "$HOME/.airprompt" "$HOME/projects/airprompt"; do
-  if [ -f "$d/src/status-formatter.js" ]; then FORMATTER="$d/src/status-formatter.js"; break; fi
-done
-if [ -z "$FORMATTER" ]; then
-  echo "SKIP: status-formatter.js not found (needs sync-claude or dev checkout)" >&2
-  exit 0
+# Resolve the formatter from the repo root (works on a fresh clone, no deployment needed).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+REPO_ROOT="$(repo_root)"
+FORMATTER="$REPO_ROOT/src/status-formatter.js"
+if [ ! -f "$FORMATTER" ]; then
+  echo "Error: $FORMATTER not found" >&2
+  exit 1
 fi
 
 pass=0; fail=0

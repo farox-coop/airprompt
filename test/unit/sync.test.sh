@@ -2,8 +2,8 @@
 set -euo pipefail
 # ── sync.sh unit tests ────────────────────────────────────────────────
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+REPO_ROOT="$(repo_root)"
 SYNC_SH="$REPO_ROOT/.claude/skills/sync-claude/sync.sh"
 
 ok()  { echo "  PASS: $1"; }
