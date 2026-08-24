@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18, 20, 24]
+        node-version: [20, 22, 24]
 
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +26,6 @@ jobs:
 
       # node-pty (native dep) compiles from source on Linux; tmux is needed
       # by the integration suite. build-essential + python3 satisfy node-gyp.
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux build-essential python3
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux build-essential python3 shellcheck
 
       - run: make test-all

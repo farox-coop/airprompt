@@ -200,7 +200,7 @@ Targets:
 | `test-all` | Run `test-unit` + `test-integration` |
 | `test-unit` | `node --test test/unit/*.test.js` |
 | `test-integration` | `bash test/integration/run.sh` |
-| `lint` | `npx eslint server.js public/client.js` (or basic `node --check`) |
+| `lint` | `eslint .` |
 | `clean` | Remove PID file, `node_modules/` |
 
 `.PHONY` on single line.

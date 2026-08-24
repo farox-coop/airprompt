@@ -18,9 +18,9 @@ set -euo pipefail
 
 REPO="farox-coop/airprompt"
 
-# Require Node ≥18. nvm is a common path; print a hint if missing.
+# Require Node ≥20. nvm is a common path; print a hint if missing.
 if ! command -v node >/dev/null 2>&1; then
-  echo "airprompt: Node.js (≥18) required. Install:" >&2
+  echo "airprompt: Node.js (≥20) required. Install:" >&2
   echo "  macOS:  brew install node" >&2
   echo "  Linux:  see https://nodejs.org or use nvm (https://github.com/nvm-sh/nvm)" >&2
   exit 1
@@ -28,7 +28,7 @@ fi
 
 NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
 if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "airprompt: Node $NODE_MAJOR too old. Need Node ≥18." >&2
+  echo "airprompt: Node $NODE_MAJOR too old. Need Node ≥20." >&2
   echo "  Upgrade: https://nodejs.org" >&2
   exit 1
 fi

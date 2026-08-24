@@ -4,7 +4,7 @@ Thanks for helping build AirPrompt. This document covers how to set up a dev env
 
 ## Prerequisites
 
-- **Node.js ≥ 18** — the installer enforces this at startup.
+- **Node.js ≥ 20** — the installer enforces this at startup.
 - **tmux** — required for terminal mirroring. `sudo apt install tmux` (macOS: `brew install tmux`).
 - **jq** — daemon protocol detection and notifications. `sudo apt install jq`.
 - **curl** — API communication with the daemon.
@@ -39,10 +39,13 @@ make test-all
 
 | Target | What it runs |
 |---|---|
-| `make lint` | `node --check` syntax check over every `.js` file |
+| `make lint` | `eslint` over every `.js` file |
+| `make lint-sh` | `shellcheck` over `.sh` (optional; skipped if shellcheck not installed) |
 | `make test-unit` | `node --test test/unit/*.test.js` + the three shell suites |
 | `make test-integration` | `bash test/integration/run.sh` |
 | `make agnostic-check` | the provider-agnosticism audit (see below) |
+
+`make format` runs `prettier --write` (one-time reformat), `make format-check` runs `prettier --check` to verify formatting. Shell scripts are checked with `make lint-sh` (shellcheck; optional locally, not yet CI-gated).
 
 Tests are isolated from any real daemon. Unit tests use `createApp()` (a fresh server, no PID file). Integration tests use port 3211 and `/tmp/airprompt-server-test.pid`. Tmux sessions are prefixed `airprompt-test-*` / `airprompt-integtest-*` and never touch real sessions. Do not change a failing test to make it pass — fix the production code, unless the production code itself changed and the test expectation is now wrong.
 

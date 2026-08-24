@@ -28,11 +28,11 @@ function Install-AirPrompt {
   $ErrorActionPreference = "Stop"
   $Repo = "farox-coop/airprompt"
 
-  # Require Node ≥18.
+  # Require Node ≥20.
   $node = Get-Command node -ErrorAction SilentlyContinue
   if (-not $node) {
     Write-Error @"
-airprompt: Node.js (>=18) required. Install:
+airprompt: Node.js (>=20) required. Install:
   - winget install OpenJS.NodeJS.LTS
   - or download from https://nodejs.org
 "@
@@ -41,7 +41,7 @@ airprompt: Node.js (>=18) required. Install:
 
   $nodeMajor = [int](& node -p "process.versions.node.split('.')[0]")
   if ($nodeMajor -lt 18) {
-    Write-Error "airprompt: Node $nodeMajor too old. Need Node >=18. Upgrade: https://nodejs.org"
+    Write-Error "airprompt: Node $nodeMajor too old. Need Node >=20. Upgrade: https://nodejs.org"
     exit 1
   }
 

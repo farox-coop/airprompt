@@ -8,7 +8,7 @@ AirPrompt lets you view and interact with remote IDE/CLI sessions running on you
 
 ## Requirements
 
-- **Node.js** ≥ 18
+- **Node.js** ≥ 20
 - **tmux** (`sudo apt install tmux`)
 - **curl** — API communication with daemon
 - **jq** (`sudo apt install jq`) — JSON parsing for daemon protocol detection and notifications
@@ -209,7 +209,10 @@ The daemon requires SSH-style device pairing: each browser holds an ECDSA P-256 
 | `stop` | Stop daemon via PID file |
 | `refresh` | Stop, clean, setup, and start fresh |
 | `logs` | Tail daemon logs |
-| `lint` | Syntax-check JS files |
+| `lint` | Lint JS files with ESLint |
+| `lint-sh` | Lint shell scripts with shellcheck (optional) |
+| `format` | Reformat with Prettier |
+| `format-check` | Verify formatting with Prettier |
 | `test-all` | Run unit and integration tests |
 | `agnostic-check` | Audit codebase for hardcoded provider names (dev only) |
 | `test-unit` | Run Node.js unit tests |

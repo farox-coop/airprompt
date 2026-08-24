@@ -140,7 +140,7 @@
     s = s.replace(/\(/g, '').replace(/\)/g, '');     // group delimiters
     s = s.replace(/[?*+]/g, '');                     // quantifiers
     s = s.replace(/\\[bBdDsSwW]/g, '');              // \b \s \d \w … escape classes
-    s = s.replace(/\[([^\[\]]*)\]/g, function (m, inner) {
+    s = s.replace(/\[([^[\]]*)\]/g, function (m, inner) {
       const acc = inner.match(/[áéíóúÁÉÍÓÚ]/);
       return acc ? acc[0] : inner.charAt(0);
     });

@@ -43,7 +43,7 @@ function parseArgs(argv) {
       case '--non-interactive': opts.nonInteractive = true; break;
       case '-h': case '--help': opts.help = true; break;
       case '--': break;
-      case '--list': printList(opts.noColor); process.exit(0);
+      case '--list': printList(opts.noColor); process.exit(0); break;
       case '--only': {
         const v = argv[++i];
         if (!v) die('error: --only requires an argument');
@@ -101,7 +101,7 @@ function makeChalk(noColor) {
 // ── Env guards ─────────────────────────────────────────────────────────────
 function checkNodeVersion() {
   const major = parseInt(process.versions.node.split('.')[0], 10);
-  if (major < 18) die(`airprompt: Node ${process.versions.node} too old. Need Node ≥18. https://nodejs.org`);
+  if (major < 20) die(`airprompt: Node ${process.versions.node} too old. Need Node ≥20. https://nodejs.org`);
 }
 
 // ── Repo root resolution ───────────────────────────────────────────────────

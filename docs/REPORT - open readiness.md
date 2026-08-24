@@ -4,7 +4,7 @@ Snapshot: 2026-08-18. Deep audit across 7 dimensions (architecture, providers, d
 
 > Implementation plan (stages + commits): [PLAN - open readiness.md](<PLAN - open readiness.md>)
 
-> **Status (2026-08-23): Phases 1 and 2 complete** — all 5 blockers resolved, plus contributor governance (CONTRIBUTING, PR/issue templates, CODEOWNERS, editorconfig, gitattributes) and test integrity (silent-skip shell tests fixed, `engines.node >=18`, Node matrix, agnostic-check gated in `test-all`). Phase 3 (wider platform) remains.
+> **Status: Phase 1 complete, Phase 2 nearly complete** — all 5 blockers resolved, plus contributor governance (CONTRIBUTING, PR/issue templates, CODEOWNERS, editorconfig, gitattributes) and test integrity (silent-skip shell tests fixed, `engines.node >=20`, Node matrix, agnostic-check gated in `test-all`). Stage 2.4 (linter/formatter) in progress; Phase 3 (wider platform) remains.
 
 ## Verdict
 

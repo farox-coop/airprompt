@@ -455,12 +455,14 @@ async function wsMessageHandler(event) {
       }
 
       // Try restore persisted session, else fall back to first
-      const storedId = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (storedId && sessions.some((s) => s.id === storedId)) {
-        selectSession(storedId);
-      } else if (sessions.length > 0) {
-        localStorage.removeItem(SESSION_STORAGE_KEY);
-        selectSession(sessions[0].id);
+      {
+        const storedId = localStorage.getItem(SESSION_STORAGE_KEY);
+        if (storedId && sessions.some((s) => s.id === storedId)) {
+          selectSession(storedId);
+        } else if (sessions.length > 0) {
+          localStorage.removeItem(SESSION_STORAGE_KEY);
+          selectSession(sessions[0].id);
+        }
       }
       break;
     case 'error':
@@ -710,7 +712,6 @@ if (window.visualViewport) {
 Dictation.init({ send: function(m) { send(m); }, log: log, blurInput: function() {
   if (window._airpromptBlurMobileInput) window._airpromptBlurMobileInput();
 }, sessionLabel: sessionLabel });
-function tr(key) { return Dictation.tr(key); }
 
 // ── Mobile input bar ──────────────────────────────────────────────────
 // On touch devices, a real <input> captures keyboard input instead of
