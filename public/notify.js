@@ -80,8 +80,8 @@ function showNotification(n) {
   toast.appendChild(metaEl);
   toast.appendChild(summaryEl);
 
-  // Filter out default/empty IDE status messages
-  if (n.message && n.message !== 'null' && n.message !== 'Claude Code' && n.message !== 'Codex' && n.message !== 'Cursor') {
+  // Filter out default/empty status messages
+  if (n.message && n.message !== 'null' && n.message !== 'undefined') {
     const msgEl = document.createElement('div');
     msgEl.className = 'notify-message';
     msgEl.textContent = n.message;

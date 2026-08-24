@@ -18,7 +18,12 @@ PROVIDERS=(claude codex cursor windsurf gemini)
 
 # Files/dirs exempt from scanning (these ARE provider-specific by design).
 EXEMPT_FILES=(
+  ".gitignore"
   "bin/airprompt-agnostic-check.sh"
+  "bin/airprompt"
+  "bin/airprompt-attach.sh"
+  "bin/airprompt-on.sh"
+  "bin/install.js"
   "src/providers/claude.js"
   "src/providers/codex.js"
   "src/providers/cursor.js"
@@ -36,6 +41,7 @@ EXEMPT_DIRS=(
   ".gemini-plugin"
   ".claude/skills"
   "docs"
+  "test"
   "node_modules"
   ".git"
 )
@@ -49,12 +55,12 @@ is_exempt() {
   return 1
 }
 
-# Collect files
+# Collect files — tracked files only (git), so gitignored local state (.vscode/,
+# .claude/review-findings/) never trips the check. Falls back to find outside a worktree.
 FILES=()
 while IFS= read -r -d '' f; do
-  f="${f#./}"  # strip ./ prefix for matching
   is_exempt "$f" || FILES+=("$f")
-done < <(find . -type f \( -name '*.js' -o -name '*.sh' -o -name '*.json' \
+done < <(git ls-files -z 2>/dev/null || find . -type f \( -name '*.js' -o -name '*.sh' -o -name '*.json' \
   -o -name '*.html' -o -name '*.css' -o -name '*.md' -o -name '*.toml' \
   -o -name '*.yml' -o -name 'Makefile' -o -name '*.mk' \
   -o -name 'airprompt' -o -name 'airprompt-launch' \) -print0 2>/dev/null | sed 's|^\./||')
@@ -80,6 +86,7 @@ for f in "${FILES[@]}"; do
       -e "\"${prov}\"" \
       -e "cursor.*pointer" \
       -e "cursorBlink" \
+      -e "cursor[A-Z]" \
       -e "cursor:" \
       -e "cursor " \
       -e "/cursor" \
@@ -100,12 +107,11 @@ for f in "${FILES[@]}"; do
         || true)
     fi
 
-    # Only scan .js/.sh/.json for non-claude providers (docs/MD mention them descriptively)
-    if [ "$prov" != "claude" ]; then
-      case "$f" in
-        *.md|docs/*|*.css|*.html|*.json|*.toml|*.svg|Makefile|*.yml) continue ;;
-      esac
-    fi
+    # Only scan code files — docs/meta/config (.md/.json/.css/.html/.toml/.yml/Makefile)
+    # mention providers descriptively and are not core code.
+    case "$f" in
+      *.md|docs/*|*.css|*.html|*.json|*.toml|*.svg|Makefile|*.yml) continue ;;
+    esac
     [ -n "$matches" ] || continue
 
     while IFS= read -r line; do

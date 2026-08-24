@@ -48,7 +48,7 @@ test-unit:
 test-integration:
 	@bash test/integration/run.sh
 
-test-all: lint test-unit test-integration
+test-all: lint agnostic-check test-unit test-integration
 
 agnostic-check:
 	@bash bin/airprompt-agnostic-check.sh

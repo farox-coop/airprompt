@@ -2,7 +2,7 @@
 
 > Derived from the audit in [REPORT - open readiness.md](<REPORT - open readiness.md>). Read the report for the full findings (blockers, should-fix, provider matrix); this plan sequences those fixes into stages.
 
-> **Status (2026-08-23): Phase 1 complete, Phase 2 in progress** — Stages 1.1–2.2 done, all blockers resolved. Stage 2.3 (agnostic-check gate) and Phase 3 remain.
+> **Status: Phase 1 complete, Phase 2 in progress** — Stages 1.1–2.3 done, all blockers resolved. Stage 2.4 (linter/formatter) and Phase 3 remain.
 
 ## How to use this plan
 
@@ -131,6 +131,17 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
   - Wire `agnostic-check` into the `test-all` target (CI runs `make test-all`, so this gates it).
 - Acceptance: `make test-all` runs `agnostic-check`; a PR hardcoding a provider name in core fails CI.
 
+### Stage 2.4 — Lint/format normalization
+
+- **Commit message:** `chore(lint): add ESLint + shellcheck + Prettier; one-time format pass`
+
+- Files: `package.json`, `Makefile`, `.eslintrc*`/`eslint.config.*` (new), `.prettierrc*` (new), `.shellcheckrc` (new), all source files (format pass).
+- Scope:
+  - Replace the syntax-only `lint` (`node --check`) with a real linter — ESLint for `.js`, shellcheck for `.sh` (already referenced in `# shellcheck` comments) — wired into `make lint` and `test-all`.
+  - Add a formatter (Prettier) aligned with `.editorconfig`.
+  - One-time `git add --renormalize .` + format pass, landed as its own "format only, no behavior change" commit so a future 2-line edit no longer churns the whole file.
+- Acceptance: `make lint` catches real issues (not just syntax); `make test-all` runs the linter; the repo is formatted consistently; a later edit diffs cleanly (no mass churn).
+
 ### Proposed PR description — Phase 2
 
 #### Summary
@@ -140,6 +151,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - fix two shell tests that silently skipped on a fresh clone
 - declare `engines.node >=18` and add a Node version matrix (18/20/24)
 - gate `agnostic-check` in CI (Stage 2.3)
+- add a real linter + formatter and normalize the codebase (Stage 2.4)
 
 #### Tasks
 
@@ -148,13 +160,12 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] fix `statusline.test.sh` / `status-formatter.test.sh` silent-skip
 - [x] `engines.node >=18`
 - [x] Node version matrix (18/20/24)
-- [ ] `agnostic-check` into `test-all`/CI
+- [x] `agnostic-check` into `test-all`/CI
+- [ ] real linter + formatter + one-time format pass
 
 #### Notes / Out of Scope
 
 - no feature work — governance + test/CI only
-- real linter deferred to Phase 3 (lint is syntax-only today)
-- `agnostic-check` gate deferred to Stage 2.3 (needs 265-ref categorization)
 
 ---
 
@@ -187,10 +198,10 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 ### Stage 3.4 — Release hygiene
 
-- **Commit message:** `chore(release): tags, changelog, linter, gui detection probes, vscode docs`
+- **Commit message:** `chore(release): tags, changelog, gui detection probes, vscode docs`
 
 - Files: `package.json`, `CHANGELOG.md` (new), `Makefile`, `src/providers/claude.js`.
-- Scope: tag releases + CHANGELOG; add a real linter (or document that lint is syntax-only today); implement `macapp:`/`vscode-ext:` probes in `claude.js` detection; document the VS Code no-`$TMUX` limitation (phone attaches to an empty mirror shell).
+- Scope: tag releases + CHANGELOG; implement `macapp:`/`vscode-ext:` probes in `claude.js` detection; document the VS Code no-`$TMUX` limitation (phone attaches to an empty mirror shell).
 - Acceptance: versioned releases exist; detection covers GUI installs; VS Code behavior is documented, not surprising.
 
 ### Proposed PR description — Phase 3
@@ -200,14 +211,14 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - add macOS support (bash 3.2, PID guard, path resolution, LAN IP detection)
 - vendor xterm.js, document node-pty build tools, harden `.gitignore`, normalize hook timeouts
 - ship Codex/Cursor/Windsurf provider adapters
-- release hygiene: version tags, CHANGELOG, linter, GUI detection probes, VS Code docs
+- release hygiene: version tags, CHANGELOG, GUI detection probes, VS Code docs
 
 #### Tasks
 
 - [ ] macOS portability fixes
 - [ ] install robustness (vendor xterm, node-pty docs, `.gitignore`, timeouts)
 - [ ] codex/cursor/windsurf adapters + detection
-- [ ] release hygiene (tags, changelog, linter, gui probes, vscode doc)
+- [ ] release hygiene (tags, changelog, gui probes, vscode doc)
 
 #### Notes / Out of Scope
 
@@ -227,6 +238,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 | 2.1 | Contributor/PR readiness section |
 | 2.2 | Test/CI integrity section (silent-skip tests + engines) |
 | 2.3 | Test/CI integrity section (agnostic-check gate) |
+| 2.4 | Polish/later section (lint is syntax-only) |
 | 3.1 | macOS breaks section |
 | 3.2 | Portability/install correctness section |
 | 3.3 | Provider readiness matrix (Codex/Cursor/Windsurf) |
@@ -240,7 +252,8 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] 1.4 Provider scope honesty
 - [x] 2.1 Contributing + repo governance
 - [x] 2.2 Test/CI integrity (silent-skip tests + engines)
-- [ ] 2.3 Test/CI integrity (agnostic-check gate)
+- [x] 2.3 Test/CI integrity (agnostic-check gate)
+- [ ] 2.4 Lint/format normalization
 - [ ] 3.1 macOS portability
 - [ ] 3.2 Install robustness
 - [ ] 3.3 Ship remaining providers
