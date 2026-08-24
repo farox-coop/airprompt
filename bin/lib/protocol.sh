@@ -140,3 +140,55 @@ _safe_rm_rf() {
   echo "  SAFETY: refusing to rm -rf ${path} (canonical: ${canonical})" >&2
   return 1
 }
+
+# ── Portable LAN IP detection ─────────────────────────────────────────
+# Linux: `hostname -I` (filter out Docker 172./VPN 10. when possible).
+# macOS: `ipconfig getifaddr` (en0 first). Falls back to localhost.
+# Usage: LAN_IP="$(_lan_ip)"
+_lan_ip() {
+  local ip=""
+  if command -v hostname &>/dev/null; then
+    ip=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.' | grep -v '^10\.' | head -1 || true)
+    [ -z "$ip" ] && ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  fi
+  if [ -z "$ip" ] && command -v ipconfig &>/dev/null; then
+    local iface
+    for iface in en0 en1 en2; do
+      ip=$(ipconfig getifaddr "$iface" 2>/dev/null || true)
+      [ -n "$ip" ] && break
+    done
+  fi
+  [ -z "$ip" ] && ip="localhost"
+  printf '%s' "$ip"
+}
+
+# ── PID identity guard ────────────────────────────────────────────────
+# Verify a PID actually belongs to the AirPrompt daemon before killing it,
+# so a reused PID (stale pidfile) is never killed. Portable: `ps -p -o
+# command=` works on Linux and macOS — no /proc dependency.
+# Usage: _is_airprompt_pid "$PID" && echo "is airprompt daemon"
+_is_airprompt_pid() {
+  local pid="${1:-}"
+  local cmd
+  [ -n "$pid" ] || return 1
+  # COLUMNS=9999 stops GNU/BSD ps from truncating `command` to terminal width
+  # (tmux exports a small COLUMNS in narrow panes), which would cut the trailing
+  # "server.js" and false-negative a live daemon. /proc/cmdline was immune.
+  cmd=$(COLUMNS=9999 ps -p "$pid" -o command= 2>/dev/null || true)
+  case "$cmd" in
+    *server\.js*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ── Portable md5 ───────────────────────────────────────────────────────
+# GNU `md5sum` on Linux, BSD `md5 -q` on macOS. Prints the hex digest
+# (or nothing on failure). Usage: digest="$(_md5 /path/to/file)"
+_md5() {
+  if command -v md5sum >/dev/null 2>&1; then
+    md5sum "$1" 2>/dev/null | awk '{print $1}' || true
+  elif command -v md5 >/dev/null 2>&1; then
+    md5 -q "$1" 2>/dev/null || true
+  fi
+  :  # always return 0 — print the digest, or nothing on failure
+}

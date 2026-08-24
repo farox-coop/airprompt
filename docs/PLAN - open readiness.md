@@ -2,7 +2,7 @@
 
 > Derived from the audit in [REPORT - open readiness.md](<REPORT - open readiness.md>). Read the report for the full findings (blockers, should-fix, provider matrix); this plan sequences those fixes into stages.
 
-> **Status: Phases 1 and 2 complete** — all 5 blockers resolved, contributor-ready (governance + test/CI integrity + linter/formatter). Phase 3 (wider platform) remains.
+> **Status: Phases 1 and 2 complete, Stage 3.1 done** — all 5 blockers resolved, contributor-ready (governance + test/CI integrity + linter/formatter), and macOS portability shipped. Phase 3 remains: Stages 3.2–3.4.
 
 ## How to use this plan
 
@@ -177,7 +177,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - **Commit message:** `fix(portability): macOS support (bash 3.2, pid guard, path resolution, ip detection)`
 
 - Files: `bin/airprompt-clean.sh`, `.claude/skills/sync-claude/sync.sh`, `bin/airprompt-on.sh`, `bin/airprompt-off.sh`, `bin/airprompt-restart.sh`, `bin/airprompt`, `bin/airprompt-launch`, `bin/airprompt-status.sh`, `bin/generate-cert.sh`, `bin/airprompt-attach.sh`.
-- Scope: replace `mapfile` with bash-3.2-safe loops; replace the `/proc/$PID/cmdline` guard with `kill -0` + port probe (so `off/clean/restart` kill the daemon on macOS); resolve symlinks via `cd … && pwd -P` instead of `readlink -f`/`realpath`; add an `ipconfig getifaddr` fallback for LAN IP detection.
+- Scope: replace `mapfile` with bash-3.2-safe loops; replace the `/proc/$PID/cmdline` guard with a portable `ps -p $PID -o command=` check (so `off/clean/restart` kill the daemon on macOS); resolve symlinks via `cd … && pwd -P` instead of `readlink -f`/`realpath`; add an `ipconfig getifaddr` fallback for LAN IP detection.
 - Acceptance: `airprompt on/off/clean/restart/status` work on a stock macOS machine; mobile URL shows a real LAN IP.
 
 ### Stage 3.2 — Install robustness
@@ -216,7 +216,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 #### Tasks
 
-- [ ] macOS portability fixes
+- [x] macOS portability fixes
 - [ ] install robustness (vendor xterm, node-pty docs, `.gitignore`, timeouts)
 - [ ] codex/cursor/windsurf adapters + detection
 - [ ] release hygiene (tags, changelog, gui probes, vscode doc)
@@ -255,7 +255,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] 2.2 Test/CI integrity (silent-skip tests + engines)
 - [x] 2.3 Test/CI integrity (agnostic-check gate)
 - [x] 2.4 Lint/format normalization
-- [ ] 3.1 macOS portability
+- [x] 3.1 macOS portability
 - [ ] 3.2 Install robustness
 - [ ] 3.3 Ship remaining providers
 - [ ] 3.4 Release hygiene

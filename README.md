@@ -15,6 +15,10 @@ AirPrompt lets you view and interact with remote IDE/CLI sessions running on you
 - **reptyr** (`sudo apt install reptyr`) — optional, for `airprompt-attach.sh` (attach running processes to tmux)
 - **openssl** — TLS certificate generation for HTTPS voice dictation
 
+## Supported platforms
+
+Linux, macOS, and WSL are supported. macOS uses Homebrew (`brew install tmux jq openssl`); the shell scripts are bash 3.2 compatible. `reptyr` (for `airprompt-attach.sh`) is Linux-only. Native Windows is not supported (the daemon requires tmux) — the PowerShell installer does a CLI-only install.
+
 ## Architecture
 
 - **Daemon**: Single `server.js` instance on port 3210 managing multiple IDE sessions

@@ -51,6 +51,7 @@ test-unit:
 	@bash test/unit/statusline.test.sh
 	@bash test/unit/sync.test.sh
 	@bash test/unit/status-formatter.test.sh
+	@bash test/unit/protocol.test.sh
 
 test-integration:
 	@bash test/integration/run.sh

@@ -6,9 +6,19 @@
 # /airprompt name something   → bash airprompt-name.sh "something"
 set -euo pipefail
 
-# Resolve real script dir (follow symlink from ~/bin/ → repo/bin/)
-_self="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
-SELF_DIR="$(dirname "$_self")"
+# Resolve real script dir (follow symlink from ~/bin/ → repo/bin/) without
+# `readlink -f`/`realpath` (absent on macOS ≤12). `cd … && pwd -P` is portable.
+_self="${BASH_SOURCE[0]:-$0}"
+_n=0
+while [ -L "$_self" ] && [ "$_n" -lt 20 ]; do
+  _n=$((_n + 1))
+  _link="$(readlink "$_self" 2>/dev/null)" || break
+  case "$_link" in
+    /*) _self="$_link" ;;
+    *)  _self="$(cd "$(dirname "$_self")" 2>/dev/null && pwd -P)/$_link" || break ;;
+  esac
+done
+SELF_DIR="$(cd "$(dirname "$_self")" 2>/dev/null && pwd -P)" || SELF_DIR="$(dirname "$_self")"
 
 # Restore ~/bin/ symlinks + wrappers if clean nuked them (before dispatching)
 # shellcheck source=/dev/null

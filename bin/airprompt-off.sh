@@ -138,11 +138,7 @@ if [ "$REMAINING_COUNT" = "0" ]; then
     PID=$(cat "$PID_FILE")
     if kill -0 "$PID" 2>/dev/null; then
       # Verify PID is actually airprompt before killing (same guard as clean.sh)
-      IS_AIRPROMPT=false
-      if [ -r "/proc/$PID/cmdline" ]; then
-        tr '\0' ' ' < "/proc/$PID/cmdline" | grep -q 'server\.js' && IS_AIRPROMPT=true
-      fi
-      if $IS_AIRPROMPT; then
+      if _is_airprompt_pid "$PID"; then
         kill "$PID" 2>/dev/null || true
       fi
     fi

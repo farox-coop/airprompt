@@ -74,21 +74,14 @@ fi
 
 SESSION_ID="$(echo "$TMUX_SESSION" | tr -cd 'a-zA-Z0-9_-' | head -c 64)"
 
-LAN_IP=""
-if command -v hostname &>/dev/null; then
-  LAN_IP=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.' | grep -v '^10\.' | head -1 || true)
-fi
-[ -z "$LAN_IP" ] && LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-[ -z "$LAN_IP" ] && LAN_IP="localhost"
+LAN_IP="$(_lan_ip)"
 
 # ── Ensure daemon is running ─────────────────────────────────────────
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE")
   if kill -0 "$PID" 2>/dev/null; then
-    # PID reuse guard — verify cmdline matches
-    if [ -r "/proc/$PID/cmdline" ]; then
-      tr '\0' ' ' < "/proc/$PID/cmdline" | grep -q 'server\.js' || rm -f "$PID_FILE"
-    fi
+    # PID reuse guard — verify this PID is actually the airprompt daemon
+    _is_airprompt_pid "$PID" || rm -f "$PID_FILE"
   else
     rm -f "$PID_FILE"
   fi

@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+source "$(dirname "$0")/lib/protocol.sh"
+
 CERT_DIR="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
 CERT_FILE="${CERT_DIR}/airprompt-cert.pem"
 KEY_FILE="${CERT_DIR}/airprompt-key.pem"
@@ -14,12 +16,7 @@ fi
 mkdir -p "$CERT_DIR"
 
 # Detect LAN IP for SAN (filter out Docker/VPN)
-LAN_IP=""
-if command -v hostname &>/dev/null; then
-  LAN_IP=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.' | grep -v '^10\.' | head -1)
-fi
-[ -z "$LAN_IP" ] && LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-[ -z "$LAN_IP" ] && LAN_IP="localhost"
+LAN_IP="$(_lan_ip)"
 
 echo "Generating self-signed TLS certificate..."
 echo "  IP:   $LAN_IP"

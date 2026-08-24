@@ -4,7 +4,7 @@ Snapshot: 2026-08-18. Deep audit across 7 dimensions (architecture, providers, d
 
 > Implementation plan (stages + commits): [PLAN - open readiness.md](<PLAN - open readiness.md>)
 
-> **Status: Phases 1 and 2 complete** — all 5 blockers resolved, plus contributor governance (CONTRIBUTING, PR/issue templates, CODEOWNERS, editorconfig, gitattributes) and test integrity (silent-skip shell tests fixed, `engines.node >=20`, Node matrix, agnostic-check + format-check gated in `test-all`, ESLint + shellcheck + Prettier wired). Phase 3 (wider platform) remains.
+> **Status: Phases 1 and 2 complete, Stage 3.1 done** — all 5 blockers resolved, plus contributor governance (CONTRIBUTING, PR/issue templates, CODEOWNERS, editorconfig, gitattributes), test integrity (silent-skip shell tests fixed, `engines.node >=20`, Node matrix, agnostic-check + format-check gated in `test-all`, ESLint + shellcheck + Prettier wired), and macOS portability (bash 3.2, portable PID guard, path resolution, LAN IP). Phase 3 remains: Stages 3.2–3.4.
 
 ## Verdict
 
@@ -33,12 +33,14 @@ Code quality is genuinely good: clean architecture (provider registry + extracte
 
 ### macOS breaks (if any coop friend is on a Mac)
 
-- `mapfile` (bash ≥4) in `clean.sh:61`, `sync.sh:26` — macOS bash 3.2 aborts `clean`, leaving orphans.
-- `/proc/$PID/cmdline` PID guard (`on.sh:91`, `off.sh:141`, `clean.sh:33`, `restart.sh:50`) — skipped on macOS, so `off/clean/restart` never kill the daemon.
-- `readlink -f` / `realpath` (`bin/airprompt:10`, `launch:93`) — absent on macOS ≤12, breaks the main dispatcher.
-- `hostname -I` (Linux-only) — mobile URL + cert SAN degrade to `localhost` on macOS.
+> Resolved in Stage 3.1 — macOS portability shipped; awaiting real-Mac validation from a coop member.
 
-Bottom line: Linux/WSL ready, macOS not ready, native Windows unsupported (despite `install.ps1`).
+- ~~`mapfile` (bash ≥4) in `clean.sh:61`, `sync.sh:26` — macOS bash 3.2 aborts `clean`, leaving orphans.~~ → `while read` loop.
+- ~~`/proc/$PID/cmdline` PID guard (`on.sh:91`, `off.sh:141`, `clean.sh:33`, `restart.sh:50`) — skipped on macOS, so `off/clean/restart` never kill the daemon.~~ → portable `ps -p $PID -o command=`.
+- ~~`readlink -f` / `realpath` (`bin/airprompt:10`, `launch:93`) — absent on macOS ≤12, breaks the main dispatcher.~~ → `cd && pwd -P` symlink walk.
+- ~~`hostname -I` (Linux-only) — mobile URL + cert SAN degrade to `localhost` on macOS.~~ → `ipconfig getifaddr` fallback.
+
+Bottom line: Linux/WSL ready, macOS supported (pending real-Mac validation), native Windows unsupported (despite `install.ps1`).
 
 ### Portability / install correctness
 
@@ -101,7 +103,7 @@ High-level summary only. The full staged/commit breakdown lives in [PLAN - open 
 
 ### Phase 3 — wider platform (before "anyone can use it")
 
-- [ ] macOS fixes (`mapfile`, `/proc` guard, `pwd -P` resolution, `ipconfig getifaddr`).
+- [x] macOS fixes (`mapfile`, `/proc` guard, `pwd -P` resolution, `ipconfig getifaddr`).
 - [ ] Vendor xterm.js; document node-pty build tools; `.gitignore` cert hardening; timeout normalization.
 
 ---

@@ -26,12 +26,7 @@ FORMATTER="$(cd "$(dirname "$0")/.." && pwd)/src/status-formatter.js"
 [ -f "$FORMATTER" ] || { echo "Error: status-formatter.js not found" >&2; exit 1; }
 
 
-LAN_IP=""
-if command -v hostname &>/dev/null; then
-  LAN_IP=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.' | grep -v '^10\.' | head -1)
-fi
-[ -z "$LAN_IP" ] && LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-[ -z "$LAN_IP" ] && LAN_IP="localhost"
+LAN_IP="$(_lan_ip)"
 
 API_URL="${AP_PROTO}://localhost:${DAEMON_PORT}"
 
@@ -42,19 +37,11 @@ echo ""
 DAEMON_RUNNING=false
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE")
-  if kill -0 "$PID" 2>/dev/null; then
-    # PID reuse guard — same /proc/cmdline pattern as off.sh/clean.sh but
-    # opposite fallback: if /proc is unreadable (non-Linux), assume RUNNING
-    # (show status). off.sh assumes NOT-airprompt (safer default for kill).
-    if [ -r "/proc/$PID/cmdline" ]; then
-      if tr '\0' ' ' < "/proc/$PID/cmdline" | grep -q 'server\.js'; then
-        DAEMON_RUNNING=true
-      fi
-    else
-      DAEMON_RUNNING=true  # non-Linux — fall back to kill -0 only
-    fi
-  fi
-  if ! $DAEMON_RUNNING; then
+  # PID reuse guard — portable `ps` check (no /proc dependency), same as
+  # off.sh/clean.sh/restart.sh. Reused or dead PID → stale pidfile.
+  if kill -0 "$PID" 2>/dev/null && _is_airprompt_pid "$PID"; then
+    DAEMON_RUNNING=true
+  else
     rm -f "$PID_FILE"
   fi
 fi

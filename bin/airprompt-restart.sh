@@ -44,11 +44,7 @@ echo "AirPrompt: restarting daemon..."
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE" 2>/dev/null || true)
   if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-    IS_AIRPROMPT=false
-    if [ -r "/proc/$PID/cmdline" ]; then
-      tr '\0' ' ' < "/proc/$PID/cmdline" | grep -q 'server\.js' && IS_AIRPROMPT=true
-    fi
-    if $IS_AIRPROMPT; then
+    if _is_airprompt_pid "$PID"; then
       kill "$PID" 2>/dev/null || true
       for i in $(seq 1 15); do
         kill -0 "$PID" 2>/dev/null || break

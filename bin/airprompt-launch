@@ -88,9 +88,21 @@ _ensure_launcher() {
   local home_bin="${HOME}/bin"
   mkdir -p "$home_bin" 2>/dev/null || true
 
-  # Resolve this script's real location (follow symlinks)
-  local self
-  self="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+  # Resolve this script's real location (follow symlinks) without
+  # `readlink -f`/`realpath` (absent on macOS ≤12).
+  local self _n
+  self="${BASH_SOURCE[0]:-$0}"
+  _n=0
+  while [ -L "$self" ] && [ "$_n" -lt 20 ]; do
+    _n=$((_n + 1))
+    local _link
+    _link="$(readlink "$self" 2>/dev/null)" || break
+    case "$_link" in
+      /*) self="$_link" ;;
+      *)  self="$(cd "$(dirname "$self")" 2>/dev/null && pwd -P)/$_link" || break ;;
+    esac
+  done
+  self="$(cd "$(dirname "$self")" 2>/dev/null && pwd -P)/$(basename "$self")" || self="${BASH_SOURCE[0]:-$0}"
 
   # Symlink: ~/bin/airprompt-launch → this script
   local launch_link="${home_bin}/airprompt-launch"

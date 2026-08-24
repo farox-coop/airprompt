@@ -132,8 +132,7 @@ RESP=$(curl -s "${AP_CURL_OPTS[@]}" -X POST "${API_URL}/api/sessions/register" \
   -d "{\"sessionId\":\"${SESSION_ID}\",\"cwd\":\"${ESC_CWD}\",\"tmuxSession\":\"${ESC_TMUX}\",\"providerId\":\"${ESC_PROV}\"}" || echo "")
 
 if echo "$RESP" | grep -q '"ok":true'; then
-  LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-  [ -z "$LAN_IP" ] && LAN_IP="localhost"
+  LAN_IP="$(_lan_ip)"
 
   MY_DIR="${SESSIONS_DIR}/${PROVIDER}-${TMUX_SESSION}"
   mkdir -p "$MY_DIR"

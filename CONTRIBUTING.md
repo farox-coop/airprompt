@@ -40,7 +40,7 @@ make test-all
 | Target                  | What it runs                                                                                   |
 | ----------------------- | ---------------------------------------------------------------------------------------------- |
 | `make lint`             | `eslint` over every `.js` file + `shellcheck` over `.sh` (shellcheck skipped if not installed) |
-| `make test-unit`        | `node --test test/unit/*.test.js` + the three shell suites                                     |
+| `make test-unit`        | `node --test test/unit/*.test.js` + the four shell suites                                      |
 | `make test-integration` | `bash test/integration/run.sh`                                                                 |
 | `make agnostic-check`   | the provider-agnosticism audit (see below)                                                     |
 

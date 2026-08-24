@@ -30,11 +30,7 @@ if [ -f "$PID_FILE" ]; then
   if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
     # Safety: verify this PID actually is an airprompt server before killing.
     # Prevents killing a reused PID belonging to a different process.
-    IS_AIRPROMPT=false
-    if [ -r "/proc/$PID/cmdline" ]; then
-      tr '\0' ' ' < "/proc/$PID/cmdline" | grep -q 'server\.js' && IS_AIRPROMPT=true
-    fi
-    if $IS_AIRPROMPT; then
+    if _is_airprompt_pid "$PID"; then
       kill "$PID" 2>/dev/null || true
       # Wait for graceful shutdown
       for _ in $(seq 1 10); do
@@ -63,12 +59,12 @@ tmux kill-session -t airprompt-daemon 2>/dev/null && echo "  daemon tmux session
 
 # 2. Kill all airprompt tmux sessions
 if command -v tmux &>/dev/null; then
-  mapfile -t AIRPROMPT_SESSIONS < <(tmux ls 2>/dev/null | grep '^airprompt-' | cut -d: -f1 || true)
-  for s in "${AIRPROMPT_SESSIONS[@]}"; do
+  # `mapfile` is bash ≥4 — macOS ships bash 3.2, so use a while-read loop.
+  while IFS= read -r s; do
     [ -z "$s" ] && continue
     tmux kill-session -t "$s" 2>/dev/null || true
     echo "  tmux session killed: $s"
-  done
+  done < <(tmux ls 2>/dev/null | grep '^airprompt-' | cut -d: -f1 || true)
 fi
 
 # 3. Session directories already removed as part of SESSIONS_DIR above
