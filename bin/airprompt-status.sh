@@ -47,12 +47,20 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 if $DAEMON_RUNNING; then
+  _webui_info "$AP_PROTO" "$DAEMON_PORT" "$LAN_IP"
   echo "Daemon:    RUNNING (PID $PID)"
-  echo "URL:       ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
+  # shellcheck disable=SC2153  # AP_URL is set by _webui_info (sourced from protocol.sh)
+  echo "URL:       $AP_URL"
   echo ""
+  if [ "$AP_PAIRED" != "1" ]; then
+    _print_qr "$AP_URL"
+    echo ""
+  fi
 else
+  _webui_info "$AP_PROTO" "$DAEMON_PORT" "$LAN_IP"
   echo "Daemon:    NOT RUNNING"
-  echo "URL:       ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT} (inactive)"
+  # shellcheck disable=SC2153  # AP_URL is set by _webui_info (sourced from protocol.sh)
+  echo "URL:       $AP_URL (inactive)"
   echo ""
   echo "No active sessions — daemon stopped to save resources."
   echo "Start with: /airprompt on"

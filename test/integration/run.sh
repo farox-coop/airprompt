@@ -58,7 +58,7 @@ done
 echo "Server running (PID $SERVER_PID)"
 
 # ── Test 1: Register → List → Unregister ────────────────────────────
-echo "[1/8] Full register → list → unregister"
+echo "[1/13] Full register → list → unregister"
 if $TMUX_OK; then
   SESSION_ID="integtest-$(date +%s)-$$-full"
   tmux new-session -d -s "airprompt-${SESSION_ID}" 2>/dev/null || true
@@ -87,7 +87,7 @@ else
 fi
 
 # ── Test 2: Two sessions, both visible ──────────────────────────────
-echo "[2/8] Two sessions register, both visible"
+echo "[2/13] Two sessions register, both visible"
 if $TMUX_OK; then
   ID_A="integtest-$(date +%s)-$$-a"
   ID_B="integtest-$(date +%s)-$$-b"
@@ -123,7 +123,7 @@ else
 fi
 
 # ── Test 3: Session unregistered on exit ────────────────────────────
-echo "[3/8] Session unregister removes from list"
+echo "[3/13] Session unregister removes from list"
 if $TMUX_OK; then
   ID_M="integtest-$(date +%s)-$$-marker"
   tmux new-session -d -s "airprompt-${ID_M}" 2>/dev/null || true
@@ -147,7 +147,7 @@ else
 fi
 
 # ── Test 4: Server survives invalid requests (no tmux needed) ───────
-echo "[4/8] Server survives invalid requests"
+echo "[4/13] Server survives invalid requests"
 INVALID=$(curl -s -o /dev/null -w "%{http_code}" \
   -X POST "http://localhost:${PORT}/api/sessions/register" \
   -H "Content-Type: application/json" \
@@ -162,7 +162,7 @@ else
 fi
 
 # ── Test 5: Duplicate registration rejected ─────────────────────────
-echo "[5/8] Duplicate registration rejected"
+echo "[5/13] Duplicate registration rejected"
 if $TMUX_OK; then
   ID_D="integtest-$(date +%s)-$$-dup"
   tmux new-session -d -s "airprompt-${ID_D}" 2>/dev/null || true
@@ -191,7 +191,7 @@ else
 fi
 
 # ── Test 6: Name update on already-registered session ───────────────
-echo "[6/8] Name update + clear on already-registered session"
+echo "[6/13] Name update + clear on already-registered session"
 if $TMUX_OK; then
   ID_N="integtest-$(date +%s)-$$-name"
   tmux new-session -d -s "airprompt-${ID_N}" 2>/dev/null || true
@@ -240,7 +240,7 @@ else
 fi
 
 # ── Test 7: Autostart script on/off with temp settings ────────────────
-echo "[7/8] Autostart script on/off"
+echo "[7/13] Autostart script on/off"
 AUTOSTART_SCRIPT="${PROJECT_DIR}/bin/airprompt-autostart.sh"
 TMP_SETTINGS="${TMPDIR}/settings.json"
 
@@ -416,7 +416,7 @@ else
 fi
 
 # ── Test 8: Name script --help and \"\" arg handling ──────────────
-echo "[8/8] Name script --help and \"\" arg handling"
+echo "[8/13] Name script --help and \"\" arg handling"
 NAME_SCRIPT="${PROJECT_DIR}/bin/airprompt-name.sh"
 
 if [ -x "$NAME_SCRIPT" ]; then
@@ -461,7 +461,7 @@ else
 fi
 
 # ── Test 9: Shell lifecycle — protocol detection + basic ops ────────
-echo "[9/8] Shell lifecycle — protocol, sessions, sweep"
+echo "[9/13] Shell lifecycle — protocol, sessions, sweep"
 
 # 9a: detect_protocol (without TLS) falls back to HTTP
 source "${PROJECT_DIR}/bin/lib/protocol.sh" 2>/dev/null
@@ -506,7 +506,7 @@ else
 fi
 
 # ── Test 10: Activate 409-recovery — session file written by 409 handler ──
-echo "[10/8] Activate 409-recovery — session file written on conflict"
+echo "[10/13] Activate 409-recovery — session file written on conflict"
 if $TMUX_OK; then
   ID_409="integtest-$(date +%s)-$$-409rec"
   tmux new-session -d -s "airprompt-${ID_409}" 2>/dev/null || true
@@ -536,7 +536,7 @@ else
 fi
 
 # ── Test 11: Sweep no-force — stale dir with shared sessionId must NOT nuke alive session ──
-echo "[11/8] Sweep no-force: stale dir shares sessionId with alive tmux → session survives"
+echo "[11/13] Sweep no-force: stale dir shares sessionId with alive tmux → session survives"
 if $TMUX_OK; then
   ID_SW="integtest-$(date +%s)-$$-nosweep"
   TMUX_ALIVE="airprompt-${ID_SW}-alive"
@@ -579,7 +579,7 @@ else
 fi
 
 # ── Test 12: grep -Fq treats dot as literal (not regex wildcard) ──
-echo "[12/8] grep -Fq: literal match (defense against tmux session names with dots)"
+echo "[12/13] grep -Fq: literal match (defense against tmux session names with dots)"
 # The daemon check in on.sh uses grep -Fq to match tmuxSession in JSON.
 # Without -F, a session named "dev.1" would false-match "devX1".
 # With -F, dot is literal — no false match.
@@ -609,7 +609,7 @@ else
 fi
 
 # ── Test 13: GET /api/sessions JSON shape — uses 'id' NOT 'sessionId' ──
-echo "[13/8] GET /api/sessions JSON shape contract"
+echo "[13/13] GET /api/sessions JSON shape contract"
 if $TMUX_OK; then
   ID_SHAPE="integtest-$(date +%s)-$$-shape"
   tmux new-session -d -s "airprompt-${ID_SHAPE}" 2>/dev/null || true

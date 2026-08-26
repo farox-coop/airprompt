@@ -181,6 +181,25 @@ _is_airprompt_pid() {
   esac
 }
 
+# ── Web UI URL + QR ────────────────────────────────────────────────────
+# _webui_info <proto> <port> <ip> → sets $AP_URL (with #fp=) and $AP_PAIRED (1|0)
+# _print_qr <url>                 → prints the QR code for <url>
+_webui_info() {
+  local repo_dir out
+  repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
+  out=$(node "$repo_dir/bin/lib/url.js" info "$1" "$2" "$3" 2>/dev/null || true)
+  AP_URL=$(printf '%s\n' "$out" | sed -n '1s/^URL=//p')
+  AP_PAIRED=$(printf '%s\n' "$out" | sed -n '2s/^PAIRED=//p')
+  [ -n "$AP_URL" ] || AP_URL="${1:-http}://${3:-localhost}:${2:-3210}"
+  AP_PAIRED="${AP_PAIRED:-0}"
+}
+
+_print_qr() {
+  local repo_dir
+  repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
+  node "$repo_dir/bin/lib/url.js" qr "$1" 2>/dev/null || true
+}
+
 # ── Portable md5 ───────────────────────────────────────────────────────
 # GNU `md5sum` on Linux, BSD `md5 -q` on macOS. Prints the hex digest
 # (or nothing on failure). Usage: digest="$(_md5 /path/to/file)"

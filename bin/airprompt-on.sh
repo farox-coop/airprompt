@@ -133,28 +133,23 @@ if [ ! -f "$PID_FILE" ]; then
   cd "$ORIG_PWD"
 fi
 
-# ── First-run splash: banner + QR code — shown ONCE ever ───────────
+# ── Web UI banner: QR + URL — shown only while no device is paired ───
 # Runs whenever the daemon is running (regardless of who started it).
-# The marker survives until clean.sh tears down the state dir.
-FIRST_RUN_MARKER="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}/.first-run-done"
-if [ -f "$PID_FILE" ] && [ ! -f "$FIRST_RUN_MARKER" ]; then
+# Once a device is paired, only the URL is shown (no QR).
+if [ -f "$PID_FILE" ]; then
   DAEMON_PID=$(cat "$PID_FILE" 2>/dev/null || echo "?")
+  _webui_info "$AP_PROTO" "$DAEMON_PORT" "$LAN_IP"
   echo ""
   echo "=================================================="
-  echo "AirPrompt Server running at: ${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}"
+  echo "AirPrompt Server running at: $AP_URL"
   echo "=================================================="
   echo ""
-  cd "$DAEMON_DIR"
-  node -e "
-    try {
-      const qr = require('qrcode-terminal');
-      qr.generate(process.argv[1], {small: true});
-    } catch(_) {}
-  " "${AP_PROTO}://${LAN_IP}:${DAEMON_PORT}" 2>/dev/null || true
-  cd "$ORIG_PWD"
-  echo "Server running (PID $DAEMON_PID)"
-  mkdir -p "${FIRST_RUN_MARKER%/*}" 2>/dev/null || true
-  touch "$FIRST_RUN_MARKER" 2>/dev/null || true
+  if [ "$AP_PAIRED" = "1" ]; then
+    echo "Server running (PID $DAEMON_PID)"
+  else
+    _print_qr "$AP_URL"
+    echo "Server running (PID $DAEMON_PID)"
+  fi
 fi
 
 # ── Per-session directory ────────────────────────────────────────────
