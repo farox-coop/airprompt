@@ -84,12 +84,12 @@ test('scroll — buildArrow emits arrow-key sequences', async (t) => {
 
 // ── buildWheelDeltaY ───────────────────────────────────────────────────
 
-test('scroll — buildWheelDeltaY negates count for xterm inverted wheel', async (t) => {
-  await t.test('negative count (drag down = older) → positive deltaY', () => {
-    assert.strictEqual(S.buildWheelDeltaY(-2), 2);
+test('scroll — buildWheelDeltaY passes count through (6.0 negates internally)', async (t) => {
+  await t.test('negative count (drag down = older) → negative deltaY', () => {
+    assert.strictEqual(S.buildWheelDeltaY(-2), -2);
   });
 
-  await t.test('positive count (drag up = newer) → negative deltaY', () => {
-    assert.strictEqual(S.buildWheelDeltaY(3), -3);
+  await t.test('positive count (drag up = newer) → positive deltaY', () => {
+    assert.strictEqual(S.buildWheelDeltaY(3), 3);
   });
 });

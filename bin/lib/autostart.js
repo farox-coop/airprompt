@@ -41,7 +41,7 @@ if (cmd === 'on') {
   const added = addCommandHook(s, 'SessionStart', {
     command: 'node ' + JSON.stringify(activateScript),
     marker: 'airprompt-activate.js',
-    timeout: 10000,
+    timeout: 10,
     statusMessage: 'Starting AirPrompt...',
   });
   if (added) {

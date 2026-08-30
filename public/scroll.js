@@ -44,11 +44,12 @@
     return count < 0 ? '\x1b[A' : '\x1b[B';
   }
 
-  // xterm's viewport is inverted: a positive wheel deltaY scrolls toward
-  // OLDER content, but our `count` is positive for drag-up (newer). Negate
-  // so the wheel path matches buildSgr/buildArrow (count < 0 = older).
+  // xterm 6.0's SmoothScrollableElement negates LINE-mode deltas internally,
+  // so a positive deltaY now scrolls toward NEWER content. `count` is already
+  // positive for drag-up (newer) — pass it through unchanged so the wheel path
+  // matches buildSgr/buildArrow (count < 0 = older).
   function buildWheelDeltaY(count) {
-    return -count;
+    return count;
   }
 
   if (typeof window !== 'undefined') {
@@ -64,7 +65,7 @@
   if (typeof document === 'undefined') return;
 
   const container = document.getElementById('terminal-container');
-  const viewport = container.querySelector('.xterm-viewport');
+  const viewport = container.querySelector('.xterm-scrollable-element');
   let startY = 0;
   let lastY = 0;
   let accumPx = 0;
@@ -77,9 +78,9 @@
   // only called past it, so taps still synthesize a click for focus).
   const TAP_SLOP = 6;
 
-  // Finger px per SGR wheel event. Smaller = faster + smoother (more events
-  // per finger travel). Tune for "mouse-wheel feel": ~5px ≈ 3 lines.
-  const TICK_PX = 5;
+  // Finger px per scroll event. Smaller = faster + smoother (more events
+  // per finger travel). Tune for "mouse-wheel feel".
+  const TICK_PX = 50;
 
   container.addEventListener(
     'touchstart',
@@ -110,7 +111,7 @@
       } else if (strategy === 'wheel') {
         viewport.dispatchEvent(
           new WheelEvent('wheel', {
-            deltaY: buildWheelDeltaY(rows), // negated: xterm wheel is inverted
+            deltaY: buildWheelDeltaY(rows), // xterm 6.0 negates internally
             deltaMode: 1, // DOM_DELTA_LINE
             bubbles: true,
             cancelable: true,

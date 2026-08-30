@@ -1774,3 +1774,19 @@ test('sessionToJSON attachedClients is 0 when tmux session is dead', () => {
   assert.strictEqual(json.tmuxAlive, false);
   assert.strictEqual(json.attachedClients, 0);
 });
+
+// ── Vendored xterm static routes ──────────────────────────────────────
+
+test('serves vendored xterm static assets from node_modules', async () => {
+  const js = await get('/vendor/xterm/lib/xterm.js');
+  assert.strictEqual(js.status, 200);
+  assert.ok(js.body.length > 1000, 'xterm.js bundle should be non-trivial');
+
+  const css = await get('/vendor/xterm/css/xterm.css');
+  assert.strictEqual(css.status, 200);
+  assert.ok(css.body.length > 100, 'xterm.css should be non-trivial');
+
+  const fit = await get('/vendor/xterm-addon-fit/lib/addon-fit.js');
+  assert.strictEqual(fit.status, 200);
+  assert.ok(fit.body.length > 100, 'addon-fit.js should be non-trivial');
+});

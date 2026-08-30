@@ -8,16 +8,18 @@ AirPrompt lets you view and interact with remote IDE/CLI sessions running on you
 
 ## Requirements
 
+> Debian/Ubuntu commands shown; macOS uses `brew install tmux jq openssl` (see [Supported platforms](#supported-platforms)).
+
 - **Node.js** ≥ 20
 - **tmux** (`sudo apt install tmux`)
 - **curl** — API communication with daemon
 - **jq** (`sudo apt install jq`) — JSON parsing for daemon protocol detection and notifications
-- **reptyr** (`sudo apt install reptyr`) — optional, for `airprompt-attach.sh` (attach running processes to tmux)
 - **openssl** — TLS certificate generation for HTTPS voice dictation
+- **Build tools** — `node-pty` compiles from source: `build-essential` + `python3` on Linux, Xcode Command Line Tools on macOS
 
 ## Supported platforms
 
-Linux, macOS, and WSL are supported. macOS uses Homebrew (`brew install tmux jq openssl`); the shell scripts are bash 3.2 compatible. `reptyr` (for `airprompt-attach.sh`) is Linux-only. Native Windows is not supported (the daemon requires tmux) — the PowerShell installer does a CLI-only install.
+Linux, macOS, and WSL are supported. macOS uses Homebrew (`brew install tmux jq openssl`); the shell scripts are bash 3.2 compatible. Native Windows is not supported (the daemon requires tmux) — the PowerShell installer does a CLI-only install.
 
 ## Architecture
 

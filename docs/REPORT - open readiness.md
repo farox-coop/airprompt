@@ -4,7 +4,7 @@ Snapshot: 2026-08-18. Deep audit across 7 dimensions (architecture, providers, d
 
 > Implementation plan (stages + commits): [PLAN - open readiness.md](<PLAN - open readiness.md>)
 
-> **Status: Phases 1 and 2 complete, Stage 3.1 done** — all 5 blockers resolved, plus contributor governance (CONTRIBUTING, PR/issue templates, CODEOWNERS, editorconfig, gitattributes), test integrity (silent-skip shell tests fixed, `engines.node >=20`, Node matrix, agnostic-check + format-check gated in `test-all`, ESLint + shellcheck + Prettier wired), and macOS portability (bash 3.2, portable PID guard, path resolution, LAN IP). Phase 3 remains: Stages 3.2–3.4.
+> **Status: Phases 1 and 2 complete, Stages 3.1–3.2 done** — all 5 blockers resolved, plus contributor governance (CONTRIBUTING, PR/issue templates, CODEOWNERS, editorconfig, gitattributes), test integrity (silent-skip shell tests fixed, `engines.node >=20`, Node matrix, agnostic-check + format-check gated in `test-all`, ESLint + shellcheck + Prettier wired), macOS portability (bash 3.2, portable PID guard, path resolution, LAN IP), and install robustness (vendored xterm, node-pty build-tool docs, `.gitignore` cert hardening, hook-timeout normalization). Phase 3 remains: Stages 3.3–3.4.
 
 ## Verdict
 
@@ -45,26 +45,26 @@ Bottom line: Linux/WSL ready, macOS supported (pending real-Mac validation), nat
 ### Portability / install correctness
 
 - `~/projects/airprompt` hardcoded fallback (`bin/airprompt:41,74`, `provider.js:95`, `resolveInstallDir`) — clones elsewhere fail "scripts not found".
-- `node-pty` native build tools (python3/make/g++) not in Requirements — clean-machine `npm install` fails.
-- xterm.js from jsdelivr CDN (`index.html:10-12`) — LAN-only phone = blank UI. Vendor it.
-- Hook timeout unit inconsistency: `10/5` (claude.js, plugin.json) vs `10000` (`autostart.js`) — 1000×, needs normalizing.
-- `.gitignore` missing `*.pem`, `*.key`, `*.pid`, `.airprompt/` — a mispointed env var could commit a private key.
+- ~~`node-pty` native build tools (python3/make/g++) not in Requirements — clean-machine `npm install` fails.~~ — resolved in Stage 3.2 (README + CONTRIBUTING).
+- ~~xterm.js from jsdelivr CDN (`index.html:10-12`) — LAN-only phone = blank UI. Vendor it.~~ — resolved in Stage 3.2 (vendored `@xterm/xterm` + `@xterm/addon-fit` via npm, served from `node_modules`).
+- ~~Hook timeout unit inconsistency: `10/5` (claude.js, plugin.json) vs `10000` (`autostart.js`) — 1000×, needs normalizing.~~ — resolved in Stage 3.2 (`autostart.js` `10000`→`10`, seconds).
+- ~~`.gitignore` missing `*.pem`, `*.key`, `*.pid`, `.airprompt/` — a mispointed env var could commit a private key.~~ — resolved in Stage 3.2.
 
 ### Contributor/PR readiness
 
 - ~~No `CONTRIBUTING.md`, no PR/issue templates, no `CODEOWNERS`, no `.editorconfig`/`.gitattributes` (CRLF risk for shell scripts).~~ — resolved in Stage 2.1.
-- Two shell tests silently skip on a fresh clone: `statusline.test.sh:5-7`, `status-formatter.test.sh:5-8` (one hardcodes `$HOME/projects/airprompt`) → green CI that tested nothing.
+- ~~Two shell tests silently skip on a fresh clone: `statusline.test.sh:5-7`, `status-formatter.test.sh:5-8` (one hardcodes `$HOME/projects/airprompt`) → green CI that tested nothing.~~ — resolved in Stage 2.2.
 - ~~`agnostic-check` (the repo's own "no provider names in core" guard) is dev-only, not in `test-all`/CI — a PR can violate the architecture rule and stay green.~~ — resolved in Stage 2.3 (wired into `test-all`).
-- ~~No `engines` field (Node ≥18 enforced only at install time); CI single Node 24, no matrix.~~ — resolved in Stage 2.2 (`engines.node >=18` + Node matrix 18/20/24).
+- ~~No `engines` field (Node ≥18 enforced only at install time); CI single Node 24, no matrix.~~ — resolved in Stage 2.2 (`engines.node >=20` + Node matrix 20/22/24).
 
 ## Polish / later
 
 - Version tags + CHANGELOG (empty `git tag`, package.json 0.2.0) — commit convention now documented in `CONTRIBUTING.md` (Stage 2.1).
 - `macapp:`/`vscode-ext:` detection probes claimed in `claude.js:238` but unimplemented (needed for future Cursor/Windsurf GUI detection).
 - ~~Lint = syntax-only `node --check`; no real linter.~~ — resolved in Stage 2.4 (ESLint + shellcheck + Prettier).
-- VS Code integrated terminal (no `$TMUX`) → phone attaches to an empty mirror shell, not the live Claude UI. Only works via `airprompt-launch`/`attach.sh`. Document this clearly.
+- VS Code integrated terminal (no `$TMUX`) → phone attaches to an empty mirror shell, not the live Claude UI. Only works via `airprompt-launch`. Document this clearly.
 - Rate-limiting on `/api/notify`; ANSI-injection in DEBUG `cwd` logging (`server.js:150,223`).
-- `install.sh:112-132` `jq` check hardcodes `sudo apt install jq` (wrong for macOS/Windows).
+- ~~`install.sh:112-132` `jq` check hardcodes `sudo apt install jq` (wrong for macOS/Windows).~~ — resolved in Stage 3.2 (jq check lives in `src/install-helpers.js` `checkJq` → `pkgInstallHint`, and `bin/lib/protocol.sh` `_pkg_hint`; both print brew on macOS, apt on Linux).
 
 ## Provider readiness matrix
 
@@ -104,7 +104,7 @@ High-level summary only. The full staged/commit breakdown lives in [PLAN - open 
 ### Phase 3 — wider platform (before "anyone can use it")
 
 - [x] macOS fixes (`mapfile`, `/proc` guard, `pwd -P` resolution, `ipconfig getifaddr`).
-- [ ] Vendor xterm.js; document node-pty build tools; `.gitignore` cert hardening; timeout normalization.
+- [x] Vendor xterm.js; document node-pty build tools; `.gitignore` cert hardening; timeout normalization.
 
 ---
 

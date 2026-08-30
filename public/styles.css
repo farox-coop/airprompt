@@ -416,20 +416,12 @@ html {
 #terminal-container .xterm {
   padding: 4px;
 }
-/* Force visible text on every renderer path (canvas + DOM) */
-#terminal-container .xterm-rows,
-#terminal-container .xterm-rows > div,
-#terminal-container .xterm-rows span,
 #terminal-container .xterm-screen {
   color: #c9d1d9 !important;
 }
 /* Canvas fallback: light background behind canvas */
 #terminal-container .xterm canvas {
   background-color: #0d1117 !important;
-}
-#terminal-container .xterm-text-layer {
-  color: #c9d1d9 !important;
-  mix-blend-mode: normal !important;
 }
 
 /* ── Loading spinner ─────────────────────────── */

@@ -18,5 +18,11 @@ thumbs.db
 .env
 .env.local
 
+# TLS certs / private keys / runtime state (never commit secrets or pidfiles)
+*.pem
+*.key
+*.pid
+.airprompt/
+
 # Review findings (read-only reports, not code)
 .claude/review-findings/

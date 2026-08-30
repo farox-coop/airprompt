@@ -689,10 +689,9 @@ document.getElementById('keybar-toggle').addEventListener('click', function (e) 
     try {
       term.refresh(0, term.rows - 1);
     } catch (_) {}
-    const vp = document.querySelector('#terminal-container .xterm-viewport');
-    if (vp) {
-      vp.scrollTop = vp.scrollHeight;
-    }
+    try {
+      term.scrollToBottom();
+    } catch (_) {}
     // Restore focus so native keyboard stays open on mobile.
     // fitAddon.fit() can blur xterm's hidden textarea, dismissing the
     // virtual keyboard. On mobile, focus the invisible input instead
@@ -802,7 +801,6 @@ if (window.visualViewport) {
       _vvhRaf = 0;
       const vh = window.visualViewport.height;
       const termContainer = document.getElementById('terminal-container');
-      const viewport = termContainer && termContainer.querySelector('.xterm-viewport');
       const lh = window.innerHeight;
       const kbHeight = lh - vh;
       const sessionBar = document.getElementById('session-bar');
@@ -820,8 +818,9 @@ if (window.visualViewport) {
         try {
           fitAddon.fit();
         } catch (_) {}
-        if (viewport && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 100) {
-          viewport.scrollTop = viewport.scrollHeight;
+        const buf = term.buffer.active;
+        if (buf.baseY - buf.viewportY <= 8) {
+          term.scrollToBottom();
         }
       } else if (kbHeight < 20 && _vvhPrev > 0 && window.visualViewport.height - _vvhPrev > 40) {
         // Keyboard dismissed: restore natural layout
@@ -918,7 +917,7 @@ Dictation.init({
 
     // ── Step 2: find the prompt start line (❯ marker) ───────────
     const buf = term.buffer.active;
-    const cursorBufY = buf.cursorY;
+    const cursorBufY = buf.baseY + buf.cursorY; // cursorY is 0..rows-1 (relative to baseY)
     const viewportY = buf.viewportY;
     let promptStartBufY = cursorBufY;
     let found = false;
@@ -942,6 +941,13 @@ Dictation.init({
     // ── Step 3: focus if tap is within the prompt zone ──────────
     const promptStartRow = promptStartBufY - viewportY;
     const cursorRow = cursorBufY - viewportY;
+
+    // Cursor/prompt off-screen (scrolled up) → the zone would cover the whole
+    // viewport; don't open the keyboard on an unrelated tap.
+    if (cursorRow > term.rows - 1 || promptStartRow < 0) {
+      inputEl.blur();
+      return;
+    }
 
     if (tapRow >= promptStartRow && tapRow <= cursorRow) {
       inputEl.focus();

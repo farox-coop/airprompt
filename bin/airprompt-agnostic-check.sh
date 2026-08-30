@@ -21,7 +21,6 @@ EXEMPT_FILES=(
   ".gitignore"
   "bin/airprompt-agnostic-check.sh"
   "bin/airprompt"
-  "bin/airprompt-attach.sh"
   "bin/airprompt-on.sh"
   "bin/install.js"
   "src/providers/claude.js"

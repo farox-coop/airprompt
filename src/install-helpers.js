@@ -141,6 +141,15 @@ function generateCert(targetDir, dryRun, say, note, warn, ok) {
 
 // ── jq dependency check ───────────────────────────────────────────────────
 
+// Cross-platform "how to install" hint (brew on macOS, apt on Linux).
+// `platform` is injectable so the branches are unit-testable.
+function pkgInstallHint(pkgs, platform = process.platform) {
+  const list = pkgs.join(' ');
+  if (platform === 'darwin') return `brew install ${list}`;
+  if (platform === 'win32') return `(Windows) install ${list} manually — no apt/brew`;
+  return `sudo apt install ${list}`;
+}
+
 function checkJq(note, warn, ok, dryRun, nonInteractive) {
   if (hasCmd('jq')) {
     note('  jq: found');
@@ -149,11 +158,11 @@ function checkJq(note, warn, ok, dryRun, nonInteractive) {
   warn('  jq is required but not installed.');
   if (nonInteractive) {
     warn('  (non-interactive mode — skipping jq install prompt)');
-    warn('  notifications may not work. Install with: sudo apt install jq');
+    warn('  notifications may not work. Install with: ' + pkgInstallHint(['jq']));
     return false;
   }
   warn('  Please run this command in another terminal:');
-  warn('    sudo apt install jq');
+  warn('    ' + pkgInstallHint(['jq']));
   warn('');
   if (dryRun) return false;
   process.stdout.write('  Press Enter after installing jq to continue...');
@@ -179,4 +188,5 @@ module.exports = {
   sameFilesystemTmpEnv,
   generateCert,
   checkJq,
+  pkgInstallHint,
 };

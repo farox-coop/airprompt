@@ -211,3 +211,14 @@ _md5() {
   fi
   :  # always return 0 — print the digest, or nothing on failure
 }
+
+# ── Package install hint (cross-platform) ──────────────────────────────
+# Prints the right "how to install" command for the current OS.
+# Usage: _pkg_hint tmux  →  "sudo apt install tmux" (Linux) / "brew install tmux" (macOS)
+_pkg_hint() {
+  if [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+    echo "brew install $*"
+  else
+    echo "sudo apt install $*"
+  fi
+}

@@ -2,7 +2,7 @@
 
 > Derived from the audit in [REPORT - open readiness.md](<REPORT - open readiness.md>). Read the report for the full findings (blockers, should-fix, provider matrix); this plan sequences those fixes into stages.
 
-> **Status: Phases 1 and 2 complete, Stage 3.1 done** — all 5 blockers resolved, contributor-ready (governance + test/CI integrity + linter/formatter), and macOS portability shipped. Phase 3 remains: Stages 3.2–3.4.
+> **Status: Phases 1 and 2 complete, Stages 3.1–3.2 done** — all 5 blockers resolved, contributor-ready (governance + test/CI integrity + linter/formatter), macOS portability shipped, and install robustness (vendored xterm, node-pty docs, `.gitignore`, timeouts, cross-platform hints). Phase 3 remains: Stages 3.3–3.4.
 
 ## How to use this plan
 
@@ -217,7 +217,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 #### Tasks
 
 - [x] macOS portability fixes
-- [ ] install robustness (vendor xterm, node-pty docs, `.gitignore`, timeouts)
+- [x] install robustness (vendor xterm, node-pty docs, `.gitignore`, timeouts)
 - [ ] codex/cursor/windsurf adapters + detection
 - [ ] release hygiene (tags, changelog, gui probes, vscode doc)
 
@@ -256,6 +256,6 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] 2.3 Test/CI integrity (agnostic-check gate)
 - [x] 2.4 Lint/format normalization
 - [x] 3.1 macOS portability
-- [ ] 3.2 Install robustness
+- [x] 3.2 Install robustness
 - [ ] 3.3 Ship remaining providers
 - [ ] 3.4 Release hygiene

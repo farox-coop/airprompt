@@ -420,9 +420,17 @@ const ClaudeProvider = {
       note(`  ${targetDir} exists — using existing install`);
     }
 
-    // 2. Ensure node_modules exist
+    // 2. Ensure node_modules exist. `express` alone is not a reliable
+    // sentinel — an upgraded install still has express but lacks the newer
+    // deps (@xterm/*), so also require them to force npm install on the
+    // upgrade path.
     const nmDir = path.join(targetDir, 'node_modules');
-    if (!fs.existsSync(nmDir) || !fs.existsSync(path.join(nmDir, 'express'))) {
+    if (
+      !fs.existsSync(nmDir) ||
+      !fs.existsSync(path.join(nmDir, 'express')) ||
+      !fs.existsSync(path.join(nmDir, '@xterm', 'xterm')) ||
+      !fs.existsSync(path.join(nmDir, '@xterm', 'addon-fit'))
+    ) {
       say('  → installing npm dependencies');
       if (!opts.dryRun) {
         const r = H.spawnXplat('npm', ['install', '--no-audit', '--no-fund', '--omit=dev'], {

@@ -255,6 +255,11 @@ if [ -x "$AUTOSTART_SCRIPT" ]; then
     else
       not_ok "SessionStart hook missing from settings"
     fi
+    if grep -q '"timeout": 10,' "$TMP_SETTINGS"; then
+      ok "autostart hook timeout is 10 (seconds, not ms)"
+    else
+      not_ok 'autostart hook timeout missing or wrong (expected "timeout": 10)'
+    fi
   else
     not_ok "settings file not created by autostart on"
   fi

@@ -332,13 +332,23 @@ function recoverSessionsFromDisk() {
 function createApp() {
   const app = express();
   app.use(express.json());
+  // LAN PoC: always revalidate so dev edits show up without cache-busting.
+  const noCache = {
+    setHeaders: function (res) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    },
+  };
+  app.use(express.static(path.join(__dirname, 'public'), noCache));
+
+  // Vendored xterm.js + addon-fit (npm deps) — served locally so the web UI
+  // works on a LAN-only phone with no CDN/internet access.
   app.use(
-    express.static(path.join(__dirname, 'public'), {
-      // LAN PoC: always revalidate so dev edits show up without cache-busting.
-      setHeaders: function (res) {
-        res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-      },
-    })
+    '/vendor/xterm',
+    express.static(path.join(__dirname, 'node_modules', '@xterm', 'xterm'), noCache)
+  );
+  app.use(
+    '/vendor/xterm-addon-fit',
+    express.static(path.join(__dirname, 'node_modules', '@xterm', 'addon-fit'), noCache)
   );
 
   // Host-internal REST endpoints (sessions + notify) are called only by the

@@ -9,7 +9,7 @@ KEY_FILE="${CERT_DIR}/airprompt-key.pem"
 
 if ! command -v openssl &>/dev/null; then
   echo "Error: openssl is required but not installed." >&2
-  echo "  sudo apt install openssl" >&2
+  echo "  $(_pkg_hint openssl)" >&2
   exit 1
 fi
 

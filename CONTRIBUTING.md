@@ -6,12 +6,11 @@ Thanks for helping build AirPrompt. This document covers how to set up a dev env
 
 - **Node.js ≥ 20** — the installer enforces this at startup.
 - **tmux** — required for terminal mirroring. `sudo apt install tmux` (macOS: `brew install tmux`).
-- **jq** — daemon protocol detection and notifications. `sudo apt install jq`.
+- **jq** — daemon protocol detection and notifications. `sudo apt install jq` (macOS: `brew install jq`).
 - **curl** — API communication with the daemon.
 - **openssl** — TLS certificate generation for HTTPS voice dictation.
-- **reptyr** (optional) — only for `airprompt-attach.sh`, which attaches a running process to tmux.
 
-Base setup additionally needs `build-essential` and `python3` on Linux to compile the `node-pty` native dependency during `npm install` (see CI in `.github/workflows/test.yml`).
+Base setup additionally needs `build-essential` and `python3` on Linux (or Xcode Command Line Tools on macOS) to compile the `node-pty` native dependency during `npm install` (see CI in `.github/workflows/test.yml`).
 
 ## Setup
 

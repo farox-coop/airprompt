@@ -51,7 +51,7 @@ if [ ${#CACHES[@]} -gt $KEEP_COUNT ]; then
 fi
 
 HOOKS=(airprompt-activate.js airprompt-deactivate.js airprompt-statusline.sh)
-BINS=(airprompt airprompt-attach.sh airprompt-autostart.sh airprompt-clean.sh airprompt-launch airprompt-name.sh airprompt-off.sh airprompt-on.sh airprompt-restart.sh airprompt-status.sh generate-cert.sh install.js)
+BINS=(airprompt airprompt-autostart.sh airprompt-clean.sh airprompt-launch airprompt-name.sh airprompt-off.sh airprompt-on.sh airprompt-restart.sh airprompt-status.sh generate-cert.sh install.js)
 
 # Copy to caches
 for d in "${CACHES[@]}"; do
