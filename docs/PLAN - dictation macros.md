@@ -134,3 +134,39 @@ Core logic is ~120 lines of pure JS (dictionary lookup + regex). Integration tou
    - Dictate `entre comillas` as standalone fragment → overlay does NOT show it (macro consumed)
    - Dictate `mundo` → overlay shows `"mundo"` (format applied)
    - Accept → terminal receives `hola? "mundo"`
+
+## Known issue — multi-line dictation collapses in Claude Code
+
+**Symptom.** Dictation that produces literal newlines — the "nueva línea" / "nuevo párrafo" macros, or STT-inserted line breaks that survive — reaches the Claude Code prompt as a collapsed `[Pasted text #N +M lines]` chip instead of visible inline text. The user cannot see or edit the full text in the prompt.
+
+**Root cause.** Multi-line input must be delivered as a paste so the newlines stay literal; a raw `\n` byte to the shell is Enter and would submit mid-text. The chain:
+
+1. `dictation-macros.js` `processFragment()` inserts `\n` / `\n\n` for the "nueva línea" / "nuevo párrafo" stateful macros.
+2. `dictation.js` `acceptDictation()` sends `{ type: 'input', data: text }` with those newlines intact.
+3. `server.js` detects `\n` and routes to `tmux load-buffer` + `paste-buffer -p` (bracketed paste) instead of `ptyProcess.write()`.
+4. Claude Code's TUI receives a bracketed paste longer than 2 lines or 800 chars and collapses it into a placeholder chip.
+
+The collapse is hardcoded in Claude Code: there is no `pasteCollapseThreshold` / `paste.fold` setting or env var (feature requests [#35581](https://github.com/anthropics/claude-code/issues/35581) and [#55329](https://github.com/anthropics/claude-code/issues/55329) are open). The threshold is >800 chars or >2 lines.
+
+**Not data loss.** The full text is stored in `~/.claude/paste-cache/` (mode 600) and sent intact on Enter. To expand in place, paste the same content again (v2.1.116+; before v2.1.207 re-pasting made a second chip). Ctrl+G opens the prompt in `$EDITOR` with every chip expanded.
+
+**Why AirPrompt can't fix it.** Every delivery mechanism for multi-line text is a paste, and Claude Code collapses all pastes:
+
+| Approach | Result |
+| --- | --- |
+| Manual bracketed paste via `pty.write('\x1b[200~'+text+'\x1b[201~')` | Same collapse — no benefit over `paste-buffer -p` |
+| `tmux send-keys -l` literal typing | Literal `\n` = Enter = submits mid-text |
+| Bracketed-paste mode toggle (`ESC[?2004l` … `ESC[?2004h`) | Claude Code ignores DEC 2004 and detects paste by byte-arrival rate → still collapses |
+| Slow keystroke replay to evade the arrival-rate heuristic | Slow and fragile for long dictation |
+
+The only mechanism that reliably avoids the collapse is single-line output (no `\n`), which loses real line breaks.
+
+**Options (deferred — left as-is for now):**
+
+1. Keep `\n` and accept the collapse — text arrives intact, just as a chip.
+2. Single-line join — replace `\n` / `\n\n` with a visible separator so dictation is always visible inline; loses real newlines.
+3. Threshold-aware — emit real `\n` only for "nuevo párrafo", and keep newlines ≤2 and total ≤800 chars; brittle.
+
+**Side note.** `paste-buffer` is safer than a raw node-pty bracketed-paste frame: node-pty <1.1.0 has a partial-write bug that drops the closing `ESC[201~` for multi-byte/CJK text. If anyone swaps to a raw write, chunk at safe boundaries and never split a marker mid-sequence.
+
+Sources: [Claude Code #35581](https://github.com/anthropics/claude-code/issues/35581), [Claude Code #55329](https://github.com/anthropics/claude-code/issues/55329), [chroxy #4270 bracketed-paste toggle](https://github.com/blamechris/chroxy/pull/4270), [chroxy #151 multiline paste](https://github.com/blamechris/chroxy/issues/151), [node-pty CJK partial-write bug](https://forum.cursor.com/t/integrated-terminal-hard-freezes-tui-apps-when-pasting-cjk-text-over-1-kib-bundled-node-pty-1-1-0-beta42-never-closes-the-bracketed-paste-frame-fixed-upstream-in-node-pty-1-1-0-stable/168491).

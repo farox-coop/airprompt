@@ -173,6 +173,8 @@ Daemon output goes to `/tmp/airprompt.log`. Tail it with `make logs` or `tail -f
 
 **HTTP fallback (TLS unavailable)** — if cert generation fails the daemon falls back to HTTP; pairing and voice dictation won't work. Run `bin/generate-cert.sh` and `airprompt restart`.
 
+**Multi-line dictation collapses into a `[Pasted text #N]` chip** — known issue. Dictation with real line breaks ("nueva línea" / "nuevo párrafo", or >800 chars) is sent as a bracketed paste, which Claude Code collapses by design. The text is not lost — it's delivered in full on Enter. See [docs/PLAN - dictation macros.md](<docs/PLAN - dictation macros.md#known-issue--multi-line-dictation-collapses-in-claude-code>) for the root cause and options.
+
 ## Commands
 
 All commands go through the unified dispatcher: `airprompt <command>` (`/airprompt <command>` inside Claude Code).
