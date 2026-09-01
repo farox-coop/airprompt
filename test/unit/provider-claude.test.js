@@ -52,7 +52,10 @@ test('ClaudeProvider — mech', () => {
 });
 
 test('ClaudeProvider — detect string', () => {
-  assert.strictEqual(ClaudeProvider.detect, 'command:claude');
+  assert.strictEqual(
+    ClaudeProvider.detect,
+    'command:claude||dir:$HOME/.claude||vscode-ext:anthropic.claude-code'
+  );
 });
 
 test('ClaudeProvider — profile is null (native plugin installs)', () => {

@@ -19,6 +19,8 @@ airprompt name [<text>]    # name/rename session (empty or "" clears)
 airprompt clean            # full teardown
 airprompt restart          # restart daemon — sessions survive via disk recovery
 airprompt autostart on|off # enable/disable auto-start on SessionStart
+airprompt auth list|allow|deny|revoke|name  # manage paired devices
+airprompt update [<tag>]   # update install to a release tag (or latest main)
 airprompt help             # show usage
 ```
 

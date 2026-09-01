@@ -12,6 +12,7 @@ const os = require('os');
 
 const H = require('../install-helpers');
 const { stripJsonComments } = require('../../bin/lib/settings');
+const { VERSION } = require('../version');
 
 const REPO = 'farox-coop/airprompt';
 
@@ -37,11 +38,19 @@ async function ensureCoreInstall(ctx, providerId) {
     if (!opts.dryRun) {
       const r = H.spawnXplat(
         'git',
-        ['clone', '--depth', '1', `https://github.com/${REPO}.git`, targetDir],
+        [
+          'clone',
+          '--depth',
+          '1',
+          '--branch',
+          `v${VERSION}`,
+          `https://github.com/${REPO}.git`,
+          targetDir,
+        ],
         { stdio: 'inherit' }
       );
       if (!H.spawnOk(r)) {
-        warn('  failed to clone repo');
+        warn(`  failed to clone repo (tag v${VERSION} not found? no network?)`);
         results.failed.push([providerId, 'git clone failed']);
         return null;
       }

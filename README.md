@@ -77,8 +77,11 @@ Accept the self-signed certificate warning on the phone and voice dictation work
 ### One-liners
 
 ```bash
-# Linux / macOS / WSL
+# Linux / macOS / WSL — latest (main branch)
 curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/main/install.sh | bash
+
+# Pin a specific release instead:
+curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/v1.0.0/install.sh | bash
 
 # PowerShell (Windows — daemon needs tmux, so CLI install only)
 irm https://raw.githubusercontent.com/farox-coop/airprompt/main/install.ps1 | iex
@@ -260,6 +263,7 @@ AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter 
 - `/airprompt autostart on|off` — Auto-start on IDE session start
 - `/airprompt clean` — Full teardown: kill daemon, remove all sessions and markers
 - `/airprompt restart` — Restart daemon — active sessions survive via disk recovery
+- `/airprompt update [<tag>]` — Update install to a release tag (or latest main)
 - `/airprompt help` — Print usage
 
 **Manual launch / resume:** `airprompt-launch --provider claude` starts Claude inside a managed tmux session so AirPrompt can mirror it. Resume a previous session with `airprompt-launch --resume <session_id>` or `airprompt-launch --continue`. Handy in VS Code where there's no `$TMUX` — the launch script creates the tmux session itself.

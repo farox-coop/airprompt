@@ -45,7 +45,7 @@ detect_protocol() {
 _warn_if_not_tmux() {
   local cmd="${1:-}"
   case "$cmd" in
-    off|clean) return 0 ;;
+    off|clean|update) return 0 ;;
   esac
   [ -n "${TMUX:-}" ] && return 0
   [ -n "${AIRPROMPT_TMUX_WARN_SHOWN:-}" ] && return 0

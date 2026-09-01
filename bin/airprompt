@@ -78,6 +78,7 @@ if [ -z "$CMD" ]; then
   echo "  restart             Restart daemon — sessions survive via disk recovery"
   echo "  name [<text>]       Set or clear session name (empty or \"\" clears)"
   echo "  autostart on|off    Auto-start AirPrompt on IDE session start"
+  echo "  update [<tag>]      Update install to a release tag (or latest main)"
   echo "  help                Show this help"
   echo ""
   echo "Entrypoint: always use 'airprompt <command>' — never call bin/airprompt-*.sh directly."
@@ -97,6 +98,7 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
     restart)   SUB="$d/bin/airprompt-restart.sh";;
     name)      SUB="$d/bin/airprompt-name.sh";;
     autostart) SUB="$d/bin/airprompt-autostart.sh";;
+    update)    SUB="$d/bin/airprompt-update.sh";;
     help|-h|--help)
       echo "AirPrompt — remote mobile access and voice dictation for IDE sessions"
       echo ""
@@ -119,7 +121,7 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
       echo "Entrypoint: always use 'airprompt <command>' — never call bin/airprompt-*.sh directly."
       exit 0
       ;;
-    *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, restart, name, autostart, auth, help" >&2; exit 1 ;;
+    *)      echo "AirPrompt: unknown command '$CMD'. Try: on, off, status, clean, restart, name, autostart, auth, update, help" >&2; exit 1 ;;
   esac
   if [ -x "$SUB" ]; then
     # --help delegation never needs a provider — run it first
@@ -146,6 +148,9 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
         exec bash "$SUB" "$@"
         ;;
       auth)
+        exec bash "$SUB" "$@"
+        ;;
+      update)
         exec bash "$SUB" "$@"
         ;;
       *)

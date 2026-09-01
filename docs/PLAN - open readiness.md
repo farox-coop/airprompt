@@ -2,7 +2,7 @@
 
 > Derived from the audit in [REPORT - open readiness.md](<REPORT - open readiness.md>). Read the report for the full findings (blockers, should-fix, provider matrix); this plan sequences those fixes into stages.
 
-> **Status: Phases 1 and 2 complete, Stages 3.1–3.3 done** — all 5 blockers resolved, contributor-ready (governance + test/CI integrity + linter/formatter), macOS portability shipped, install robustness (vendored xterm, node-pty docs, `.gitignore`, timeouts, cross-platform hints), and Codex/Cursor/Windsurf adapters shipped (see [PLAN - multi-IDE-v1.md](<PLAN - multi-IDE-v1.md>)). Stage 3.4 (release hygiene) remains.
+> **Status: complete** — all 5 blockers resolved and Phases 1–3 shipped: contributor-ready (governance + test/CI integrity + linter/formatter), macOS portability, install robustness (vendored xterm, node-pty docs, `.gitignore`, timeouts, cross-platform hints), Codex/Cursor/Windsurf adapters (see [PLAN - multi-IDE-v1.md](<PLAN - multi-IDE-v1.md>)), and release hygiene (tags, CHANGELOG, GUI detection probes, VS Code docs).
 
 ## How to use this plan
 
@@ -221,7 +221,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] macOS portability fixes
 - [x] install robustness (vendor xterm, node-pty docs, `.gitignore`, timeouts)
 - [x] codex/cursor/windsurf adapters + detection
-- [ ] release hygiene (tags, changelog, gui probes, vscode doc)
+- [x] release hygiene (tags, changelog, gui probes, vscode doc)
 
 #### Notes / Out of Scope
 
@@ -260,4 +260,4 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] 3.1 macOS portability
 - [x] 3.2 Install robustness
 - [x] 3.3 Ship remaining providers
-- [ ] 3.4 Release hygiene
+- [x] 3.4 Release hygiene

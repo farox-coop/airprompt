@@ -22,16 +22,17 @@ _warn_if_not_tmux status
 detect_protocol
 DAEMON_PORT="$AP_PORT"
 
-# Resolve formatter — derive from script location (avoids stale ~/.airprompt)
+# Resolve formatter + version — derive from script location (avoids stale ~/.airprompt)
 FORMATTER="$(cd "$(dirname "$0")/.." && pwd)/src/status-formatter.js"
 [ -f "$FORMATTER" ] || { echo "Error: status-formatter.js not found" >&2; exit 1; }
+VERSION="$(node "$(cd "$(dirname "$0")/.." && pwd)/src/version.js" 2>/dev/null || echo "0.0.0")"
 
 
 LAN_IP="$(_lan_ip)"
 
 API_URL="${AP_PROTO}://localhost:${DAEMON_PORT}"
 
-echo "=== AirPrompt Status ==="
+echo "=== AirPrompt Status (v${VERSION}) ==="
 echo ""
 
 # ── Daemon status ────────────────────────────────────────────────────

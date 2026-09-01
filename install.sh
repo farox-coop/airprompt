@@ -17,6 +17,8 @@
 set -euo pipefail
 
 REPO="farox-coop/airprompt"
+# Pinned install tag (immutable). `make set-release-tag TAG=vX.Y.Z` bumps this.
+VERSION="v1.0.0"
 
 # Require Node ≥20. nvm is a common path; print a hint if missing.
 if ! command -v node >/dev/null 2>&1; then
@@ -48,5 +50,8 @@ fi
 # Clone + let bin/install.js handle npm install.
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
-git clone --depth 1 "https://github.com/${REPO}.git" "$TMP_DIR" 2>/dev/null
+if ! git clone --depth 1 --branch "$VERSION" "https://github.com/${REPO}.git" "$TMP_DIR"; then
+  echo "airprompt: clone of ${REPO}@${VERSION} failed (tag not found? no network?)" >&2
+  exit 1
+fi
 exec node "$TMP_DIR/bin/install.js" "$@"

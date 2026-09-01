@@ -1,4 +1,4 @@
-.PHONY: setup cert start stop clean refresh logs lint format-write format-check test-unit test-integration test-all agnostic-check install-plugin uninstall-plugin
+.PHONY: setup cert start stop clean refresh logs lint format-write format-check test-unit test-integration test-all agnostic-check install-plugin uninstall-plugin set-release-tag
 
 LOG_FILE := /tmp/airprompt.log
 PID_FILE := /tmp/airprompt-server.pid
@@ -66,3 +66,6 @@ install-plugin:
 
 uninstall-plugin:
 	@node bin/install.js --uninstall
+
+set-release-tag:
+	@node bin/lib/set-release-tag.js "$(TAG)"

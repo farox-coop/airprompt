@@ -226,7 +226,7 @@ const ClaudeProvider = {
   id: 'claude',
   label: 'Claude Code',
   mech: 'claude plugin install',
-  detect: 'command:claude',
+  detect: 'command:claude||dir:$HOME/.claude||vscode-ext:anthropic.claude-code',
   profile: null, // Claude uses native plugin installs, not skills.sh profiles
 
   // ── Config resolution ──────────────────────────────────────────────────

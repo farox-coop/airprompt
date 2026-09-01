@@ -27,6 +27,8 @@ function Install-AirPrompt {
 
   $ErrorActionPreference = "Stop"
   $Repo = "farox-coop/airprompt"
+  # Pinned install tag (immutable). `make set-release-tag TAG=vX.Y.Z` bumps this.
+  $Version = "v1.0.0"
 
   # Require Node ≥20.
   $node = Get-Command node -ErrorAction SilentlyContinue
@@ -60,7 +62,11 @@ airprompt: Node.js (>=20) required. Install:
   # (express, ws, node-pty, qrcode-terminal) that npx won't install.
   # Clone + let bin/install.js handle npm install.
   $tmp = Join-Path $env:TEMP "airprompt-install-$(Get-Random)"
-  git clone --depth 1 "https://github.com/$Repo.git" $tmp 2>$null
+  git clone --depth 1 --branch $Version "https://github.com/$Repo.git" $tmp
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "airprompt: clone of $Repo@$Version failed (tag not found? no network?)"
+    exit 1
+  }
   & node "$tmp/bin/install.js" @InstallerArgs
   $exitCode = $LASTEXITCODE
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

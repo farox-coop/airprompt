@@ -58,6 +58,12 @@ Providers live in `src/providers/`. The registry auto-discovers every `*.js` fil
 
 Do not re-advertise a provider in the CLI hints or the `--only` validator until its adapter actually ships.
 
+## Releasing
+
+1. `make set-release-tag TAG=vX.Y.Z` — propagates the release across `version`, `package.json`, `package-lock.json`, `install.sh`, `install.ps1`, and `README.md` (the pinned one-liner). The `version` file at the repo root is the Node-side source of truth.
+2. Commit and push the version bump.
+3. Create the release at `https://github.com/farox-coop/airprompt/releases/new` with the same tag (e.g. `v1.0.0`) — GitHub creates the tag and the release there.
+
 ## Conventions
 
 - **No hardcoded user paths.** AirPrompt runs for any user. Never hardcode a user-specific absolute path. Shell scripts use `$HOME` / `$CLAUDE_CONFIG_DIR`; Node uses `os.homedir()` / `process.env.HOME` / `process.env.CLAUDE_CONFIG_DIR`; docs use `~` / `$HOME`. Config values (port, pid file, state dir) come from `AIRPROMPT_*` env vars, never a literal.

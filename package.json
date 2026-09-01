@@ -1,6 +1,6 @@
 {
   "name": "airprompt",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Remote control interface for IDE/CLI terminals with voice dictation",
   "main": "server.js",
   "files": [
@@ -11,6 +11,7 @@
     "server.js",
     "install.sh",
     "install.ps1",
+    "version",
     ".claude-plugin/"
   ],
   "scripts": {
