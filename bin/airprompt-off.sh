@@ -14,7 +14,7 @@ fi
 
 DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
-PROVIDER="${AIRPROMPT_PROVIDER:?}"
+PROVIDER="${AIRPROMPT_PROVIDER:-}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
 source "$(dirname "$0")/lib/protocol.sh"
@@ -36,11 +36,17 @@ fi
 MY_DIR=""
 if [ -n "$CURRENT_TMUX" ]; then
   SAFE_TMUX=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
-  if [ -d "${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}" ]; then
+  if [ -n "$PROVIDER" ] && [ -d "${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}" ]; then
     MY_DIR="${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}"
-    if [ -z "$SESSION_ID" ]; then
-      SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
-    fi
+  else
+    # Provider unknown (e.g. IDE uninstalled) — find the session dir matching
+    # this tmux regardless of provider prefix.
+    for d in "${SESSIONS_DIR}"/*-"${SAFE_TMUX}"; do
+      [ -d "$d" ] && { MY_DIR="$d"; break; }
+    done
+  fi
+  if [ -n "$MY_DIR" ] && [ -z "$SESSION_ID" ]; then
+    SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
   fi
 fi
 

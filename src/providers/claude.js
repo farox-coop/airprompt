@@ -14,9 +14,9 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { spawnSync } = require('child_process');
 
-const { resolveInstallDir } = require('./provider');
+const { resolveInstallDir, hasCmd, detectMatch, sessionsRootDir } = require('./provider');
+const { ensureCoreInstall } = require('./install-common');
 const { safeRmSync } = require('../utils');
 
 // Lazy-loaded — only needed during install/uninstall, not hook execution
@@ -30,19 +30,6 @@ function loadInstallDeps() {
 const REPO = 'farox-coop/airprompt';
 
 const HOOK_FILES = ['airprompt-activate.js', 'airprompt-deactivate.js', 'airprompt-statusline.sh'];
-
-// ── Detection ──────────────────────────────────────────────────────────────
-
-function hasCmd(cmd) {
-  try {
-    const r = spawnSync('sh', ['-c', `command -v '${String(cmd).replace(/'/g, "'\\''")}'`], {
-      stdio: 'ignore',
-    });
-    return r.status === 0;
-  } catch (_) {
-    return false;
-  }
-}
 
 // ── Hook installer (standalone, non-plugin) ─────────────────────────────────
 
@@ -116,16 +103,16 @@ async function installHooks(ctx, targetDir) {
   const activate = path.join(hooksDir, 'airprompt-activate.js');
   const deactivate = path.join(hooksDir, 'airprompt-deactivate.js');
 
-  SETTINGS.rewriteManagedHookCommands(settings, node);
+  const rewritten = SETTINGS.rewriteManagedHookCommands(settings, node);
 
-  SETTINGS.addCommandHook(settings, 'SessionStart', {
+  const addedStart = SETTINGS.addCommandHook(settings, 'SessionStart', {
     command: `"${node}" "${activate}"`,
     marker: 'airprompt-activate',
     timeout: 10,
     statusMessage: 'Registering AirPrompt session...',
   });
 
-  SETTINGS.addCommandHook(settings, 'Stop', {
+  const addedStop = SETTINGS.addCommandHook(settings, 'Stop', {
     command: `"${node}" "${deactivate}"`,
     marker: 'airprompt-deactivate',
     timeout: 5,
@@ -133,8 +120,12 @@ async function installHooks(ctx, targetDir) {
   });
 
   SETTINGS.validateHookFields(settings);
-  SETTINGS.writeSettings(settingsPath, settings);
-  process.stdout.write(`  hooks wired in ${settingsPath}\n`);
+  if (rewritten > 0 || addedStart || addedStop) {
+    SETTINGS.writeSettings(settingsPath, settings);
+    process.stdout.write(`  hooks wired in ${settingsPath}\n`);
+  } else {
+    process.stdout.write('  hooks already wired — nothing to do\n');
+  }
   return 'ok';
 }
 
@@ -287,33 +278,9 @@ const ClaudeProvider = {
 
   commandPrefix: '/',
 
-  // ── Detection ──────────────────────────────────────────────────────────
+  // ── Detection (shared — see provider.js) ────────────────────────────────
 
-  /**
-   * Resolve ||-separated detection probes.
-   * Supported kinds: command:, dir:, macapp:, vscode-ext:
-   * @param {string} spec
-   * @returns {boolean}
-   */
-  detectMatch(spec) {
-    if (!spec) return false;
-    for (const clause of spec.split('||')) {
-      const c = clause.trim();
-      if (!c) continue;
-      const colon = c.indexOf(':');
-      const kind = colon === -1 ? c : c.slice(0, colon);
-      const val =
-        colon === -1
-          ? ''
-          : c
-              .slice(colon + 1)
-              .replace(/^\$HOME/, os.homedir())
-              .replace(/^~/, os.homedir());
-      if (kind === 'command' && hasCmd(val)) return true;
-      if (kind === 'dir' && fs.existsSync(val)) return true;
-    }
-    return false;
-  },
+  detectMatch,
 
   // ── Hook I/O (adapter pattern) ─────────────────────────────────────────
 
@@ -397,110 +364,8 @@ const ClaudeProvider = {
     results.detected++;
     say('→ Claude Code detected');
 
-    const targetDir = opts.targetDir || path.join(os.homedir(), '.airprompt');
-
-    // 1. Clone or verify repo at target dir
-    if (!fs.existsSync(targetDir)) {
-      say('  → cloning AirPrompt repo');
-      if (!opts.dryRun) {
-        const r = H.spawnXplat(
-          'git',
-          ['clone', '--depth', '1', `https://github.com/${REPO}.git`, targetDir],
-          { stdio: 'inherit' }
-        );
-        if (!H.spawnOk(r)) {
-          warn('  failed to clone repo');
-          results.failed.push(['claude', 'git clone failed']);
-          return;
-        }
-      } else {
-        note(`  would clone ${REPO} → ${targetDir}`);
-      }
-    } else {
-      note(`  ${targetDir} exists — using existing install`);
-    }
-
-    // 2. Ensure node_modules exist. `express` alone is not a reliable
-    // sentinel — an upgraded install still has express but lacks the newer
-    // deps (@xterm/*), so also require them to force npm install on the
-    // upgrade path.
-    const nmDir = path.join(targetDir, 'node_modules');
-    if (
-      !fs.existsSync(nmDir) ||
-      !fs.existsSync(path.join(nmDir, 'express')) ||
-      !fs.existsSync(path.join(nmDir, '@xterm', 'xterm')) ||
-      !fs.existsSync(path.join(nmDir, '@xterm', 'addon-fit'))
-    ) {
-      say('  → installing npm dependencies');
-      if (!opts.dryRun) {
-        const r = H.spawnXplat('npm', ['install', '--no-audit', '--no-fund', '--omit=dev'], {
-          cwd: targetDir,
-          stdio: 'inherit',
-        });
-        if (!H.spawnOk(r)) {
-          warn('  npm install failed — daemon will not start until deps are installed');
-          results.failed.push(['claude', 'npm install failed']);
-        }
-      } else {
-        note('  would run: npm install in ' + targetDir);
-      }
-    } else {
-      note('  dependencies already installed');
-    }
-
-    // 2b. Check jq
-    H.checkJq(note, warn, ok, opts.dryRun, opts.nonInteractive);
-
-    // 2c. Enforce HTTPS — generate TLS certificate
-    if (!H.generateCert(targetDir, opts.dryRun, say, note, warn, ok)) {
-      warn('  HTTPS not available — voice dictation and notifications may not work');
-    }
-
-    // 3. Create symlinks + provider wrappers in ~/bin/
-    {
-      const homeBin = path.join(os.homedir(), 'bin');
-      const launchTarget = path.join(targetDir, 'bin', 'airprompt-launch');
-
-      // ~/bin/ symlinks
-      const entries = [{ name: 'airprompt', target: path.join(targetDir, 'bin', 'airprompt') }];
-
-      if (!opts.dryRun) {
-        try {
-          fs.mkdirSync(homeBin, { recursive: true });
-          for (const { name, target } of entries) {
-            const linkPath = path.join(homeBin, name);
-            try {
-              fs.unlinkSync(linkPath);
-            } catch (_) {}
-            fs.symlinkSync(target, linkPath);
-            process.stdout.write(`  symlink: ${linkPath} → ${target}\n`);
-          }
-
-          // airprompt-launch symlink (idempotent across providers)
-          const launchLink = path.join(homeBin, 'airprompt-launch');
-          if (!fs.existsSync(launchLink)) {
-            fs.symlinkSync(launchTarget, launchLink);
-            process.stdout.write(`  symlink: ${launchLink} → ${launchTarget}\n`);
-          }
-
-          // airprompt-{provider} wrapper script
-          const wrapperPath = path.join(homeBin, `airprompt-${this.id}`);
-          if (!fs.existsSync(wrapperPath)) {
-            const wrapperContent = `#!/bin/bash\nexec airprompt-launch --provider ${this.id} "$@"\n`;
-            fs.writeFileSync(wrapperPath, wrapperContent, { mode: 0o755 });
-            process.stdout.write(`  wrapper: ${wrapperPath}\n`);
-          }
-        } catch (e) {
-          note(`  could not create symlinks/wrappers: ${e.message} (non-fatal)`);
-        }
-      } else {
-        for (const { name, target } of entries) {
-          note(`  would symlink ${path.join(homeBin, name)} → ${target}`);
-        }
-        note(`  would symlink ${path.join(homeBin, 'airprompt-launch')} → ${launchTarget}`);
-        note(`  would create ${path.join(homeBin, `airprompt-${this.id}`)} wrapper`);
-      }
-    }
+    const targetDir = await ensureCoreInstall(ctx, this.id);
+    if (!targetDir) return; // clone failed — abort
 
     // 4. Claude Code plugin install (idempotent unless --force)
     let alreadyInstalled = false;
@@ -619,26 +484,32 @@ const ClaudeProvider = {
     const { SETTINGS, H } = loadInstallDeps();
     const { say, note, warn, ok, opts } = ctx;
     const configDir = ctx.configDir || this.configDir();
+    // Scoped uninstall (--only claude) must not destroy the shared install that
+    // other providers' hooks reference — full teardown only when unscoped.
+    const isFullUninstall = !opts.only || opts.only.length === 0;
     say('airprompt uninstall');
 
     if (opts.dryRun) note('  (dry run — nothing will be removed)');
 
-    // 1. Stop daemon
-    const pidFile = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
-    if (fs.existsSync(pidFile)) {
-      if (opts.dryRun) {
-        note(`  would stop daemon (PID file: ${pidFile})`);
-      } else {
-        try {
-          const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
-          process.kill(pid, 'SIGTERM');
-          note('  stopped daemon');
-        } catch (_) {
-          /* already dead */
+    // 1. Stop daemon — full uninstall only; a scoped --only uninstall must not
+    // kill the shared daemon that other providers' sessions depend on.
+    if (isFullUninstall) {
+      const pidFile = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
+      if (fs.existsSync(pidFile)) {
+        if (opts.dryRun) {
+          note(`  would stop daemon (PID file: ${pidFile})`);
+        } else {
+          try {
+            const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
+            process.kill(pid, 'SIGTERM');
+            note('  stopped daemon');
+          } catch (_) {
+            /* already dead */
+          }
+          try {
+            fs.unlinkSync(pidFile);
+          } catch (_) {}
         }
-        try {
-          fs.unlinkSync(pidFile);
-        } catch (_) {}
       }
     }
 
@@ -678,17 +549,21 @@ const ClaudeProvider = {
       }
     }
 
-    // 4. Remove ~/bin/ symlinks + all provider wrappers
+    // 4. Remove ~/bin/ symlinks + provider wrappers
     {
       const homeBin = path.join(os.homedir(), 'bin');
-      // Core symlinks + wrappers
-      const entries = ['airprompt', 'airprompt-launch'];
-      // All known provider wrappers — comprehensive list covers any that
-      // may have been generated by install or airprompt-launch self-bootstrap.
-      const wrapperProviders = ['claude', 'codex', 'cursor', 'windsurf'];
-      for (const prov of wrapperProviders) {
-        entries.push(`airprompt-${prov}`);
-      }
+      // Full uninstall removes the shared entrypoints + all provider wrappers;
+      // scoped uninstall (--only claude) removes only the claude wrapper.
+      const entries = isFullUninstall
+        ? [
+            'airprompt',
+            'airprompt-launch',
+            'airprompt-claude',
+            'airprompt-codex',
+            'airprompt-cursor',
+            'airprompt-windsurf',
+          ]
+        : ['airprompt-claude'];
 
       for (const name of entries) {
         const linkPath = path.join(homeBin, name);
@@ -735,7 +610,7 @@ const ClaudeProvider = {
     }
 
     // 7. Remove per-session directories (~/.airprompt/sessions/)
-    const sessionsDir = path.join(os.homedir(), '.airprompt', 'sessions');
+    const sessionsDir = sessionsRootDir();
     if (fs.existsSync(sessionsDir)) {
       if (!opts.dryRun) {
         try {
@@ -751,18 +626,22 @@ const ClaudeProvider = {
       note(`  removed ${sessionsDir}`);
     }
 
-    // 9. Remove install dir contents (~/.airprompt/) — keep state/ (user data)
-    const targetDir = opts.targetDir || path.join(os.homedir(), '.airprompt');
-    if (fs.existsSync(targetDir)) {
-      if (!opts.dryRun) {
-        try {
-          for (const entry of fs.readdirSync(targetDir)) {
-            if (entry === 'state') continue; // preserve user data
-            safeRmSync(path.join(targetDir, entry));
-          }
-        } catch (_) {}
+    // 9. Remove install dir contents (~/.airprompt/) — keep state/ (user data).
+    // Full uninstall only — a scoped --only uninstall must not nuke the shared
+    // install that other providers' hook commands reference.
+    if (isFullUninstall) {
+      const targetDir = opts.targetDir || path.join(os.homedir(), '.airprompt');
+      if (fs.existsSync(targetDir)) {
+        if (!opts.dryRun) {
+          try {
+            for (const entry of fs.readdirSync(targetDir)) {
+              if (entry === 'state') continue; // preserve user data
+              safeRmSync(path.join(targetDir, entry));
+            }
+          } catch (_) {}
+        }
+        note(`  removed ${targetDir} (state/ kept)`);
       }
-      note(`  removed ${targetDir} (state/ kept)`);
     }
   },
 

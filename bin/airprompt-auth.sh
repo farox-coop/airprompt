@@ -24,4 +24,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$DIR/lib/protocol.sh"
+_warn_if_not_tmux auth
 exec node "$DIR/lib/auth-cli.js" "$@"

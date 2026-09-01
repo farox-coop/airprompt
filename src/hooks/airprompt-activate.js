@@ -1,18 +1,22 @@
 #!/usr/bin/env node
-// airprompt-activate.js — SessionStart hook (Claude Code wrapper).
+// airprompt-activate.js — SessionStart hook wrapper.
 //
-// Thin wrapper that parses Claude's hook stdin, delegates to shared core logic,
-// and formats output back to Claude's expected format.
+// Provider-agnostic. Resolves the provider from argv (`node airprompt-activate.js codex`
+// or `--provider codex`), parses that provider's hook stdin, and delegates to the
+// shared core activation. Defaults to `claude` when no provider id is given.
 //
-// Claude Code SessionStart hook wrapper. Delegates to provider-agnostic core.
-// Plugin.json and settings.json hook entries point here.
+// `--dump-stdin` prints the raw stdin it received and exits without side effects —
+// a beta helper for confirming each IDE's exact hook wire format.
 
 'use strict';
 
-const ClaudeProvider = require('../providers/claude');
+const { resolveProvider } = require('./core/resolve-provider');
 const { activateSession } = require('./core/activate');
 
 async function main() {
+  const argv = process.argv.slice(2);
+  const dumpStdin = argv.includes('--dump-stdin');
+
   // Read stdin (provider passes hook context as JSON).
   // Skip stdin read when invoked from a TTY (e.g. autostart.sh immediate register)
   // or when piped stdin is already closed — for-await would hang forever.
@@ -23,19 +27,26 @@ async function main() {
     input = Buffer.concat(chunks).toString();
   }
 
-  const ctx = ClaudeProvider.parseHookStdin(input);
-  const result = await activateSession({ ...ctx, provider: ClaudeProvider });
+  if (dumpStdin) {
+    process.stdout.write(input || '(no stdin)\n');
+    process.exit(0);
+  }
 
-  // Only write structured output for errors — Claude Code reads this as
-  // hook feedback. Success cases already print human-friendly messages
-  // via process.stdout.write in activateSession.
+  const provider = resolveProvider(argv);
+  const ctx = provider.parseHookStdin(input);
+  const result = await activateSession({ ...ctx, provider });
+
+  // Only write structured output for errors — the IDE reads this as hook
+  // feedback. Success cases already print human-friendly messages via
+  // process.stdout.write in activateSession.
   if (result.status === 'error') {
-    process.stdout.write(ClaudeProvider.formatHookOutput(result) + '\n');
+    process.stdout.write(provider.formatHookOutput(result) + '\n');
   }
   // Let event loop drain before exit — ensures pending async work completes.
   setImmediate(() => process.exit(0));
 }
 
-main().catch(() => {
-  setImmediate(() => process.exit(0));
+main().catch((e) => {
+  process.stderr.write(`airprompt activate error: ${e && e.message ? e.message : e}\n`);
+  setImmediate(() => process.exit(1));
 });

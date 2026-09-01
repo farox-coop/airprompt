@@ -29,18 +29,21 @@ CMD="${1:-}"
 shift || true
 # Remaining positional args in "$@" after shift
 
+# ── tmux warning (not inside tmux → phone shows mirror shell, not live UI) ─
+_warn_if_not_tmux "$CMD"
+
 # ── Provider auto-detection (only for commands that need it) ────────────
 # Runs before dispatching to sub-scripts that require AIRPROMPT_PROVIDER.
 _ensure_provider() {
   if [ -n "${AIRPROMPT_PROVIDER:-}" ]; then return 0; fi
-  for prov in claude codex cursor windsurf; do
-    if command -v "$prov" >/dev/null 2>&1; then
-      export AIRPROMPT_PROVIDER="$prov"
-      return 0
-    fi
-  done
+  local detected
+  detected="$(node "$SELF_DIR/lib/resolve-provider.js" || true)"
+  if [ -n "$detected" ]; then
+    export AIRPROMPT_PROVIDER="$detected"
+    return 0
+  fi
   echo "AirPrompt: no provider detected and AIRPROMPT_PROVIDER not set." >&2
-  echo "  Install claude (codex, cursor, windsurf coming soon)" >&2
+  echo "  Install claude, codex, cursor, or windsurf" >&2
   echo "  Or set AIRPROMPT_PROVIDER manually." >&2
   return 1
 }
@@ -52,7 +55,7 @@ if [ -z "$CMD" ]; then
     [ -d "$d" ] || continue
     STATUS_SH="$d/bin/airprompt-status.sh"
     if [ -x "$STATUS_SH" ]; then
-      bash "$STATUS_SH"
+      bash "$STATUS_SH" || true # status may exit non-zero (stale pidfile) — still print help
       echo ""
       echo ""
     fi
@@ -123,8 +126,9 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
     if [ $# -gt 0 ] && { [ "$1" = "--help" ] || [ "$1" = "-h" ]; }; then
       exec bash "$SUB" --help
     fi
-    # Commands that need a provider
-    case "$CMD" in on|off|name|autostart) _ensure_provider || exit 1 ;; esac
+    # Commands that need a provider (autostart resolves its own, and supports
+    # AIRPROMPT_SETTINGS_FILE; off finds its session provider-agnostically)
+    case "$CMD" in on|name) _ensure_provider || exit 1 ;; esac
     case "$CMD" in
       on)
         if [ $# -gt 0 ] && [ "$1" = "--name" ]; then

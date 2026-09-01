@@ -18,6 +18,7 @@ PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
 source "$(dirname "$0")/lib/protocol.sh"
+_warn_if_not_tmux status
 detect_protocol
 DAEMON_PORT="$AP_PORT"
 

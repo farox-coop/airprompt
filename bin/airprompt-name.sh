@@ -20,11 +20,15 @@ ORIG_PWD="$PWD"
 
 DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+
+# ── tmux warning (before the provider gate, so direct invocation still warns) ─
+source "$(dirname "$0")/lib/protocol.sh"
+_warn_if_not_tmux name
+
 PROVIDER="${AIRPROMPT_PROVIDER:?}"
 PROJECT_NAMES_FILE="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}/project-names.json"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
-source "$(dirname "$0")/lib/protocol.sh"
 detect_protocol
 DAEMON_PORT="$AP_PORT"
 

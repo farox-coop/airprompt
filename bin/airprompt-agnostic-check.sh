@@ -22,6 +22,7 @@ EXEMPT_FILES=(
   "bin/airprompt-agnostic-check.sh"
   "bin/airprompt"
   "bin/airprompt-on.sh"
+  "bin/airprompt-autostart.sh"
   "bin/install.js"
   "src/providers/claude.js"
   "src/providers/codex.js"
@@ -30,6 +31,7 @@ EXEMPT_FILES=(
   "src/providers/gemini.js"
   "src/hooks/airprompt-activate.js"
   "src/hooks/airprompt-deactivate.js"
+  "src/hooks/core/resolve-provider.js"
 )
 
 EXEMPT_DIRS=(

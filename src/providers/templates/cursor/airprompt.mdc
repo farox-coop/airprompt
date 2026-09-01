@@ -1,0 +1,6 @@
+---
+description: AirPrompt remote access — the `airprompt` CLI controls remote mobile access and voice dictation for this Cursor session.
+alwaysApply: false
+---
+
+The `airprompt` command controls remote mobile access and voice dictation for this Cursor session. Always run it with the Cursor provider id: `AIRPROMPT_PROVIDER=cursor airprompt <command>`. Use `airprompt on` to register, `airprompt off` to unregister, and `airprompt status` to inspect.

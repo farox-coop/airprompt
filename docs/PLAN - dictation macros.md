@@ -128,7 +128,7 @@ Core logic is ~120 lines of pure JS (dictionary lookup + regex). Integration tou
 
 ## Verification
 
-1. `make -C /home/diego/projects/airprompt test-all` — all existing + new macro tests pass
+1. `make test-all` — all existing + new macro tests pass
 2. Manual smoke test:
    - Dictate `hola signo de pregunta` → overlay shows `hola?`
    - Dictate `entre comillas` as standalone fragment → overlay does NOT show it (macro consumed)
@@ -152,12 +152,12 @@ The collapse is hardcoded in Claude Code: there is no `pasteCollapseThreshold` /
 
 **Why AirPrompt can't fix it.** Every delivery mechanism for multi-line text is a paste, and Claude Code collapses all pastes:
 
-| Approach | Result |
-| --- | --- |
-| Manual bracketed paste via `pty.write('\x1b[200~'+text+'\x1b[201~')` | Same collapse — no benefit over `paste-buffer -p` |
-| `tmux send-keys -l` literal typing | Literal `\n` = Enter = submits mid-text |
-| Bracketed-paste mode toggle (`ESC[?2004l` … `ESC[?2004h`) | Claude Code ignores DEC 2004 and detects paste by byte-arrival rate → still collapses |
-| Slow keystroke replay to evade the arrival-rate heuristic | Slow and fragile for long dictation |
+| Approach                                                             | Result                                                                                |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Manual bracketed paste via `pty.write('\x1b[200~'+text+'\x1b[201~')` | Same collapse — no benefit over `paste-buffer -p`                                     |
+| `tmux send-keys -l` literal typing                                   | Literal `\n` = Enter = submits mid-text                                               |
+| Bracketed-paste mode toggle (`ESC[?2004l` … `ESC[?2004h`)            | Claude Code ignores DEC 2004 and detects paste by byte-arrival rate → still collapses |
+| Slow keystroke replay to evade the arrival-rate heuristic            | Slow and fragile for long dictation                                                   |
 
 The only mechanism that reliably avoids the collapse is single-line output (no `\n`), which loses real line breaks.
 

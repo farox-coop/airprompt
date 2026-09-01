@@ -2,7 +2,7 @@
 
 > Derived from the audit in [REPORT - open readiness.md](<REPORT - open readiness.md>). Read the report for the full findings (blockers, should-fix, provider matrix); this plan sequences those fixes into stages.
 
-> **Status: Phases 1 and 2 complete, Stages 3.1–3.2 done** — all 5 blockers resolved, contributor-ready (governance + test/CI integrity + linter/formatter), macOS portability shipped, and install robustness (vendored xterm, node-pty docs, `.gitignore`, timeouts, cross-platform hints). Phase 3 remains: Stages 3.3–3.4.
+> **Status: Phases 1 and 2 complete, Stages 3.1–3.3 done** — all 5 blockers resolved, contributor-ready (governance + test/CI integrity + linter/formatter), macOS portability shipped, install robustness (vendored xterm, node-pty docs, `.gitignore`, timeouts, cross-platform hints), and Codex/Cursor/Windsurf adapters shipped (see [PLAN - multi-IDE-v1.md](<PLAN - multi-IDE-v1.md>)). Stage 3.4 (release hygiene) remains.
 
 ## How to use this plan
 
@@ -190,6 +190,8 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 ### Stage 3.3 — Ship remaining providers (codex/cursor/windsurf)
 
+> **Detailed plan:** see [PLAN - multi-IDE-v1.md](<PLAN - multi-IDE-v1.md>) — exact hook formats, config paths, detection probes, and beta strategy for all three providers.
+
 - **Commit message:** `feat(providers): codex, cursor, windsurf adapters`
 
 - Files: new `src/providers/codex.js`, `src/providers/cursor.js`, `src/providers/windsurf.js`; re-enable detection loops; per-provider hook wiring + tests.
@@ -218,7 +220,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 - [x] macOS portability fixes
 - [x] install robustness (vendor xterm, node-pty docs, `.gitignore`, timeouts)
-- [ ] codex/cursor/windsurf adapters + detection
+- [x] codex/cursor/windsurf adapters + detection
 - [ ] release hygiene (tags, changelog, gui probes, vscode doc)
 
 #### Notes / Out of Scope
@@ -257,5 +259,5 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 - [x] 2.4 Lint/format normalization
 - [x] 3.1 macOS portability
 - [x] 3.2 Install robustness
-- [ ] 3.3 Ship remaining providers
+- [x] 3.3 Ship remaining providers
 - [ ] 3.4 Release hygiene

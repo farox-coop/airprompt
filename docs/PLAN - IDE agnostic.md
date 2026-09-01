@@ -643,6 +643,8 @@ All stages (1-11) implemented. 563 unit + 37 integration tests pass.
 
 ## 8. Future: Adding Codex (after agnostic refactor)
 
+> **Superseded.** The concrete implementation plan for Codex/Cursor/Windsurf now lives in [PLAN - multi-IDE-v1.md](<PLAN - multi-IDE-v1.md>) (generic single hook wrapper, direct file copy, dual `hooks`/`codex_hooks` flag). The sketch below predates that plan and differs in three details: per-provider wrapper files, `npx skills add`, and the single feature flag.
+
 Once the refactoring is done, adding Codex is fast:
 
 1. **Create `src/providers/codex.js`** (~150 lines)

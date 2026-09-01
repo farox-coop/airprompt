@@ -22,6 +22,10 @@ if [ "$ACTION" != "on" ] && [ "$ACTION" != "off" ]; then
   exit 1
 fi
 
+# ── tmux warning (not inside tmux → phone shows mirror shell, not live UI) ─
+source "$(dirname "$0")/lib/protocol.sh"
+_warn_if_not_tmux autostart
+
 # ── Resolve install dir ───────────────────────────────────────────────
 # Derive from script location (more reliable than probing PATH/env).
 INSTALL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,7 +40,10 @@ fi
 if [ -n "${AIRPROMPT_SETTINGS_FILE:-}" ]; then
   SETTINGS="$AIRPROMPT_SETTINGS_FILE"
 else
-  CONFIG_DIR=$(AIRPROMPT_INSTALL_DIR="$INSTALL_DIR" node "${INSTALL_DIR}/bin/lib/resolve-config-dir.js" "${AIRPROMPT_PROVIDER:-}" 2>/dev/null) || { echo "AirPrompt autostart: cannot resolve IDE config dir" >&2; exit 1; }
+  # autostart wires a Claude Code `settings.json` SessionStart hook — a
+  # Claude-only feature. Codex/Cursor/Windsurf auto-start is already wired via
+  # their hooks.json by the provider install, so resolve Claude's config dir.
+  CONFIG_DIR=$(AIRPROMPT_INSTALL_DIR="$INSTALL_DIR" node "${INSTALL_DIR}/bin/lib/resolve-config-dir.js" "claude" 2>/dev/null) || { echo "AirPrompt autostart: cannot resolve Claude config dir" >&2; exit 1; }
   SETTINGS="${CONFIG_DIR}/settings.json"
 fi
 ACTIVATE_SCRIPT="${INSTALL_DIR}/src/hooks/airprompt-activate.js"

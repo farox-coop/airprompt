@@ -60,7 +60,8 @@ process.stdin.on('end', () => {
     if (lastAct) {
       try {
         const idleS = (Date.now() - lastAct) / 1000;
-        if (idleS < 60) idleStr = String(Math.floor(idleS)) + 's ago';
+        if (!Number.isFinite(idleS)) idleStr = '?';
+        else if (idleS < 60) idleStr = String(Math.floor(idleS)) + 's ago';
         else if (idleS < 3600) idleStr = String(Math.floor(idleS / 60)) + 'm ago';
         else idleStr = String(Math.floor(idleS / 3600)) + 'h ago';
       } catch (_) {
@@ -69,14 +70,22 @@ process.stdin.on('end', () => {
     }
 
     const stype = mirror ? 'MIRROR  ' : 'REAL    ';
+    // Non-tmux (mirror) sessions render red so they stand out in `status`;
+    // real tmux sessions keep the default cyan. Colors only when stdout is a TTY
+    // (captured output stays clean).
+    const useColor = process.stdout.isTTY;
+    const nameColor = useColor ? (mirror ? '\x1b[1;31m' : '\x1b[1;36m') : '';
+    const reset = useColor ? '\x1b[0m' : '';
     const liveness = alive ? 'ALIVE' : 'DEAD';
     const badgeStr = active ? 'YES' : 'no';
     const clientStr = String(clients);
 
     process.stdout.write(
-      '  \x1b[1;36m' +
+      '  ' +
+        nameColor +
         name +
-        '\x1b[0m  (' +
+        reset +
+        '  (' +
         stype +
         ')\n' +
         '    ID:           ' +

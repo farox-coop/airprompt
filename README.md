@@ -4,7 +4,7 @@
 
 ## Overview
 
-AirPrompt lets you view and interact with remote IDE/CLI sessions running on your local network machine from your mobile phone using voice prompts. Provider-agnostic: supports multiple IDEs via adapters (Claude Code first, Codex/Cursor/Windsurf planned).
+AirPrompt lets you view and interact with remote IDE/CLI sessions running on your local network machine from your mobile phone using voice prompts. Provider-agnostic: supports multiple IDEs via adapters (Claude Code, Codex, Cursor, Windsurf).
 
 ## Requirements
 
@@ -111,7 +111,8 @@ node bin/install.js
 - `~/.airprompt/state/` — daemon.json, TLS cert/key, project names
 - `~/.airprompt/sessions/` — per-session markers (url, name)
 - `~/bin/airprompt` — symlink to the dispatcher (add `~/bin` to your PATH)
-- `~/.claude/hooks/` + `settings.json` — SessionStart, Stop, and statusline wiring
+- `~/bin/airprompt-{codex,cursor,windsurf}` — per-provider launch wrappers
+- Per-provider config: `~/.claude/hooks/` + `settings.json`; `~/.codex/hooks.json` + `config.toml` + `skills/`; `~/.cursor/hooks.json` + `commands/` + `rules/`; `~/.codeium/windsurf/hooks.json` + `skills/` + `rules/`
 - `/tmp/airprompt-server.pid` — daemon PID file
 - `/tmp/airprompt.log` — daemon log
 
@@ -151,13 +152,13 @@ Daemon output goes to `/tmp/airprompt.log`. Tail it with `make logs` or `tail -f
 
 ## Provider status
 
-| Provider              | Status        | Notes                                                                   |
-| --------------------- | ------------- | ----------------------------------------------------------------------- |
-| Claude Code (tmux)    | ✅ Functional | Full install, hooks, badge, lifecycle                                   |
-| Claude Code (VS Code) | ⚠️ Partial    | Registers, but no `$TMUX` — phone shows an empty shell, not the live UI |
-| Codex                 | 🚧 Planned    | Adapter not shipped yet                                                 |
-| Cursor                | 🚧 Planned    | Adapter not shipped yet                                                 |
-| Windsurf              | 🚧 Planned    | Adapter not shipped yet                                                 |
+| Provider              | Status        | Notes                                                                     |
+| --------------------- | ------------- | ------------------------------------------------------------------------- |
+| Claude Code (tmux)    | ✅ Functional | Full install, hooks, badge, lifecycle                                     |
+| Claude Code (VS Code) | ⚠️ Partial    | Registers, but no `$TMUX` — phone shows an empty shell, not the live UI   |
+| Codex                 | ✅ Functional | `$airprompt` skill, `SessionStart`/`Stop` hooks                           |
+| Cursor                | ✅ Functional | `/airprompt` command + rule, `sessionStart`/`sessionEnd` hooks            |
+| Windsurf              | ✅ Functional | `on-open` hook; no session-end — daemon runs until `airprompt off`/reboot |
 
 ## Troubleshooting
 
@@ -167,7 +168,7 @@ Daemon output goes to `/tmp/airprompt.log`. Tail it with `make logs` or `tail -f
 
 **Voice dictation (mic) doesn't work** — HTTPS is required. Chrome/Android block `SpeechRecognition` over plain HTTP. Don't set `AIRPROMPT_NO_TLS=1` if you need the mic.
 
-**"no provider detected" / badge missing** — only Claude Code is implemented today. Install `claude` and re-run the installer. The badge shows only in the registered session.
+**"no provider detected" / badge missing** — install a supported agent (`claude`, `codex`, `cursor`, or `windsurf`) and re-run the installer, or set `AIRPROMPT_PROVIDER` manually. The badge shows only in the registered session.
 
 **Missing tmux / jq / openssl** — `sudo apt install tmux jq openssl` (macOS: `brew install tmux jq openssl`). tmux is required for mirroring; jq for protocol detection; openssl for the TLS cert.
 
@@ -248,7 +249,7 @@ Every macro can be toggled from the web UI: tap the ⚙ gear button in the heade
 
 ## IDE Integration
 
-AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter implementing a shared interface. Claude Code ships as the first provider.
+AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter implementing a shared interface. Four providers ship today: Claude Code, Codex, Cursor, and Windsurf.
 
 **Claude Code:**
 
@@ -263,7 +264,7 @@ AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter 
 
 **Manual launch / resume:** `airprompt-launch --provider claude` starts Claude inside a managed tmux session so AirPrompt can mirror it. Resume a previous session with `airprompt-launch --resume <session_id>` or `airprompt-launch --continue`. Handy in VS Code where there's no `$TMUX` — the launch script creates the tmux session itself.
 
-**Adding new IDEs** (Codex, Cursor, Windsurf): create one provider file + thin hook wrappers. Provider auto-discovered by registry. Zero changes to core.
+**Adding a new provider:** create one provider file + a single generic hook wrapper (provider id passed via argv). Provider auto-discovered by registry. Zero changes to core.
 
 ## Contributing
 

@@ -285,7 +285,7 @@ test('buildSessionLabel — fallback to sessions array lookup', async (t) => {
 
 test('buildSessionLabel — fallback to notification cwd basename', async (t) => {
   await t.test('cwd present, no session_label → basename', function () {
-    const n = { cwd: '/home/diego/projects/airprompt' };
+    const n = { cwd: '/home/user/projects/airprompt' };
     assert.strictEqual(buildSessionLabel(n, []), 'airprompt');
   });
 

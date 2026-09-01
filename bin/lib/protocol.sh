@@ -36,6 +36,34 @@ detect_protocol() {
   [ "$AP_PROTO" = "https" ] && AP_CURL_OPTS=(-k) || true
 }
 
+# ── tmux warning ───────────────────────────────────────────────────────
+# Warn when the session is NOT running inside tmux — the phone can only
+# mirror the live terminal when the IDE/CLI runs in tmux; otherwise it
+# attaches to an empty mirror shell. Suppressed for teardown commands
+# (off/clean) and deduped via AIRPROMPT_TMUX_WARN_SHOWN so the
+# dispatcher→sub-script chain warns only once.
+_warn_if_not_tmux() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    off|clean) return 0 ;;
+  esac
+  [ -n "${TMUX:-}" ] && return 0
+  [ -n "${AIRPROMPT_TMUX_WARN_SHOWN:-}" ] && return 0
+  export AIRPROMPT_TMUX_WARN_SHOWN=1
+
+  # Emit ANSI only when stdout is a TTY — captured output (pipes/logs/CI) stays clean.
+  if [ -t 1 ]; then
+    printf '\033[1;33m⚠  AirPrompt: not inside tmux — phone will show an empty mirror shell, not your live terminal.\033[0m\n'
+    printf '\033[1;31m   Run your IDE/CLI inside tmux (or `airprompt-launch --provider <id>`) for full remote access.\033[0m\n'
+    printf '\n'
+  else
+    printf '%s\n' '⚠  AirPrompt: not inside tmux — phone will show an empty mirror shell, not your live terminal.'
+    printf '%s\n' '   Run your IDE/CLI inside tmux (or `airprompt-launch --provider <id>`) for full remote access.'
+    printf '\n'
+  fi
+  : # always return 0 (a failed printf must not abort a set -e caller)
+}
+
 # ── Daemon environment forwarding ─────────────────────────────────────
 # Tmux does NOT inherit client env by default. Use this to build the
 # env prefix string passed to `tmux new-session` / `tmux respawn-pane`.

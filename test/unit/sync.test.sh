@@ -16,12 +16,12 @@ echo "=== sync.sh unit tests ==="
 echo "[1/7] Syntax check"
 if bash -n "$SYNC_SH" 2>&1; then ok "valid bash syntax"; else not_ok "syntax error"; fi
 
-# ── Test 2: no hardcoded /home/diego paths ──────────────────────────
-echo "[2/7] No hardcoded /home/diego paths"
-if grep -n '/home/diego' "$SYNC_SH" 2>/dev/null; then
-  not_ok "found /home/diego in sync.sh"
+# ── Test 2: no hardcoded user home path ─────────────────────────────
+echo "[2/7] No hardcoded user home path"
+if grep -nE '/home/[a-z]+' "$SYNC_SH" 2>/dev/null; then
+  not_ok "found a hardcoded /home/<user> path in sync.sh"
 else
-  ok "no /home/diego hardcoded"
+  ok "no hardcoded home path"
 fi
 
 # ── Test 3: no hardcoded farox-coop publisher ──────────────────────

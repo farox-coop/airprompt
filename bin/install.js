@@ -103,14 +103,8 @@ function parseArgs(argv) {
   }
   if (opts.only.length) {
     const knownIds = new Set(registry.listProviders());
-    const plannedIds = new Set(['codex', 'cursor', 'windsurf']); // not yet implemented
     for (const id of opts.only) {
       if (knownIds.has(id)) continue;
-      if (plannedIds.has(id)) {
-        die(
-          `error: ${id} is not yet implemented — coming soon.\n  Available today: ${[...knownIds].join(', ')}`
-        );
-      }
       die(`error: unknown agent: ${id}\n  see 'airprompt --list' for valid ids`);
     }
   }

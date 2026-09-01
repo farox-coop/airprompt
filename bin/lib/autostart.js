@@ -39,7 +39,8 @@ if (cmd === 'on') {
   // NOTE: marker is a stable identifier, not a path. Must match the
   // MANAGED_HOOK_BASENAMES set in bin/lib/settings.js or off won't clean it.
   const added = addCommandHook(s, 'SessionStart', {
-    command: 'node ' + JSON.stringify(activateScript),
+    // Absolute node path survives GUI-launched IDEs with a minimal PATH.
+    command: JSON.stringify(process.execPath) + ' ' + JSON.stringify(activateScript),
     marker: 'airprompt-activate.js',
     timeout: 10,
     statusMessage: 'Starting AirPrompt...',

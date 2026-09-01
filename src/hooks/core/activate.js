@@ -76,16 +76,23 @@ async function startDaemon(installDir, port, pidFile) {
   child.unref();
   // Wait for HTTP readiness, not just PID — server writes PID before
   // recovery+listen, so register can ECONNREFUSED during slow recovery.
+  // Probe over the TLS scheme the daemon will actually serve (no http redirect).
+  const tls = detectTls();
+  const httpMod = tls ? require('https') : require('http');
+  const scheme = tls ? 'https' : 'http';
   for (let i = 0; i < 30; i++) {
     if (daemonRunning(pidFile)) {
       try {
-        const http = require('http');
         const resp = await new Promise((resolve) => {
-          const req = http.get(`http://localhost:${port}/api/sessions`, (res) => {
-            let data = '';
-            res.on('data', (c) => (data += c));
-            res.on('end', () => resolve(data));
-          });
+          const req = httpMod.get(
+            `${scheme}://localhost:${port}/api/sessions`,
+            tls ? { rejectUnauthorized: false } : {},
+            (res) => {
+              let data = '';
+              res.on('data', (c) => (data += c));
+              res.on('end', () => resolve(data));
+            }
+          );
           req.on('error', () => resolve(null));
           req.setTimeout(500, () => {
             req.destroy();
@@ -344,7 +351,7 @@ async function activateSession(ctx) {
   // 5. Generate session ID
   const cwd = ctx.cwd || process.cwd();
   const cwdSafe = path.basename(cwd).replace(/[^a-zA-Z0-9_-]/g, '');
-  const sessionId = ctx.sessionId || `${Date.now()}-${process.pid}-${cwdSafe}`.slice(0, 64);
+  const sessionId = String(ctx.sessionId || `${Date.now()}-${process.pid}-${cwdSafe}`).slice(0, 64);
 
   // 6. Resolve tmux session
   let tmuxSession = currentTmux;

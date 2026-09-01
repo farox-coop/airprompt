@@ -47,7 +47,7 @@ if (targetId) {
     process.stderr.write('AirPrompt: no provider detected\n');
     process.exit(1);
   }
-  provider = registry.loadProvider(detectedIds[0]);
+  provider = registry.loadProvider(detectedIds.sort()[0]);
 }
 
 if (typeof provider.configDir !== 'function') {

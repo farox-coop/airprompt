@@ -25,10 +25,14 @@ DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 DAEMON_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+
+# ── tmux warning (before the provider gate, so direct invocation still warns) ─
+source "$(dirname "$0")/lib/protocol.sh"
+_warn_if_not_tmux on
+
 PROVIDER="${AIRPROMPT_PROVIDER:?}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
-source "$(dirname "$0")/lib/protocol.sh"
 detect_protocol
 DAEMON_PORT="$AP_PORT"
 
