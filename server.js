@@ -930,7 +930,11 @@ function createApp() {
           break;
         }
         case 'ping':
-          break; // keepalive ack — no action needed
+          // Keepalive reply — the client's dead-connection watchdog needs a
+          // pong back to confirm the receive path is alive (send-only pings
+          // prove nothing when the downlink dies first).
+          if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pong' }));
+          break;
         case 'debug':
           log('debug', '[client] ' + (msg.msg || ''), { level: msg.level, extra: msg.extra });
           break;

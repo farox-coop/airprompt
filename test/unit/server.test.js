@@ -935,6 +935,48 @@ test('WS switch_session for unknown id returns error', async () => {
   assert.ok(err, 'should get an error for unknown session');
 });
 
+test('WS ping → pong keepalive round-trip (authed)', async () => {
+  const { ws } = await connectAuthed();
+  const pong = await new Promise((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error('no pong received within 2s')), 2000);
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'pong') {
+        clearTimeout(to);
+        resolve(msg);
+      }
+    });
+    ws.send(JSON.stringify({ type: 'ping' }));
+  });
+  ws.close();
+  assert.strictEqual(pong.type, 'pong');
+});
+
+test('WS ping before auth is rejected — no pong', (t, done) => {
+  const ws = new WebSocket(`ws://localhost:${port}`);
+  const to = setTimeout(() => {
+    ws.close();
+    done(new Error('no auth_error for pre-auth ping within 2s'));
+  }, 2000);
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw.toString());
+    if (msg.type === 'pong') {
+      clearTimeout(to);
+      ws.close();
+      done(new Error('server must not pong an unauthenticated socket'));
+    } else if (msg.type === 'auth_error') {
+      clearTimeout(to);
+      assert.strictEqual(msg.reason, 'unauthorized');
+      ws.close();
+      done();
+    }
+  });
+  ws.on('open', () => {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  });
+  ws.on('error', () => {}); // server force-closes unauthenticated sockets — expected
+});
+
 // ── Server-side input queue tests ────────────────────────────────────
 // Input messages arriving before PTY is spawned are buffered in a
 // per-connection _inputQueue and flushed after spawnPty() succeeds.

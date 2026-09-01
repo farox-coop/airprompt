@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Dead-connection watchdog — the web client detects half-open WebSocket connections (stale on flaky WiFi) via an app-level ping/pong probe and force-reconnects, with a page-reload fallback for wedged sockets. The daemon replies `pong` to client `ping` messages.
+
 ## [1.0.0] - 2026-09-01
 
 First official release.

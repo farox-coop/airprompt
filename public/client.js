@@ -165,8 +165,13 @@ let ws = null;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 let pingTimer = null;
+let reloadTimer = null;
+let _pingPending = false; // keepalive probe in flight — cleared by any inbound frame
+let probeTimer = null; // force-reconnect if a ping draws no reply within PONG_TIMEOUT_MS
 const PING_INTERVAL_MS = 25_000; // Keepalive — mobile browsers drop idle WS
 const MAX_RECONNECT_MS = 30_000;
+const PONG_TIMEOUT_MS = 10_000; // dead if a ping draws no reply within this window
+const RELOAD_GRACE_MS = 8000; // force-reconnect fallback: reload if new WS never opens
 
 function wsUrl() {
   return `${protocol}//${window.location.host}`;
@@ -273,15 +278,15 @@ function dismissPairNotice(id) {
 function onAuthed() {
   _authed = true;
   _needPtySpawn = true; // new connection — PTY must be re-spawned
+  // A fully-working (authed) connection cancels any pending reload fallback.
+  // Cleared here, not on onopen, so an OPEN-but-stuck-auth socket still reloads.
+  if (reloadTimer) {
+    clearTimeout(reloadTimer);
+    reloadTimer = null;
+  }
   scheduleResize();
   _flushPending();
-  pingTimer = setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(JSON.stringify({ type: 'ping' }));
-      } catch (_) {}
-    }
-  }, PING_INTERVAL_MS);
+  startPingTimer();
 }
 
 // Pair this device: POST /api/pair, show "waiting", poll until the host allows.
@@ -322,6 +327,19 @@ function connect() {
   }
   ws = new WebSocket(wsUrl());
   log('info', 'ws connecting', { url: wsUrl() });
+  // Arm the wedge-recovery reload fallback: if this socket neither opens nor
+  // closes within RELOAD_GRACE_MS (some WebKit builds hang at CONNECTING
+  // forever after background resume), a full reload is the only recovery.
+  // Self-cancels on onAuthed (success) or onclose (clean failure → backoff).
+  if (!_authed) {
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      if (!_authed && !_pairing) {
+        log('warn', 'reconnect wedged — reloading page');
+        location.reload();
+      }
+    }, RELOAD_GRACE_MS);
+  }
 
   ws.onopen = () => {
     log('info', 'ws connected');
@@ -351,9 +369,13 @@ function connect() {
     hideLoadSpinner(); // spinner blocks banner at z-index 500 — must hide
     term.write('\r\n\x1b[31m[AirPrompt: disconnected]\x1b[0m\r\n');
     // Stop ping timer
-    if (pingTimer) {
-      clearInterval(pingTimer);
-      pingTimer = null;
+    stopPingTimer();
+    // A closed socket proves the network stack is responsive — backoff will
+    // handle reconnection, so cancel any pending reload fallback (only a
+    // wedged socket that neither opens nor closes should trigger reload).
+    if (reloadTimer) {
+      clearTimeout(reloadTimer);
+      reloadTimer = null;
     }
     // Overlay banner — stays until clicked or reconnected
     if (!window._airpromptDiscBanner) {
@@ -399,6 +421,79 @@ function scheduleReconnect() {
   }, delay);
 }
 
+// Any inbound frame proves the receive path is alive — clear the in-flight
+// keepalive probe and its timeout.
+function noteServerActivity() {
+  _pingPending = false;
+  if (probeTimer) {
+    clearTimeout(probeTimer);
+    probeTimer = null;
+  }
+}
+
+function stopPingTimer() {
+  if (pingTimer) {
+    clearInterval(pingTimer);
+    pingTimer = null;
+  }
+  noteServerActivity(); // also clear any in-flight probe
+}
+
+function startPingTimer() {
+  stopPingTimer();
+  pingTimer = setInterval(sendProbe, PING_INTERVAL_MS);
+}
+
+// Active dead-connection probe. Send a ping and expect any inbound frame
+// within PONG_TIMEOUT_MS. The socket can report OPEN while the receive path
+// is gone (half-open TCP — no FIN/RST on flaky WiFi, so onclose never fires),
+// so readyState alone can't be trusted; only a reply proves the path is alive.
+function sendProbe() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  } catch (_) {
+    forceReconnect(); // send() throws only on a socket that is really closing
+    return;
+  }
+  _pingPending = true;
+  if (probeTimer) clearTimeout(probeTimer);
+  probeTimer = setTimeout(() => {
+    probeTimer = null;
+    if (_pingPending) {
+      log('warn', 'ws dead (no reply to ping) — force reconnect');
+      forceReconnect();
+    }
+  }, PONG_TIMEOUT_MS);
+}
+
+// Tear down a half-open socket and open a fresh one. Unlike onclose-driven
+// reconnect, this fires while the socket still claims to be OPEN — the only
+// way to recover when onclose never arrives.
+function forceReconnect() {
+  log('info', 'force reconnect');
+  stopPingTimer();
+  // Drop any pending backoff timer — it would double-fire connect() and its
+  // delay is pointless when we're already forcing an immediate reconnect.
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (ws) {
+    // Detach handlers so the old socket's late onclose can't clobber state.
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onclose = null;
+    ws.onerror = null;
+    try {
+      ws.close(); // best-effort: frees the server slot if the uplink still works
+    } catch (_) {}
+    ws = null; // null it so connect()'s OPEN/CONNECTING guard doesn't bail
+  }
+  _authed = false;
+  connect(); // connect() arms the reload fallback for the fresh socket
+}
+
 // Kick off: load/generate the device key, then connect (handshake on open).
 (async function init() {
   // WebCrypto (crypto.subtle) is only available in secure contexts — HTTPS or
@@ -417,6 +512,25 @@ function scheduleReconnect() {
   }
   connect();
 })();
+
+// ── Background / lock-screen recovery ─────────────────────────────────
+// Mobile browsers throttle JS and may silently drop the socket while the
+// tab is hidden. Pause heartbeats while hidden (saves battery); on resume,
+// re-arm the heartbeat and fire an immediate probe so a socket that died
+// while hidden is detected within PONG_TIMEOUT_MS instead of a full interval.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopPingTimer(); // pause heartbeats while hidden (saves battery)
+    return;
+  }
+  if (!_authed) return; // pairing/identity flows drive their own reconnect
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    scheduleReconnect(); // respect backoff — don't hammer on resume
+    return;
+  }
+  startPingTimer(); // re-arm heartbeat paused while hidden
+  sendProbe(); // immediate probe — detect a dead-while-hidden socket fast
+});
 
 function send(msg) {
   // Tag input messages with monotonic seq — debug tracing + future ack.
@@ -462,6 +576,10 @@ async function wsMessageHandler(event) {
   } catch (e) {
     return;
   }
+
+  // Any inbound frame proves the receive path is alive — clears the keepalive
+  // probe (half-open sockets look OPEN but deliver nothing).
+  noteServerActivity();
 
   // Before auth, only handshake messages are meaningful.
   if (!_authed && msg.type !== 'challenge' && msg.type !== 'auth_ok' && msg.type !== 'auth_error')
