@@ -51,12 +51,12 @@ write('install.sh', read('install.sh').replace(/^VERSION="v[0-9.]+"/m, `VERSION=
 // install.ps1 — $Version = "vX.Y.Z"
 write('install.ps1', read('install.ps1').replace(/\$Version = "v[0-9.]+"/, `$Version = "${tag}"`));
 
-// README.md — only bump the pinned `vX.Y.Z` example one-liners; leave `main` alone
+// README.md — only bump the pinned `vX.Y.Z` example one-liners; leave `latest` alone
 write(
   'README.md',
   read('README.md').replace(
-    /raw\.githubusercontent\.com\/farox-coop\/airprompt\/v[0-9.]+/g,
-    `raw.githubusercontent.com/farox-coop/airprompt/${tag}`
+    /github\.com\/farox-coop\/airprompt\/releases\/download\/v[0-9.]+/g,
+    `github.com/farox-coop/airprompt/releases/download/${tag}`
   )
 );
 

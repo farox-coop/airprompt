@@ -52,7 +52,7 @@ Every tmux feature AirPrompt depends on, where it's used, and why:
 Install AirPrompt and wire it into Claude Code with one command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/main/install.sh | bash
+curl -fsSL https://github.com/farox-coop/airprompt/releases/latest/download/install.sh | bash
 ```
 
 This clones the repo to `~/.airprompt/`, installs dependencies, generates a TLS certificate, symlinks `airprompt` into `~/bin/`, installs the Claude Code plugin, and wires the hooks + statusline badge.
@@ -77,14 +77,14 @@ Accept the self-signed certificate warning on the phone and voice dictation work
 ### One-liners
 
 ```bash
-# Linux / macOS / WSL — latest (main branch)
-curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/main/install.sh | bash
+# Linux / macOS / WSL — latest release
+curl -fsSL https://github.com/farox-coop/airprompt/releases/latest/download/install.sh | bash
 
 # Pin a specific release instead:
-curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/v1.0.0/install.sh | bash
+curl -fsSL https://github.com/farox-coop/airprompt/releases/download/v1.0.0/install.sh | bash
 
 # PowerShell (Windows — daemon needs tmux, so CLI install only)
-irm https://raw.githubusercontent.com/farox-coop/airprompt/main/install.ps1 | iex
+irm https://github.com/farox-coop/airprompt/releases/latest/download/install.ps1 | iex
 
 # From a local clone
 node bin/install.js
