@@ -11,6 +11,7 @@ const qrcode = require('qrcode-terminal');
 const { tmuxExists, sessionToJSON, getSessionsDir, safeRmSync } = require('./src/utils');
 const { runStaleSweep } = require('./src/sweep');
 const auth = require('./src/auth');
+const uploads = require('./src/uploads');
 
 const PORT = process.env.AIRPROMPT_PORT || 3210;
 const PID_FILE = process.env.AIRPROMPT_PID_FILE || '/tmp/airprompt-server.pid';
@@ -353,10 +354,12 @@ function createApp() {
 
   // Host-internal REST endpoints (sessions + notify) are called only by the
   // hooks/CLI running on the host via loopback. Restrict them so a rogue LAN
-  // device can't inject/kill sessions or spoof notifications. /api/pair is the
-  // one LAN-reachable surface (pairing requests — request-only, rate-limited).
+  // device can't inject/kill sessions or spoof notifications. /api/pair and
+  // /api/upload are the LAN-reachable surfaces (pairing requests, and file
+  // uploads authenticated by their own one-time token) — both rate-limited.
   app.use('/api', (req, res, next) => {
-    if (req.path === '/pair' || req.path.startsWith('/pair/')) return next();
+    if (req.path === '/pair' || req.path.startsWith('/pair/') || req.path === '/upload')
+      return next();
     if (isLoopback(req.socket.remoteAddress || '')) return next();
     res.status(403).json({ error: 'Forbidden' });
   });
@@ -600,6 +603,71 @@ function createApp() {
 
   app.get('/api/pair/:id', (req, res) => {
     res.json({ status: auth.pendingStatus(req.params.id) });
+  });
+
+  // ── File upload (LAN, token-gated) ────────────────────────────────────
+  //
+  // The phone cannot hand the host a phone-side path, so the bytes come here,
+  // are written under ~/.airprompt/uploads/<session>/, and the returned absolute
+  // path is what the client types into the session. This endpoint is exempt from
+  // the loopback gate (the phone is not loopback), so the one-time token minted
+  // over the authenticated WS is its authentication: device-bound, single-use,
+  // short-lived, and re-checked against the paired-device list here so that
+  // `airprompt auth revoke` also kills an in-flight upload.
+  app.post(
+    '/api/upload',
+    (req, res, next) => {
+      if (!auth.checkUploadRate(req.socket.remoteAddress || '')) {
+        return res.status(429).json({ error: 'Too many uploads' });
+      }
+      next();
+    },
+    // Token validation runs BEFORE the body is parsed: without it, any LAN host
+    // could make the daemon buffer a full-size body per request and never get
+    // past this point.
+    (req, res, next) => {
+      const rec = uploads.takeToken(req.get('x-airprompt-upload-token') || '', Date.now());
+      if (!rec) return res.status(401).json({ error: 'Invalid or expired upload token' });
+      if (!auth.deviceByPublicKey(rec.device)) {
+        return res.status(403).json({ error: 'Device is not paired' });
+      }
+      const entry = sessions.get(rec.sessionId);
+      if (!entry) return res.status(409).json({ error: 'Session not found' });
+      // The write directory comes from the token's session, never from a
+      // client-supplied parameter — a token for one session cannot write into
+      // another's directory.
+      req._upload = { entry: entry, device: rec.device };
+      next();
+    },
+    express.raw({ type: 'application/octet-stream', limit: uploads.maxBytes() }),
+    (req, res) => {
+      if (!Buffer.isBuffer(req.body)) {
+        // express.raw only buffers its configured type; anything else arrives as
+        // an empty object, which would otherwise be written as a 0-byte file.
+        return res.status(415).json({ error: 'Expected a raw application/octet-stream body' });
+      }
+      const out = uploads.writeUpload({
+        entry: req._upload.entry,
+        device: req._upload.device,
+        name: req.query.name,
+        mime: req.query.mime,
+        buffer: req.body,
+        now: Date.now(),
+      });
+      if (!out.ok) return res.status(out.status).json({ error: out.error });
+      log('info', 'upload stored', { path: out.path, bytes: out.bytes });
+      res.json({ path: out.path, bytes: out.bytes, mime: out.mime });
+    }
+  );
+
+  // Body-parser failures on the upload route (an over-limit body arrives as
+  // `entity.too.large`). Express's default handler renders an HTML page, which
+  // the phone's fetch cannot parse — answer JSON instead.
+  app.use('/api/upload', (err, req, res, _next) => {
+    const status = (err && err.status) || 400;
+    res
+      .status(status)
+      .json({ error: err && err.type === 'entity.too.large' ? 'File too large' : 'Upload failed' });
   });
 
   const tlsOptions = TLS_ENABLED
@@ -976,6 +1044,14 @@ function createApp() {
             }
             const activeEntry = activeSessionId ? sessions.get(activeSessionId) : null;
             if (activeEntry) activeEntry.lastActivity = Date.now();
+            // A submitted prompt releases this device's pending uploads: the
+            // files stay readable for a grace window (a still-running turn may
+            // read them late), then the sweep reaps them. Only '\r' submits — a
+            // payload containing '\n' was handled above as a literal newline
+            // (bracketed paste), never an Enter.
+            if (msg.data.indexOf('\r') !== -1 && msg.data.indexOf('\n') === -1) {
+              uploads.releaseForDevice(activeEntry, ws._airpromptPublicKey, { now: Date.now() });
+            }
           } else {
             // PTY not spawned yet — buffer input so it's not lost.
             // Flushed after spawnPty() succeeds.
@@ -990,6 +1066,24 @@ function createApp() {
             }
           }
           break;
+        case 'upload_token': {
+          // Mint the one-time token that authenticates the LAN upload POST. Only
+          // an authenticated device reaches here, and the token is bound to that
+          // device's key plus the session it targets.
+          if (typeof msg.sessionId !== 'string' || !sessions.has(msg.sessionId)) {
+            ws.send(JSON.stringify({ type: 'upload_token_error', reason: 'session_not_found' }));
+            break;
+          }
+          const token = uploads.mintToken(ws._airpromptPublicKey, msg.sessionId, Date.now());
+          ws.send(
+            JSON.stringify(
+              token
+                ? { type: 'upload_token', token: token }
+                : { type: 'upload_token_error', reason: 'too_many_tokens' }
+            )
+          );
+          break;
+        }
         case 'switch_session':
           if (msg.sessionId && sessions.has(msg.sessionId)) spawnPty(msg.sessionId);
           else ws.send(JSON.stringify({ type: 'error', message: 'Session not found' }));
@@ -1101,6 +1195,11 @@ function createApp() {
 
   const staleInterval = setInterval(() => {
     if (runStaleSweep(sessions, { log }) > 0) broadcastSessionList(wss);
+    // Uploads ride the same pass: one cleanup authority, driven by ground truth
+    // (is the session's tmux still alive), so every death path — kill, unregister,
+    // `airprompt off`, a crashed turn, the hook sweeps — converges here.
+    const reaped = uploads.sweepUploads({ log });
+    if (reaped.removedFiles || reaped.removedDirs) log('debug', 'uploads swept', reaped);
   }, STALE_CHECK_MS);
 
   httpServer.on('close', () => clearInterval(staleInterval));
@@ -1149,6 +1248,9 @@ function createApp() {
         client._airpromptPublicKey &&
         !deviceKeys.has(client._airpromptPublicKey)
       ) {
+        // Revocation must also kill in-flight uploads: drop the device's
+        // outstanding upload tokens, not just its socket.
+        uploads.dropTokensForDevice(client._airpromptPublicKey);
         try {
           client.close(4001, 'device revoked');
         } catch (_) {}

@@ -533,6 +533,19 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function send(msg) {
+  // Refuse a submit while an upload is in flight: the path for the file the user
+  // just attached has not arrived yet, so the keystroke would land mid-turn
+  // without it. The upload UI shows why nothing happened.
+  if (
+    msg.type === 'input' &&
+    typeof msg.data === 'string' &&
+    msg.data.indexOf('\r') !== -1 &&
+    window._airpromptUpload &&
+    window._airpromptUpload.busy()
+  ) {
+    if (window._airpromptUpload.notifyBlocked) window._airpromptUpload.notifyBlocked();
+    return;
+  }
   // Tag input messages with monotonic seq — debug tracing + future ack.
   if (msg.type === 'input') {
     msg.seq = ++_inputSeq;
@@ -568,6 +581,39 @@ function _flushPending() {
 // Expose for keybar.js
 window._airpromptSend = send;
 
+// ── Request/reply over the WS ────────────────────────────────────────
+// Registers a one-shot waiter for whichever of `replyTypes` arrives, then sends
+// `msg`. Resolves with that message, or null on timeout — a plain resolve, not a
+// reject, so a caller can never produce an unhandled rejection by timing out.
+const _replyWaiters = new Map(); // type -> settle fn
+
+function requestReply(msg, replyTypes, timeoutMs) {
+  return new Promise(function (resolve) {
+    let timer = null;
+    function settle(reply) {
+      if (timer) clearTimeout(timer);
+      replyTypes.forEach(function (t) {
+        _replyWaiters.delete(t);
+      });
+      resolve(reply);
+    }
+    replyTypes.forEach(function (t) {
+      _replyWaiters.set(t, settle);
+    });
+    timer = setTimeout(function () {
+      settle(null);
+    }, timeoutMs || 5000);
+    send(msg);
+  });
+}
+
+window._airpromptRequest = requestReply;
+
+// Expose for upload.js — the upload token is bound to the active session.
+window._airpromptActiveSession = function () {
+  return activeSessionId;
+};
+
 // ── Message handler (detached for reconnect) ─────────────────────────
 async function wsMessageHandler(event) {
   let msg;
@@ -584,6 +630,11 @@ async function wsMessageHandler(event) {
   // Before auth, only handshake messages are meaningful.
   if (!_authed && msg.type !== 'challenge' && msg.type !== 'auth_ok' && msg.type !== 'auth_error')
     return;
+
+  // One-shot waiters (the upload-token reply) settle before the main switch;
+  // the switch still runs, it simply has nothing to add for those types.
+  const replyTo = _replyWaiters.get(msg.type);
+  if (replyTo) replyTo(msg);
 
   switch (msg.type) {
     case 'challenge': {
@@ -707,11 +758,11 @@ function sessionDisplayLabel(s) {
 function updateUI() {
   const s = sessions.find((s) => s.id === activeSessionId);
   if (activeSessionId && s) {
-    if (s.name) {
-      sessionLabel.innerHTML = `<span class="name">${escHtml(s.name)}</span><span class="cwd">${escHtml(s.cwd)}</span>`;
-    } else {
-      sessionLabel.textContent = s.cwd;
-    }
+    // The path is the part worth reading, so it is wrapped for tail-ellipsis
+    // (see #session-label .cwd): with the two extra toolbar buttons it no longer
+    // fits on a narrow phone, and losing the tail hides which project you're in.
+    const cwd = `<span class="cwd${s.name ? '' : ' cwd-primary'}"><span>${escHtml(s.cwd)}</span></span>`;
+    sessionLabel.innerHTML = s.name ? `<span class="name">${escHtml(s.name)}</span>${cwd}` : cwd;
     sessionLabel.classList.remove('no-session');
   } else {
     sessionLabel.textContent = tr('noSession');
@@ -794,52 +845,141 @@ function closeModal() {
 
 sessionBar.addEventListener('click', openModal);
 modalClose.addEventListener('click', closeModal);
-document.getElementById('keybar-toggle').addEventListener('click', function (e) {
-  e.stopPropagation();
-  window._airpromptKeybar && window._airpromptKeybar.toggle();
-  // Keybar has 0.2s CSS transition. Fit + scroll after it finishes.
-  const keybarEl = document.getElementById('keybar-container');
-  function refit() {
+
+// Refit + repaint after a container above the terminal collapses or expands
+// (keyboard bar, session tools). Both call this the same way, so it lives here
+// rather than inside either toggle handler.
+function refitTerminal() {
+  try {
+    fitAddon.fit();
+  } catch (_) {}
+  // Force xterm canvas repaint — prevents "black screen" after resize
+  try {
+    term.refresh(0, term.rows - 1);
+  } catch (_) {}
+  try {
+    term.scrollToBottom();
+  } catch (_) {}
+  // Restore focus so native keyboard stays open on mobile.
+  // fitAddon.fit() can blur xterm's hidden textarea, dismissing the
+  // virtual keyboard. On mobile, focus the invisible input instead
+  // of xterm's readonly textarea.
+  const mi = document.getElementById('mobile-input');
+  if (mi && mi.classList.contains('visible')) {
     try {
-      fitAddon.fit();
+      mi.focus();
     } catch (_) {}
-    // Force xterm canvas repaint — prevents "black screen" after resize
+  } else {
     try {
-      term.refresh(0, term.rows - 1);
+      term.focus();
     } catch (_) {}
-    try {
-      term.scrollToBottom();
-    } catch (_) {}
-    // Restore focus so native keyboard stays open on mobile.
-    // fitAddon.fit() can blur xterm's hidden textarea, dismissing the
-    // virtual keyboard. On mobile, focus the invisible input instead
-    // of xterm's readonly textarea.
-    const mi = document.getElementById('mobile-input');
-    if (mi && mi.classList.contains('visible')) {
-      try {
-        mi.focus();
-      } catch (_) {}
-    } else {
-      try {
-        term.focus();
-      } catch (_) {}
-    }
   }
-  if (keybarEl) {
-    keybarEl.addEventListener(
+}
+
+// Toggling a container animates over 0.2s, so refit when it lands — plus a
+// next-paint fallback for when transitionend never fires (e.g.
+// prefers-reduced-motion disables transitions).
+function refitAfterToggle(container) {
+  if (container) {
+    container.addEventListener(
       'transitionend',
       function () {
-        refit();
+        refitTerminal();
       },
       { once: true }
     );
   }
-  // Fallback: also fit after next paint cycle in case transitionend
-  // doesn't fire (e.g. prefers-reduced-motion disables transitions)
   requestAnimationFrame(function () {
-    requestAnimationFrame(refit);
+    requestAnimationFrame(refitTerminal);
   });
+}
+
+document.getElementById('keybar-toggle').addEventListener('click', function (e) {
+  e.stopPropagation();
+  window._airpromptKeybar && window._airpromptKeybar.toggle();
+  refitAfterToggle(document.getElementById('keybar-container'));
 });
+
+// ── Session tools: inline on desktop, collapsed behind the chevron on mobile ──
+// Desktop always has room, so the three tool buttons sit inline in the bar
+// exactly as they always did; on a phone they move into the panel behind
+// #tools-toggle. Same pointer test the on-screen keyboard button uses
+// (see keybar.js init()). The elements are MOVED, never duplicated: two copies
+// would mean two elements with the same id, and upload.js / preferences.js would
+// bind to whichever one they happened to find first.
+const toolsToggle = document.getElementById('tools-toggle');
+const toolsWrap = document.getElementById('tools-wrap');
+const toolsPanel = document.getElementById('session-tools');
+const keybarToggle = document.getElementById('keybar-toggle');
+const toolButtons = ['attach-btn', 'clipboard-btn', 'prefs-btn']
+  .map(function (id) {
+    return document.getElementById(id);
+  })
+  .filter(Boolean);
+
+function isCoarsePointer() {
+  try {
+    return window.matchMedia('(pointer: coarse)').matches;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Single owner of the open/closed state, so the class, the chevron and
+// aria-expanded can never drift apart.
+function setToolsOpen(open) {
+  toolsPanel.classList.toggle('tools-hidden', !open);
+  toolsToggle.classList.toggle('active', open);
+  toolsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function layoutTools() {
+  const mobile = isCoarsePointer();
+  for (const btn of toolButtons) {
+    // insertBefore (not appendChild) keeps the original bar order: 📎 📋 ⚙ ⌨
+    if (mobile) toolsPanel.appendChild(btn);
+    else sessionBar.insertBefore(btn, keybarToggle);
+  }
+  // Hide the wrapper, not just the button: it carries the bar's spacing margin
+  // and is the panel's positioning context.
+  toolsWrap.style.display = mobile ? '' : 'none';
+  if (!mobile) setToolsOpen(false);
+}
+
+// Chevron for the session-tools panel. The panel is absolutely positioned, so
+// unlike the keybar toggle there is nothing to refit — the terminal neither moves
+// nor resizes. Clicks inside the bar must not bubble to it either, or tapping the
+// panel would open the session modal.
+toolsToggle.addEventListener('click', function (e) {
+  e.stopPropagation();
+  setToolsOpen(toolsPanel.classList.contains('tools-hidden'));
+});
+
+// Picking a tool collapses the panel: the tap already did its job (opened the
+// picker, read the clipboard, opened the preferences), and leaving the panel over
+// the terminal would be in the way of what happens next. The listener goes on
+// each button rather than on the panel: the buttons' own handlers call
+// stopPropagation (they have to — on desktop they live in the bar, where an
+// unguarded tap opens the session modal), and that stops the event before an
+// ancestor listener would ever see it. Listeners on the same element still run.
+for (const btn of toolButtons) {
+  btn.addEventListener('click', function () {
+    setToolsOpen(false);
+  });
+}
+
+// Background taps inside the panel only need to stay off the bar's openModal.
+toolsPanel.addEventListener('click', function (e) {
+  e.stopPropagation();
+});
+
+layoutTools();
+// Rotating a tablet or dragging across the breakpoint re-homes the buttons.
+try {
+  window.matchMedia('(pointer: coarse)').addEventListener('change', layoutTools);
+} catch (_) {
+  /* older engines: load-time placement only */
+}
 sessionModal.addEventListener('click', (e) => {
   if (e.target === sessionModal) closeModal();
 });

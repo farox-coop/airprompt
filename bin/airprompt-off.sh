@@ -14,6 +14,7 @@ fi
 
 DAEMON_PORT="${AIRPROMPT_PORT:-3210}"
 SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+UPLOADS_DIR="${AIRPROMPT_UPLOADS_DIR:-$HOME/.airprompt/uploads}"
 PROVIDER="${AIRPROMPT_PROVIDER:-}"
 
 # ── Protocol detection (shared lib) ────────────────────────────────────
@@ -25,6 +26,7 @@ SESSION_ID="${1:-}"
 
 # ── Detect current tmux session ──────────────────────────────────────
 CURRENT_TMUX=""
+SAFE_TMUX=""
 if [ -n "${TMUX:-}" ]; then
   CURRENT_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
   if echo "$CURRENT_TMUX" | grep -q '^airprompt-web-'; then
@@ -48,6 +50,18 @@ if [ -n "$CURRENT_TMUX" ]; then
   if [ -n "$MY_DIR" ] && [ -z "$SESSION_ID" ]; then
     SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
   fi
+fi
+
+# ── Purge this session's uploads ─────────────────────────────────────
+# Keyed the same way as the daemon writes them: <providerId>-<sessionId>.
+# Deliberately done BEFORE the "already off" early exit below, so a session torn
+# down the hard way still cleans up. If even the sessionId is unknown there is no
+# way to name the dir here — the daemon's sweep reaps it from its manifest once
+# this session's tmux is gone.
+if [ -n "$SESSION_ID" ]; then
+  for _ud in "${UPLOADS_DIR}"/*-"${SESSION_ID}"; do
+    [ -d "$_ud" ] && _purge_uploads_dir "$_ud"
+  done
 fi
 
 # ── Idempotent: if already off, exit silently ────────────────────────

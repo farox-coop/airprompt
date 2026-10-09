@@ -57,8 +57,19 @@ AirPrompt is a tool to be used by ANY user. **NEVER** hardcode `/home/diego/` or
 
 Also applies to: `$AIRPROMPT_PORT`, `$AIRPROMPT_DEBUG`, `$AIRPROMPT_PID_FILE` — use env vars, never hardcoded values specific to one machine.
 
+## Web UI strings MUST be translatable (i18n)
+
+**Every user-facing string in `public/` goes through `Dictation.tr(key)`.** Never leave a new label hardcoded in English — a bare `<span>Some label</span>` or a literal in a JS toast is a bug the moment the app is used in Spanish.
+
+- **The table** lives in `public/dictation.js`: `const T = { 'en-US': {…}, 'es-AR': {…} }`. Add the key to **both** entries. `tr()` resolves `T[currentLang][key] → T['en-US'][key] → key` (dictation.js:91), so a missing translation silently falls back to English — it will not throw, it will just be wrong.
+- **Language selection**: `setLang(code)` persists to `localStorage['airprompt-lang']`; `normalizeLang()` maps bare codes to region codes (`es` → `es-AR`), and languages with no table entry fall back to `en-US`. Only `en-US` and `es-AR` are actually translated today.
+- **Where labels get applied**: static markup keeps an English default in `public/index.html` with an `id` on the element, and JS overwrites it — `public/preferences.js` `render()` (runs on **every** modal open, so it follows the current language) or `public/dictation.js` `updateAllLabels()`.
+- **A new preferences row** = markup with an id + a `tr()` assignment in `render()` + both table entries. The checkbox's own behaviour can live in another module (e.g. the upload-resize pref is wired in `public/upload.js`); the label is still the preferences modal's job.
+- **Known gap**: the upload error/diagnostic toasts in `public/upload.js` (`MSG.*`) are English-only. Extend them through the same table if that becomes a problem.
+
 Before committing, `grep -r '/home/'` in changed files. Any hit is a bug.
 
 ## Development
 
 - Always `AIRPROMPT_DEBUG=1` when running scripts in dev. Use: `AIRPROMPT_DEBUG=1 airprompt <cmd>`
+- **After editing server-side code (`server.js`, `src/**`), restart the daemon: `AIRPROMPT_DEBUG=1 airprompt restart`.** Static files under `public/` are served no-cache from disk, so the browser picks up client changes on a plain reload — which is exactly what makes a stale daemon confusing: the new UI loads fine while its new routes 404. A feature that "works in tests but fails on the phone" is almost always this. Sessions survive the restart via disk recovery; `make refresh` is not needed for it (and it wipes pairing + sessions + `node_modules`).

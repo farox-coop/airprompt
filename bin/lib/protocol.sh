@@ -78,6 +78,12 @@ daemon_env() {
   [ -n "${AIRPROMPT_PORT:-}" ]         && parts+=("AIRPROMPT_PORT='$AIRPROMPT_PORT'")
   [ -n "${AIRPROMPT_PID_FILE:-}" ]     && parts+=("AIRPROMPT_PID_FILE='$AIRPROMPT_PID_FILE'")
   [ -n "${AIRPROMPT_SESSIONS_DIR:-}" ] && parts+=("AIRPROMPT_SESSIONS_DIR='$AIRPROMPT_SESSIONS_DIR'")
+  # Uploads: the daemon writes them and the shell scripts purge them, so both
+  # sides must resolve the same root and the same limits.
+  [ -n "${AIRPROMPT_UPLOADS_DIR:-}" ]       && parts+=("AIRPROMPT_UPLOADS_DIR='$AIRPROMPT_UPLOADS_DIR'")
+  [ -n "${AIRPROMPT_UPLOAD_MAX_BYTES:-}" ]  && parts+=("AIRPROMPT_UPLOAD_MAX_BYTES='$AIRPROMPT_UPLOAD_MAX_BYTES'")
+  [ -n "${AIRPROMPT_UPLOAD_TTL_MS:-}" ]     && parts+=("AIRPROMPT_UPLOAD_TTL_MS='$AIRPROMPT_UPLOAD_TTL_MS'")
+  [ -n "${AIRPROMPT_UPLOAD_GRACE_MS:-}" ]   && parts+=("AIRPROMPT_UPLOAD_GRACE_MS='$AIRPROMPT_UPLOAD_GRACE_MS'")
   [ -n "${AIRPROMPT_NO_TLS:-}" ]       && parts+=("AIRPROMPT_NO_TLS='$AIRPROMPT_NO_TLS'")
   # PORT removed — AIRPROMPT_PORT is the single source of truth
   printf '%s' "${parts[*]}"
@@ -127,9 +133,10 @@ PROVIDEREOF
 # allowing rm -rf. Prevents disaster on misconfigured env vars and blocks the
 # trivial `*airprompt*` substring bypass via `..` traversal.
 #
-# Roots: $HOME/.airprompt (default install/state/sessions), plus custom
-# AIRPROMPT_INSTALL_DIR / AIRPROMPT_STATE_DIR / AIRPROMPT_SESSIONS_DIR when
-# set — each must contain "airprompt" in its path (blocks /, /home, /tmp).
+# Roots: $HOME/.airprompt (default install/state/sessions/uploads), plus custom
+# AIRPROMPT_INSTALL_DIR / AIRPROMPT_STATE_DIR / AIRPROMPT_SESSIONS_DIR /
+# AIRPROMPT_UPLOADS_DIR when set — each must contain "airprompt" in its path
+# (blocks /, /home, /tmp).
 #
 # Usage: _safe_rm_rf "/path/to/dir" && echo "ok"
 # Returns 0 (safe, caller should rm -rf) or 1 (blocked, already printed).
@@ -157,7 +164,8 @@ _safe_rm_rf() {
     "$HOME/.airprompt" \
     "${AIRPROMPT_INSTALL_DIR:-}" \
     "${AIRPROMPT_STATE_DIR:-}" \
-    "${AIRPROMPT_SESSIONS_DIR:-}"; do
+    "${AIRPROMPT_SESSIONS_DIR:-}" \
+    "${AIRPROMPT_UPLOADS_DIR:-}"; do
     [ -n "$root" ] || continue
     case "$root" in *airprompt*) ;; *) continue ;; esac
     case "$canonical" in
@@ -167,6 +175,20 @@ _safe_rm_rf() {
 
   echo "  SAFETY: refusing to rm -rf ${path} (canonical: ${canonical})" >&2
   return 1
+}
+
+# ── Uploads purge ─────────────────────────────────────────────────────
+# Removes one uploads directory (guarded). Shared by off/clean so both key it
+# exactly like the daemon writes it: <uploadsRoot>/<provider>-<safeTmux>.
+# Usage: _purge_uploads_dir "$UPLOADS_DIR/<providerId>-<safeTmux>"
+_purge_uploads_dir() {
+  local dir="$1"
+  [ -n "$dir" ] || return 0
+  [ -d "$dir" ] || return 0
+  if _safe_rm_rf "$dir"; then
+    rm -rf "$dir"
+    echo "  uploads removed: $dir"
+  fi
 }
 
 # ── Portable LAN IP detection ─────────────────────────────────────────

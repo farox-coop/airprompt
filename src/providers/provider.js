@@ -115,15 +115,54 @@ function stateDir() {
 }
 
 /**
+ * Sanitize a tmux session name for use as a directory component. The raw name
+ * can contain ':' / '/' (tmux window syntax, paths), which would escape the
+ * marker root if used verbatim. Marker dirs are keyed on the tmux name because
+ * the shell scripts only ever know the tmux name — but see uploadsSessionDir(),
+ * which is keyed on the already-validated sessionId and needs none of this.
+ * @param {string} sessionName - tmux session name (unsanitized)
+ * @returns {string}
+ */
+function sanitizeSessionName(sessionName) {
+  const raw = String(sessionName || '');
+  return raw.replace(/[^a-zA-Z0-9_.-]/g, '') || (raw ? 'unknown' : '');
+}
+
+/**
  * Per-session marker directory.
  * @param {string} providerId - e.g. 'claude', 'codex'
  * @param {string} sessionName - tmux session name (unsanitized)
  * @returns {string} ~/.airprompt/sessions/{providerId}-{sanitizedSessionName}/
  */
 function sessionDir(providerId, sessionName) {
-  const raw = String(sessionName || '');
-  const safe = raw.replace(/[^a-zA-Z0-9_.-]/g, '') || (raw ? 'unknown' : '');
-  return path.join(sessionsRootDir(), `${providerId}-${safe}`);
+  return path.join(sessionsRootDir(), `${providerId}-${sanitizeSessionName(sessionName)}`);
+}
+
+/**
+ * Root for files uploaded from the web UI. Separate from sessions/ so uploads
+ * never mix with the marker files (mirror/active) that sessionToJSON and the
+ * activate/deactivate hooks read.
+ * @returns {string} ~/.airprompt/uploads/
+ */
+function uploadsRootDir() {
+  if (process.env.AIRPROMPT_UPLOADS_DIR) return process.env.AIRPROMPT_UPLOADS_DIR;
+  return path.join(os.homedir(), '.airprompt', 'uploads');
+}
+
+/**
+ * Per-session uploads directory, keyed on the sessionId.
+ *
+ * The sessionId is already constrained to [A-Za-z0-9_-]{1,64} at registration
+ * (server.js) and on disk recovery, so it is a safe path component as-is —
+ * sanitizing it would only invent collisions between distinct sessions. The
+ * provider prefix stays for readable `ls` output and to keep the dir named like
+ * its marker counterpart.
+ * @param {string} providerId - e.g. 'claude', 'codex'
+ * @param {string} sessionId - daemon session id (validated, not a tmux name)
+ * @returns {string} ~/.airprompt/uploads/{providerId}-{sessionId}/
+ */
+function uploadsSessionDir(providerId, sessionId) {
+  return path.join(uploadsRootDir(), `${providerId}-${sessionId}`);
 }
 
 // ── Shared detection ──────────────────────────────────────────────────────
@@ -216,6 +255,9 @@ module.exports = {
   sessionsRootDir,
   stateDir,
   sessionDir,
+  sanitizeSessionName,
+  uploadsRootDir,
+  uploadsSessionDir,
   hasCmd,
   detectMatch,
 };

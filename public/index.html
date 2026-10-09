@@ -54,7 +54,44 @@
         </g>
       </svg>
       <span id="session-label">No session selected</span>
-      <button id="prefs-btn" title="Preferences">⚙</button>
+      <div id="tools-wrap">
+        <button
+          id="tools-toggle"
+          title="More tools"
+          aria-expanded="false"
+          aria-controls="session-tools"
+        >
+          <svg
+            role="img"
+            aria-hidden="true"
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+
+        <!-- Anchored to this wrapper, so the panel always hangs from the chevron
+             itself (right edges aligned) no matter how the bar reflows — the
+             Dictate button changes width with the language. Floats over the
+             terminal (absolute, like #lang-dropdown) instead of pushing it down.
+             Holds the tool buttons on touch devices; on desktop they are moved
+             back into the bar and this stays empty and hidden. -->
+        <div id="session-tools" class="tools-hidden">
+          <button id="attach-btn" title="Attach image">📎</button>
+          <button id="clipboard-btn" class="upload-hidden" title="Paste image from clipboard">
+            📋
+          </button>
+          <button id="prefs-btn" title="Preferences">⚙</button>
+        </div>
+      </div>
       <button id="keybar-toggle" title="Keyboard">⌨</button>
       <button id="dictate-btn">
         <span id="dictate-icon">🎤</span> <span id="dictate-label">Dictate</span
@@ -65,6 +102,18 @@
         <button id="lang-cancel">Cancel</button>
       </div>
     </div>
+
+    <div id="upload-progress"><div id="upload-progress-fill"></div></div>
+    <div id="upload-error"></div>
+
+    <input
+      type="file"
+      id="upload-input"
+      accept="image/*"
+      multiple
+      tabindex="-1"
+      aria-hidden="true"
+    />
 
     <div id="keybar-container" class="keybar-hidden"></div>
 
@@ -79,6 +128,10 @@
     <div id="preferences-modal">
       <div id="preferences-modal-content">
         <h3 id="pref-title">Preferences</h3>
+        <label class="pref-global">
+          <input type="checkbox" id="pref-upload-resize" />
+          <span id="pref-shrink-images-label">Shrink attached images before upload</span>
+        </label>
         <label class="pref-global">
           <input type="checkbox" id="pref-enable-all" />
           <span id="pref-enable-all-label">Enable all dictation macros</span>
@@ -134,6 +187,8 @@
     <script src="preferences.js"></script>
     <script src="auth.js"></script>
     <script src="client.js"></script>
+    <script src="upload-resize.js"></script>
+    <script src="upload.js"></script>
     <script src="scroll.js"></script>
     <script src="keybar.js"></script>
     <script src="notify.js"></script>

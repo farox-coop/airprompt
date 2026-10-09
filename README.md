@@ -25,7 +25,7 @@ Linux, macOS, and WSL are supported. macOS uses Homebrew (`brew install tmux jq 
 
 - **Daemon**: Single `server.js` instance on port 3210 managing multiple IDE sessions
 - **Sessions**: One tmux session per IDE/CLI instance
-- **Mobile UI**: Web-based terminal with session selector, xterm.js, adaptive touch scrolling, tap-to-dictate voice dictation, keyboard input fallback, and dictation-macro preferences
+- **Mobile UI**: Web-based terminal with session selector, xterm.js, adaptive touch scrolling, tap-to-dictate voice dictation, keyboard input fallback, image attach (phone gallery/clipboard/paste/drag-and-drop), and dictation-macro preferences
 - **Statusline**: Integrated badge `[AirPrompt: https://<IP>:3210]` in IDE terminal
 
 ### tmux feature usage
@@ -131,14 +131,18 @@ airprompt clean
 
 Environment variables (all optional):
 
-| Variable                 | Default                     | Purpose                                               |
-| ------------------------ | --------------------------- | ----------------------------------------------------- |
-| `AIRPROMPT_PORT`         | `3210`                      | Daemon port                                           |
-| `AIRPROMPT_STATE_DIR`    | `~/.airprompt/state`        | daemon.json, TLS cert/key, project names              |
-| `AIRPROMPT_SESSIONS_DIR` | `~/.airprompt/sessions`     | Per-session markers                                   |
-| `AIRPROMPT_PID_FILE`     | `/tmp/airprompt-server.pid` | Daemon PID file                                       |
-| `AIRPROMPT_NO_TLS`       | unset                       | `1` disables HTTPS (breaks pairing + voice dictation) |
-| `AIRPROMPT_DEBUG`        | unset                       | `1` enables verbose logging                           |
+| Variable                     | Default                     | Purpose                                                              |
+| ---------------------------- | --------------------------- | -------------------------------------------------------------------- |
+| `AIRPROMPT_PORT`             | `3210`                      | Daemon port                                                          |
+| `AIRPROMPT_STATE_DIR`        | `~/.airprompt/state`        | daemon.json, TLS cert/key, project names                             |
+| `AIRPROMPT_SESSIONS_DIR`     | `~/.airprompt/sessions`     | Per-session markers                                                  |
+| `AIRPROMPT_UPLOADS_DIR`      | `~/.airprompt/uploads`      | Files attached from the phone (must contain `airprompt` in its path) |
+| `AIRPROMPT_UPLOAD_MAX_BYTES` | `26214400` (25 MB)          | Per-file upload cap                                                  |
+| `AIRPROMPT_UPLOAD_TTL_MS`    | `86400000` (24 h)           | Backstop lifetime for an upload never released by a prompt           |
+| `AIRPROMPT_UPLOAD_GRACE_MS`  | `600000` (10 min)           | Grace window between a prompt submit and the file being reaped       |
+| `AIRPROMPT_PID_FILE`         | `/tmp/airprompt-server.pid` | Daemon PID file                                                      |
+| `AIRPROMPT_NO_TLS`           | unset                       | `1` disables HTTPS (breaks pairing + voice dictation)                |
+| `AIRPROMPT_DEBUG`            | unset                       | `1` enables verbose logging                                          |
 
 ### TLS certificate
 
@@ -178,6 +182,16 @@ Daemon output goes to `/tmp/airprompt.log`. Tail it with `make logs` or `tail -f
 **HTTP fallback (TLS unavailable)** — if cert generation fails the daemon falls back to HTTP; pairing and voice dictation won't work. Run `bin/generate-cert.sh` and `airprompt restart`.
 
 **Multi-line dictation collapses into a `[Pasted text #N]` chip** — known issue. Dictation with real line breaks ("nueva línea" / "nuevo párrafo", or >800 chars) is sent as a bracketed paste, which Claude Code collapses by design. The text is not lost — it's delivered in full on Enter. See [docs/PLAN - dictation macros.md](<docs/PLAN - dictation macros.md#known-issue--multi-line-dictation-collapses-in-claude-code>) for the root cause and options.
+
+## Attaching files from the phone
+
+- **Three ways in** — 📎 in the session bar opens the gallery/camera picker, 📋 reads an image straight from the clipboard where the browser allows it, and on desktop you can paste (Ctrl+V) or drop a file onto the terminal.
+- **The path is what travels** — the daemon stores the file under `~/.airprompt/uploads/<provider>-<sessionId>/` and answers with its absolute path, which is typed into the session wrapped in backticks (` `/path/to/file.jpg` `) so it lands as a self-contained code span. A CLI that reads images from a path (Claude Code, for example) therefore sees your screenshot with no manual transfer. Nothing is submitted: the path lands at the CLI's cursor and you add your instruction and send.
+- **Downscaled to a 1568px long edge** — the vision API's own limit, so a 4000px screenshot does not cost upload time for nothing. Toggle it in the ⚙ preferences; PNG stays PNG, so UI screenshots keep crisp text.
+- **Self-cleaning** — a prompt submit releases the previous turn's files, which are reaped after `AIRPROMPT_UPLOAD_GRACE_MS` (10 min by default, so a slow turn can still read them); anything never released is reaped after `AIRPROMPT_UPLOAD_TTL_MS` (24 h); and a session's uploads go with the session (`airprompt off`, `airprompt clean`, or its tmux session ending).
+- **Bounded and authenticated** — `/api/upload` is reachable from the LAN but requires a single-use, device-bound token minted over the paired WebSocket. Images only (PNG/JPEG/WebP/GIF), capped by `AIRPROMPT_UPLOAD_MAX_BYTES` (25 MB).
+
+> **Caveats:** a `$HOME` or `AIRPROMPT_UPLOADS_DIR` containing spaces makes the typed path ambiguous for the CLI (filenames themselves are always sanitized), and clipboard reads depend on the source app (some Android galleries never put the image on the clipboard, in which case 📋 says so) — confirmed working from Android Chrome, so try it, with 📎 as the always-works fallback.
 
 ## Commands
 

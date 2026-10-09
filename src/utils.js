@@ -9,7 +9,12 @@ const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
 
-const { sessionsRootDir, resolveInstallDir, stateDir } = require('./providers/provider');
+const {
+  sessionsRootDir,
+  resolveInstallDir,
+  stateDir,
+  uploadsRootDir,
+} = require('./providers/provider');
 
 // ── Sessions dir ──────────────────────────────────────────────────────────
 
@@ -30,7 +35,8 @@ function getSessionsDir() {
 //
 // Rules (same as the shell):
 //   1. Resolve the target to an absolute path (kills `..` traversal).
-//   2. It must live under an AirPrompt-owned root (install / sessions / state).
+//   2. It must live under an AirPrompt-owned root (install / sessions / state /
+//      uploads).
 //   3. That root must contain "airprompt" in its path (blocks `/home`, `/`,
 //      `/tmp` style misconfiguration that happens to be the configured dir).
 //
@@ -43,7 +49,10 @@ function isSafeRmTarget(target) {
   const absolute = canonicalTarget(target);
 
   // Containment roots, in priority order. Each must be AirPrompt-owned.
-  const roots = [resolveInstallDir(), sessionsRootDir(), stateDir()];
+  // uploadsRootDir() is a sibling of sessions/ and state/, so without it a
+  // purge of an uploads dir would silently no-op in a dev/plugin install
+  // (where the install dir is the checkout, not ~/.airprompt).
+  const roots = [resolveInstallDir(), sessionsRootDir(), stateDir(), uploadsRootDir()];
   for (const candidate of roots) {
     const root = canonicalRoot(candidate);
     // Root itself must be AirPrompt-owned — require 'airprompt' in its path.
@@ -102,6 +111,23 @@ function tmuxExists(sessionName) {
     return r.status === 0;
   } catch (_) {
     return false;
+  }
+}
+
+// Tri-state liveness probe for callers that DELETE on "gone": exit code 1 is
+// tmux's definitive "no such session", while any other failure (timeout, error,
+// missing binary) is unknown and must not be read as death. Same discipline as
+// runStaleSweep.
+// @returns {'alive'|'dead'|'unknown'}
+function tmuxState(sessionName) {
+  if (!sessionName) return 'unknown';
+  try {
+    const r = spawnSync('tmux', ['has-session', '-t', sessionName], { timeout: 2000 });
+    if (r.status === 0) return 'alive';
+    if (r.status === 1) return 'dead';
+    return 'unknown';
+  } catch (_) {
+    return 'unknown';
   }
 }
 
@@ -164,10 +190,13 @@ function sessionToJSON(entry, sessionsDirOverride) {
 
 module.exports = {
   tmuxExists,
+  tmuxState,
   sessionToJSON,
   getSessionsDir,
   isSafeRmTarget,
   safeRmSync,
   sessionsRootDir,
+  uploadsRootDir,
+  uploadsSessionDir: require('./providers/provider').uploadsSessionDir,
   sessionDir: require('./providers/provider').sessionDir,
 };

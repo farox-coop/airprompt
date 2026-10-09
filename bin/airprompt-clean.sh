@@ -18,6 +18,7 @@ fi
 source "$(dirname "$0")/lib/protocol.sh"
 
 SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
+UPLOADS_DIR="${AIRPROMPT_UPLOADS_DIR:-$HOME/.airprompt/uploads}"
 AIRPROMPT_DIR="${AIRPROMPT_STATE_DIR:-$HOME/.airprompt/state}"
 PID_FILE="${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}"
 LOG_FILE="/tmp/airprompt.log"
@@ -54,6 +55,9 @@ for _authfile in server-key.json devices.json pending.json; do
 done
 echo "  state files removed (daemon.json + auth — devices must re-pair)"
 _safe_rm_rf "${SESSIONS_DIR}" && { rm -rf "${SESSIONS_DIR}" 2>/dev/null || true; }
+# Uploads are a sibling of state/ and sessions/ — neither removal below reaches
+# them, so purge the resolved root explicitly (guarded).
+_purge_uploads_dir "${UPLOADS_DIR}"
 _safe_rm_rf "${AIRPROMPT_DIR}" && { rm -rf "${AIRPROMPT_DIR}" 2>/dev/null || true; }
 tmux kill-session -t airprompt-daemon 2>/dev/null && echo "  daemon tmux session killed" || true
 
@@ -100,6 +104,8 @@ if [ -d "$AIRPROMPT_INSTALL" ]; then
     echo "  (preserving install files in $AIRPROMPT_INSTALL — removing only state/sessions)"
     _safe_rm_rf "$AIRPROMPT_INSTALL/state" && { rm -rf "$AIRPROMPT_INSTALL/state" && echo "  removed state dir"; } || true
     _safe_rm_rf "$AIRPROMPT_INSTALL/sessions" && { rm -rf "$AIRPROMPT_INSTALL/sessions" && echo "  removed sessions dir"; } || true
+    # (uploads/ is removed above by its own resolved root — it is a sibling of
+    # these two, so neither removal reaches it.)
   else
     _safe_rm_rf "$AIRPROMPT_INSTALL" && { rm -rf "$AIRPROMPT_INSTALL" && echo "  removed $AIRPROMPT_INSTALL"; }
   fi

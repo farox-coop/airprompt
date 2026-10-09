@@ -12,6 +12,7 @@
   const prefsModal = document.getElementById('preferences-modal');
   const prefsTitle = document.getElementById('pref-title');
   const enableAll = document.getElementById('pref-enable-all');
+  const shrinkImagesLabel = document.getElementById('pref-shrink-images-label');
   const enableAllLabel = document.getElementById('pref-enable-all-label');
   const macroList = document.getElementById('pref-macro-list');
   const closeBtn = document.getElementById('pref-close');
@@ -98,6 +99,9 @@
   function render() {
     prefsTitle.textContent = tr('preferences');
     enableAllLabel.textContent = tr('enableAllMacros');
+    // The checkbox itself belongs to upload.js; only its label is ours to
+    // translate, because render() runs on every open (so it follows the language).
+    if (shrinkImagesLabel) shrinkImagesLabel.textContent = tr('shrinkImages');
     closeBtn.textContent = tr('close');
     enableAll.checked = Macros.getGlobalEnabled();
     buildList();

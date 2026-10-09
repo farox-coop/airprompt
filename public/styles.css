@@ -47,6 +47,9 @@ html {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  /* Flex items floor at their content width by default, so without this the bar
+     never shrinks below the full path and overflow just chops it. */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -57,18 +60,37 @@ html {
 #session-label .cwd {
   color: #c9d1d9;
   font-size: 11px;
+  /* Tail-first truncation: rtl puts the ellipsis at the START, so a path that
+     doesn't fit reads "…/projects/nestled" instead of losing the useful end. The
+     inner span re-declares ltr, otherwise the leading "/" would jump to the end. */
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#session-label .cwd > span {
+  direction: ltr;
+  unicode-bidi: embed;
+}
+/* No session name: the path is the primary line, so keep the larger blue look. */
+#session-label .cwd-primary {
+  color: #58a6ff;
+  font-size: 16px;
 }
 #session-label.no-session {
   color: #8b949e;
 }
-#prefs-btn {
+/* Session-bar buttons share one look: the gold outline + glow. */
+#prefs-btn,
+#tools-toggle,
+#attach-btn,
+#clipboard-btn {
   width: 32px;
   height: 32px;
   background: #21262d;
   color: #c9d1d9;
   border: 1px solid #d29922;
   border-radius: 6px;
-  font-size: 20px;
   cursor: pointer;
   flex-shrink: 0;
   margin-left: 8px;
@@ -84,8 +106,135 @@ html {
     0 0 10px rgba(210, 153, 34, 0.6),
     0 0 20px rgba(210, 153, 34, 0.25);
 }
-#prefs-btn:active {
+#prefs-btn {
+  font-size: 20px;
+}
+/* Emoji glyphs read larger than ⌨ / ⚙ at the same size. */
+#attach-btn,
+#clipboard-btn {
+  font-size: 16px;
+}
+#prefs-btn:active,
+#tools-toggle:active,
+#attach-btn:active,
+#clipboard-btn:active {
   background: #30363d;
+}
+#attach-btn:disabled,
+#clipboard-btn:disabled {
+  opacity: 0.4;
+}
+/* Chevron flips while the tools panel is open. */
+#tools-toggle svg {
+  transition: transform 0.2s;
+}
+#tools-toggle.active {
+  background: #d29922;
+  color: #0d1117;
+  box-shadow:
+    0 0 14px rgba(210, 153, 34, 0.8),
+    0 0 28px rgba(210, 153, 34, 0.4);
+}
+#tools-toggle.active svg {
+  transform: rotate(180deg);
+}
+
+/* Chevron + its floating panel share a positioning context, so the panel hangs
+   from the button itself rather than from the bar's edge. The bar's spacing
+   margin moves here from the button so the wrapper hugs the chevron exactly. */
+#tools-wrap {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+#tools-wrap #tools-toggle {
+  margin-left: 0;
+}
+
+/* Tool panel — floats over the terminal instead of pushing it down, the way
+   #lang-dropdown does. Absolute, so the terminal neither moves nor refits.
+   Unlike the keyboard bar (which reads well full-width and pushing the
+   terminal), this one hugs its three buttons. z-index 100 is the modal layer;
+   the modals come later in the DOM, so they still cover it. */
+#session-tools {
+  position: absolute;
+  /* 100% is the wrapper (= the 32px button); the extra 6px is the bar's vertical
+     centering offset (44px bar - 32px button) / 2, which lands the panel's top
+     edge exactly on the bar's bottom border. */
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  width: fit-content;
+  background: #161b22;
+  border: 1px solid #d29922;
+  border-top: none;
+  padding: 6px;
+  max-height: 60px;
+  overflow: hidden;
+  display: flex;
+  opacity: 1;
+  transition:
+    max-height 0.2s,
+    padding 0.2s,
+    opacity 0.2s;
+  box-shadow:
+    0 0 10px rgba(210, 153, 34, 0.4),
+    0 0 20px rgba(210, 153, 34, 0.15);
+}
+/* The bar buttons carry margin-left for spacing; the first one in the panel
+   would just pad the box wider on the left. */
+#session-tools button:first-child {
+  margin-left: 0;
+}
+#session-tools.tools-hidden {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border: none;
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* ── Upload ───────────────────────────────────────── */
+/* Off-screen rather than display:none — some mobile browsers refuse to open the
+   picker for a file input that is not rendered. */
+.upload-hidden {
+  display: none;
+}
+#upload-input {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+#upload-progress {
+  display: none;
+  height: 3px;
+  background: #21262d;
+  flex-shrink: 0;
+}
+#upload-progress.visible {
+  display: block;
+}
+#upload-progress-fill {
+  height: 100%;
+  width: 0;
+  background: #1f6feb;
+  transition: width 0.15s linear;
+}
+#upload-error {
+  color: #f85149;
+  font-size: 11px;
+  text-align: center;
+  display: none;
+}
+#upload-error.visible {
+  display: block;
 }
 #dictate-btn {
   background: #1f6feb;

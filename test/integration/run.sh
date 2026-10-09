@@ -42,7 +42,7 @@ echo "Starting AirPrompt server on port $PORT..."
 TEST_PID_FILE="/tmp/airprompt-server-test.pid"
 rm -f "$TEST_PID_FILE"
 cd "$PROJECT_DIR"
-AIRPROMPT_NO_TLS=1 AIRPROMPT_PID_FILE="$TEST_PID_FILE" AIRPROMPT_STATE_DIR="$TMPDIR/state" AIRPROMPT_SESSIONS_DIR="$TMPDIR/sessions" AIRPROMPT_SKIP_RECOVERY=1 AIRPROMPT_PORT="$PORT" node server.js 2>/dev/null &
+AIRPROMPT_NO_TLS=1 AIRPROMPT_PID_FILE="$TEST_PID_FILE" AIRPROMPT_STATE_DIR="$TMPDIR/state" AIRPROMPT_SESSIONS_DIR="$TMPDIR/sessions" AIRPROMPT_UPLOADS_DIR="$TMPDIR/airprompt-uploads" AIRPROMPT_SKIP_RECOVERY=1 AIRPROMPT_PORT="$PORT" node server.js 2>/dev/null &
 SERVER_PID=$!
 
 for _ in $(seq 1 20); do
@@ -58,7 +58,7 @@ done
 echo "Server running (PID $SERVER_PID)"
 
 # ── Test 1: Register → List → Unregister ────────────────────────────
-echo "[1/13] Full register → list → unregister"
+echo "[1/14] Full register → list → unregister"
 if $TMUX_OK; then
   SESSION_ID="integtest-$(date +%s)-$$-full"
   tmux new-session -d -s "airprompt-${SESSION_ID}" 2>/dev/null || true
@@ -87,7 +87,7 @@ else
 fi
 
 # ── Test 2: Two sessions, both visible ──────────────────────────────
-echo "[2/13] Two sessions register, both visible"
+echo "[2/14] Two sessions register, both visible"
 if $TMUX_OK; then
   ID_A="integtest-$(date +%s)-$$-a"
   ID_B="integtest-$(date +%s)-$$-b"
@@ -123,7 +123,7 @@ else
 fi
 
 # ── Test 3: Session unregistered on exit ────────────────────────────
-echo "[3/13] Session unregister removes from list"
+echo "[3/14] Session unregister removes from list"
 if $TMUX_OK; then
   ID_M="integtest-$(date +%s)-$$-marker"
   tmux new-session -d -s "airprompt-${ID_M}" 2>/dev/null || true
@@ -147,7 +147,7 @@ else
 fi
 
 # ── Test 4: Server survives invalid requests (no tmux needed) ───────
-echo "[4/13] Server survives invalid requests"
+echo "[4/14] Server survives invalid requests"
 INVALID=$(curl -s -o /dev/null -w "%{http_code}" \
   -X POST "http://localhost:${PORT}/api/sessions/register" \
   -H "Content-Type: application/json" \
@@ -162,7 +162,7 @@ else
 fi
 
 # ── Test 5: Duplicate registration rejected ─────────────────────────
-echo "[5/13] Duplicate registration rejected"
+echo "[5/14] Duplicate registration rejected"
 if $TMUX_OK; then
   ID_D="integtest-$(date +%s)-$$-dup"
   tmux new-session -d -s "airprompt-${ID_D}" 2>/dev/null || true
@@ -191,7 +191,7 @@ else
 fi
 
 # ── Test 6: Name update on already-registered session ───────────────
-echo "[6/13] Name update + clear on already-registered session"
+echo "[6/14] Name update + clear on already-registered session"
 if $TMUX_OK; then
   ID_N="integtest-$(date +%s)-$$-name"
   tmux new-session -d -s "airprompt-${ID_N}" 2>/dev/null || true
@@ -240,7 +240,7 @@ else
 fi
 
 # ── Test 7: Autostart script on/off with temp settings ────────────────
-echo "[7/13] Autostart script on/off"
+echo "[7/14] Autostart script on/off"
 AUTOSTART_SCRIPT="${PROJECT_DIR}/bin/airprompt-autostart.sh"
 TMP_SETTINGS="${TMPDIR}/settings.json"
 
@@ -421,7 +421,7 @@ else
 fi
 
 # ── Test 8: Name script --help and \"\" arg handling ──────────────
-echo "[8/13] Name script --help and \"\" arg handling"
+echo "[8/14] Name script --help and \"\" arg handling"
 NAME_SCRIPT="${PROJECT_DIR}/bin/airprompt-name.sh"
 
 if [ -x "$NAME_SCRIPT" ]; then
@@ -466,7 +466,7 @@ else
 fi
 
 # ── Test 9: Shell lifecycle — protocol detection + basic ops ────────
-echo "[9/13] Shell lifecycle — protocol, sessions, sweep"
+echo "[9/14] Shell lifecycle — protocol, sessions, sweep"
 
 # 9a: detect_protocol (without TLS) falls back to HTTP
 source "${PROJECT_DIR}/bin/lib/protocol.sh" 2>/dev/null
@@ -511,7 +511,7 @@ else
 fi
 
 # ── Test 10: Activate 409-recovery — session file written by 409 handler ──
-echo "[10/13] Activate 409-recovery — session file written on conflict"
+echo "[10/14] Activate 409-recovery — session file written on conflict"
 if $TMUX_OK; then
   ID_409="integtest-$(date +%s)-$$-409rec"
   tmux new-session -d -s "airprompt-${ID_409}" 2>/dev/null || true
@@ -541,7 +541,7 @@ else
 fi
 
 # ── Test 11: Sweep no-force — stale dir with shared sessionId must NOT nuke alive session ──
-echo "[11/13] Sweep no-force: stale dir shares sessionId with alive tmux → session survives"
+echo "[11/14] Sweep no-force: stale dir shares sessionId with alive tmux → session survives"
 if $TMUX_OK; then
   ID_SW="integtest-$(date +%s)-$$-nosweep"
   TMUX_ALIVE="airprompt-${ID_SW}-alive"
@@ -584,7 +584,7 @@ else
 fi
 
 # ── Test 12: grep -Fq treats dot as literal (not regex wildcard) ──
-echo "[12/13] grep -Fq: literal match (defense against tmux session names with dots)"
+echo "[12/14] grep -Fq: literal match (defense against tmux session names with dots)"
 # The daemon check in on.sh uses grep -Fq to match tmuxSession in JSON.
 # Without -F, a session named "dev.1" would false-match "devX1".
 # With -F, dot is literal — no false match.
@@ -614,7 +614,7 @@ else
 fi
 
 # ── Test 13: GET /api/sessions JSON shape — uses 'id' NOT 'sessionId' ──
-echo "[13/13] GET /api/sessions JSON shape contract"
+echo "[13/14] GET /api/sessions JSON shape contract"
 if $TMUX_OK; then
   ID_SHAPE="integtest-$(date +%s)-$$-shape"
   tmux new-session -d -s "airprompt-${ID_SHAPE}" 2>/dev/null || true
@@ -652,6 +652,50 @@ if $TMUX_OK; then
 else
   skipped "tmux not available — JSON shape tests skipped"
 fi
+
+echo "[14/14] Uploads — token-gated endpoint, guarded purge"
+
+# 14a: /api/upload is exempt from the loopback gate (the phone is not loopback),
+# so the one-time upload token is what must reject an unauthenticated call.
+UP_BODY="${TMPDIR}/upload-body.json"
+UP_CODE=$(curl -s -o "$UP_BODY" -w '%{http_code}' -X POST \
+  "http://localhost:${PORT}/api/upload?name=x.png&mime=image/png" \
+  -H "Content-Type: application/octet-stream" --data-binary 'not-an-image')
+if [ "$UP_CODE" = "401" ] && grep -q '"error"' "$UP_BODY"; then
+  ok "tokenless upload rejected with a JSON 401"
+else
+  not_ok "tokenless upload: HTTP $UP_CODE $(cat "$UP_BODY" 2>/dev/null)"
+fi
+# Nothing may have been written for a rejected upload
+if [ ! -d "${TMPDIR}/airprompt-uploads" ] || [ -z "$(find "${TMPDIR}/airprompt-uploads" -type f 2>/dev/null)" ]; then
+  ok "rejected upload wrote no file"
+else
+  not_ok "rejected upload left files: $(find "${TMPDIR}/airprompt-uploads" -type f 2>/dev/null | tr '\n' ' ')"
+fi
+
+# 14b: the purge helper both off/clean call removes a session's uploads dir, and
+# refuses a path the rm guard does not own. (clean.sh itself is deliberately NOT
+# run here — it removes ~/bin symlinks and would wreck a dev checkout.)
+source "${PROJECT_DIR}/bin/lib/protocol.sh" 2>/dev/null
+UPL_ROOT="${TMPDIR}/airprompt-uploads"
+mkdir -p "${UPL_ROOT}/claude-integ-1"
+echo "fake" > "${UPL_ROOT}/claude-integ-1/shot.png"
+AIRPROMPT_UPLOADS_DIR="$UPL_ROOT" _purge_uploads_dir "${UPL_ROOT}/claude-integ-1" >/dev/null 2>&1
+if [ ! -d "${UPL_ROOT}/claude-integ-1" ]; then
+  ok "purge removes a session uploads dir"
+else
+  not_ok "purge left ${UPL_ROOT}/claude-integ-1 behind"
+fi
+
+REFUSE_PARENT="$(mktemp -d)"
+mkdir -p "${REFUSE_PARENT}/plain"
+_purge_uploads_dir "${REFUSE_PARENT}/plain" >/dev/null 2>&1
+if [ -d "${REFUSE_PARENT}/plain" ]; then
+  ok "purge refuses a path outside an airprompt-owned root"
+else
+  not_ok "purge deleted a non-airprompt path"
+fi
+rm -rf "$REFUSE_PARENT"
 
 # ── Summary ──────────────────────────────────────────────────────────
 echo ""

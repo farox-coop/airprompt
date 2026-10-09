@@ -65,6 +65,38 @@ function post(path, body) {
   });
 }
 
+// Raw-body POST — the upload endpoint takes bytes, not JSON.
+function postRaw(path, buffer, headers) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: 'localhost',
+        port,
+        path,
+        method: 'POST',
+        headers: Object.assign(
+          { 'Content-Length': buffer.length, Connection: 'close' },
+          headers || {}
+        ),
+      },
+      (res) => {
+        let buf = '';
+        res.on('data', (c) => (buf += c));
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode, body: JSON.parse(buf) });
+          } catch (e) {
+            resolve({ status: res.statusCode, body: buf });
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(buffer);
+    req.end();
+  });
+}
+
 function get(path) {
   return new Promise((resolve, reject) => {
     http
@@ -104,6 +136,7 @@ function killTmux(name) {
 // ── Setup / Teardown ────────────────────────────────────────────────
 
 let TEST_STATE_DIR;
+let TEST_UPLOADS_DIR;
 let TEST_DEVICE; // pre-authorized device { publicKeyB64, privateKey, seq }
 
 // Generate + whitelist a device keypair (simulates host `airprompt auth allow`).
@@ -170,7 +203,13 @@ function connectAuthed() {
 
 before(async () => {
   TEST_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-auth-test-'));
+  // Uploads go to their own temp root ("airprompt" in the name so the rm guard
+  // accepts it), and the size cap is small enough to trip with a tiny body — the
+  // raw-body limit is fixed when the route is created, so it must be set here.
+  TEST_UPLOADS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-uploads-test-'));
   process.env.AIRPROMPT_STATE_DIR = TEST_STATE_DIR;
+  process.env.AIRPROMPT_UPLOADS_DIR = TEST_UPLOADS_DIR;
+  process.env.AIRPROMPT_UPLOAD_MAX_BYTES = '4096';
   process.env.AIRPROMPT_PAIR_POLL_MS = '100'; // fast pairing-resolution poll in tests
   const { httpServer, wss: wssRef } = createApp();
   server = httpServer;
@@ -190,9 +229,14 @@ after(() => {
   }
   server.close();
   delete process.env.AIRPROMPT_STATE_DIR;
+  delete process.env.AIRPROMPT_UPLOADS_DIR;
+  delete process.env.AIRPROMPT_UPLOAD_MAX_BYTES;
   delete process.env.AIRPROMPT_PAIR_POLL_MS;
   try {
     fs.rmSync(TEST_STATE_DIR, { recursive: true, force: true });
+  } catch (_) {}
+  try {
+    fs.rmSync(TEST_UPLOADS_DIR, { recursive: true, force: true });
   } catch (_) {}
 });
 
@@ -1816,6 +1860,243 @@ test('sessionToJSON attachedClients is 0 when tmux session is dead', () => {
   assert.strictEqual(json.tmuxAlive, false);
   assert.strictEqual(json.attachedClients, 0);
 });
+
+// ── File upload API ───────────────────────────────────────────────────
+//
+// /api/upload is exempt from the loopback gate (the phone is not loopback), so
+// the one-time token minted over the authenticated WS is the whole
+// authentication — and the destination directory comes from the token's session,
+// never from a client-supplied parameter.
+
+const uploads = require('../../src/uploads');
+
+const PNG_BODY = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(32, 7)]);
+
+// TEST_DEVICE only exists once `before()` has run, so resolve it lazily.
+function canonicalDevice() {
+  return auth.deviceByPublicKey(TEST_DEVICE.publicKeyB64).publicKey;
+}
+
+// Register a session entry directly. `live` creates the tmux session for real:
+// the daemon's sweep reaps uploads whose session is *definitively* gone, so any
+// test that expects files to survive needs a tmux that exists.
+function addSession(id, tmuxName, live) {
+  const name = tmuxName || 'airprompt-' + id;
+  if (live) createTmux(name);
+  sessions.set(id, {
+    sessionId: id,
+    cwd: '/tmp',
+    tmuxSession: name,
+    providerId: TEST_PROVIDER,
+    createdAt: Date.now(),
+    lastActivity: Date.now(),
+  });
+  return name;
+}
+
+function uploadUrl(name, mime, sessionClaim) {
+  return (
+    `/api/upload?name=${encodeURIComponent(name || 'shot.png')}` +
+    `&mime=${encodeURIComponent(mime || 'image/png')}` +
+    (sessionClaim ? `&sessionId=${encodeURIComponent(sessionClaim)}` : '')
+  );
+}
+
+function uploadWith(token, opts) {
+  opts = opts || {};
+  const headers = { 'Content-Type': opts.contentType || 'application/octet-stream' };
+  if (token) headers['X-AirPrompt-Upload-Token'] = token;
+  return postRaw(
+    uploadUrl(opts.name, opts.mime, opts.sessionClaim),
+    opts.body || PNG_BODY,
+    headers
+  );
+}
+
+// Files stored for one session — asserted per sessionId, not over the whole
+// root, so tests cannot see each other's uploads.
+function sessionFiles(sessionId) {
+  const dir = path.join(TEST_UPLOADS_DIR, `${TEST_PROVIDER}-${sessionId}`);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => f !== 'manifest.json');
+}
+
+test('POST /api/upload without a token is rejected in JSON and writes nothing', async () => {
+  addSession('up-noauth');
+  const res = await uploadWith(null);
+  assert.strictEqual(res.status, 401);
+  assert.ok(res.body.error, 'must answer JSON, not an HTML error page');
+  assert.deepStrictEqual(sessionFiles('up-noauth'), []);
+});
+
+test(
+  'a minted token uploads a file and returns a path inside the uploads root',
+  { skip: !TMUX_AVAILABLE },
+  async () => {
+    const tmux = addSession('up-ok', 'airprompt-up-ok', true);
+    try {
+      const token = uploads.mintToken(canonicalDevice(), 'up-ok', Date.now());
+      const res = await uploadWith(token);
+      assert.strictEqual(res.status, 200);
+      assert.ok(res.body.path.startsWith(TEST_UPLOADS_DIR), 'path must be under the uploads root');
+      assert.strictEqual(fs.existsSync(res.body.path), true);
+      assert.strictEqual(fs.readFileSync(res.body.path).length, PNG_BODY.length);
+      assert.strictEqual(
+        path.basename(path.dirname(res.body.path)),
+        `${TEST_PROVIDER}-up-ok`,
+        'keyed providerId + sessionId (used verbatim — it is charset-validated)'
+      );
+
+      const manifest = uploads.readManifest(path.dirname(res.body.path));
+      assert.strictEqual(manifest.entries.length, 1);
+      assert.strictEqual(manifest.entries[0].device, canonicalDevice());
+      assert.strictEqual(manifest.entries[0].deadline, null, 'pending until a prompt is submitted');
+    } finally {
+      killTmux(tmux);
+    }
+  }
+);
+
+test(
+  'the token decides the destination session, not the client query',
+  { skip: !TMUX_AVAILABLE },
+  async () => {
+    const tmuxA = addSession('up-a', 'airprompt-up-a', true);
+    const tmuxB = addSession('up-b', 'airprompt-up-b', true);
+    try {
+      const token = uploads.mintToken(canonicalDevice(), 'up-a', Date.now());
+      const res = await uploadWith(token, { sessionClaim: 'up-b' });
+      assert.strictEqual(res.status, 200);
+      assert.ok(res.body.path.includes(`${TEST_PROVIDER}-up-a`), res.body.path);
+      assert.deepStrictEqual(sessionFiles('up-b'), []);
+    } finally {
+      killTmux(tmuxA);
+      killTmux(tmuxB);
+    }
+  }
+);
+
+test('an upload token is single-use', { skip: !TMUX_AVAILABLE }, async () => {
+  const tmux = addSession('up-reuse', 'airprompt-up-reuse', true);
+  try {
+    const token = uploads.mintToken(canonicalDevice(), 'up-reuse', Date.now());
+    assert.strictEqual((await uploadWith(token)).status, 200);
+    assert.strictEqual((await uploadWith(token)).status, 401);
+    assert.strictEqual(sessionFiles('up-reuse').length, 1, 'the retry stored nothing extra');
+  } finally {
+    killTmux(tmux);
+  }
+});
+
+test('a token whose device is no longer paired is refused', async () => {
+  addSession('up-revoked');
+  const token = uploads.mintToken('not-a-paired-key', 'up-revoked', Date.now());
+  assert.strictEqual((await uploadWith(token)).status, 403);
+  assert.deepStrictEqual(sessionFiles('up-revoked'), []);
+});
+
+test('a token for an unregistered session is refused', async () => {
+  const token = uploads.mintToken(canonicalDevice(), 'no-such-session', Date.now());
+  assert.strictEqual((await uploadWith(token)).status, 409);
+});
+
+test('non-whitelisted MIME types are refused and nothing is written', async () => {
+  addSession('up-mime');
+  for (const mime of ['text/html', 'image/svg+xml', 'application/pdf']) {
+    const token = uploads.mintToken(canonicalDevice(), 'up-mime', Date.now());
+    const res = await uploadWith(token, { mime: mime, name: 'evil' });
+    assert.strictEqual(res.status, 415, `${mime} must be refused`);
+  }
+  assert.deepStrictEqual(sessionFiles('up-mime'), []);
+});
+
+test('a body that is not application/octet-stream is refused, not stored empty', async () => {
+  addSession('up-ctype');
+  const token = uploads.mintToken(canonicalDevice(), 'up-ctype', Date.now());
+  const res = await uploadWith(token, { contentType: 'application/json', body: Buffer.from('{}') });
+  assert.strictEqual(res.status, 415);
+  assert.deepStrictEqual(sessionFiles('up-ctype'), []);
+});
+
+test('an oversized body is refused with JSON, not the Express HTML error page', async () => {
+  addSession('up-big');
+  const token = uploads.mintToken(canonicalDevice(), 'up-big', Date.now());
+  const res = await uploadWith(token, { body: Buffer.alloc(5000, 3) });
+  assert.strictEqual(res.status, 413);
+  assert.strictEqual(res.body.error, 'File too large');
+  assert.deepStrictEqual(sessionFiles('up-big'), []);
+});
+
+test(
+  'an upload without Content-Length (chunked) still succeeds',
+  { skip: !TMUX_AVAILABLE },
+  async () => {
+    const tmux = addSession('up-chunked', 'airprompt-up-chunked', true);
+    try {
+      const token = uploads.mintToken(canonicalDevice(), 'up-chunked', Date.now());
+      const res = await new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: 'localhost',
+            port,
+            path: uploadUrl(),
+            method: 'POST',
+            headers: {
+              'X-AirPrompt-Upload-Token': token,
+              'Content-Type': 'application/octet-stream',
+              'Transfer-Encoding': 'chunked',
+            },
+          },
+          (r) => {
+            let buf = '';
+            r.on('data', (c) => (buf += c));
+            r.on('end', () => resolve({ status: r.statusCode, body: buf }));
+          }
+        );
+        req.on('error', reject);
+        req.write(PNG_BODY);
+        req.end();
+      });
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(JSON.parse(res.body).bytes, PNG_BODY.length);
+    } finally {
+      killTmux(tmux);
+    }
+  }
+);
+
+test(
+  'a prompt submit releases the uploading device, a bare newline does not',
+  { skip: !TMUX_AVAILABLE },
+  async () => {
+    const tmux = addSession('up-submit', 'airprompt-up-submit', true);
+    const { ws } = await connectAuthed();
+    try {
+      ws.send(JSON.stringify({ type: 'switch_session', sessionId: 'up-submit' }));
+      await new Promise((r) => setTimeout(r, 300)); // let the pty attach
+
+      const token = uploads.mintToken(canonicalDevice(), 'up-submit', Date.now());
+      const res = await uploadWith(token);
+      assert.strictEqual(res.status, 200);
+      const dir = path.dirname(res.body.path);
+
+      // '\n' is a literal newline (the server pastes it as bracketed paste), not a submit.
+      ws.send(JSON.stringify({ type: 'input', data: '\n' }));
+      await new Promise((r) => setTimeout(r, 200));
+      assert.strictEqual(uploads.readManifest(dir).entries[0].deadline, null);
+
+      // '\r' is the submit.
+      ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+      await new Promise((r) => setTimeout(r, 200));
+      assert.ok(uploads.readManifest(dir).entries[0].deadline > 0, 'submit must release the file');
+    } finally {
+      try {
+        ws.close();
+      } catch (_) {}
+      killTmux(tmux);
+    }
+  }
+);
 
 // ── Vendored xterm static routes ──────────────────────────────────────
 

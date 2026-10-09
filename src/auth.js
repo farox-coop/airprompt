@@ -327,27 +327,39 @@ function verifyNonce(nonceStr, signatureB64, publicKeyB64) {
 
 // ── Anti-flood (in-memory, per-IP) ─────────────────────────────────────────
 
-const _pairAttempts = new Map(); // ip -> [timestamps]
+// Generic sliding-window limiter: `max` attempts per `windowMs` per IP.
+// The map is bounded — on a busy LAN IPv6 privacy addresses rotate, so
+// fully-expired keys are dropped once it grows large.
+function createRateLimiter(max, windowMs) {
+  const attempts = new Map(); // ip -> [timestamps]
 
-function checkPairRate(ip) {
-  const now = Date.now();
-  const arr = (_pairAttempts.get(ip) || []).filter((t) => now - t < PAIR_RATE_WINDOW_MS);
-  if (arr.length === 0) _pairAttempts.delete(ip);
-  if (arr.length >= PAIR_RATE_MAX) {
-    _pairAttempts.set(ip, arr);
-    return false;
-  }
-  arr.push(now);
-  _pairAttempts.set(ip, arr);
-  // Bound memory on a busy LAN (IPv6 privacy addresses rotate): drop
-  // fully-expired entries once the map grows large.
-  if (_pairAttempts.size > 1024) {
-    for (const [k, times] of _pairAttempts) {
-      if (times.every((t) => now - t >= PAIR_RATE_WINDOW_MS)) _pairAttempts.delete(k);
+  return function check(ip) {
+    const now = Date.now();
+    const key = String(ip || 'unknown');
+    const arr = (attempts.get(key) || []).filter((t) => now - t < windowMs);
+    if (arr.length === 0) attempts.delete(key);
+    if (arr.length >= max) {
+      attempts.set(key, arr);
+      return false;
     }
-  }
-  return true;
+    arr.push(now);
+    attempts.set(key, arr);
+    if (attempts.size > 1024) {
+      for (const [k, times] of attempts) {
+        if (times.every((t) => now - t >= windowMs)) attempts.delete(k);
+      }
+    }
+    return true;
+  };
 }
+
+const checkPairRate = createRateLimiter(PAIR_RATE_MAX, PAIR_RATE_WINDOW_MS);
+
+// Uploads are token-gated, but /api/upload buffers a whole body before the
+// handler runs, so it needs its own per-IP ceiling.
+const UPLOAD_RATE_MAX = 30;
+const UPLOAD_RATE_WINDOW_MS = 60_000;
+const checkUploadRate = createRateLimiter(UPLOAD_RATE_MAX, UPLOAD_RATE_WINDOW_MS);
 
 module.exports = {
   PENDING_TTL_MS,
@@ -371,5 +383,6 @@ module.exports = {
   verifyNonce,
   isValidPublicKey,
   checkPairRate,
+  checkUploadRate,
   stateFile,
 };
