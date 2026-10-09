@@ -19,7 +19,7 @@ Code quality is genuinely good: clean architecture (provider registry + extracte
 | 1   | Zero auth on daemon → LAN RCE          | `server.js:156-163,637` binds `0.0.0.0`, no token/Origin check                                                                                 | Any device on the shared network gets interactive terminal as the dev user + session-kill + notification spoofing. The "nuke the machine" class. ~30 lines to fix: random token + require on REST/WS + Origin allowlist. |
 | 2   | Node-side `fs.rmSync` unguarded        | `server.js:113,125`, `activate.js:161`, `deactivate.js:185`                                                                                    | Shell has `_safe_rm_rf`, Node has no equivalent. Misconfigured `AIRPROMPT_SESSIONS_DIR=/home` → daemon `rm -rf`'s arbitrary dirs on startup recovery.                                                                    |
 | 3   | No `LICENSE` file                      | repo root                                                                                                                                      | `package.json` says MIT, README names Farox, but no license text = all-rights-reserved. Blocks coop AND public.                                                                                                          |
-| 4   | Personal identity hardcoded everywhere | `install.sh:19`, `bin/install.js:24-25,151`, `src/providers/claude.js:29`, `.claude-plugin/marketplace.json:5`, `.claude-plugin/plugin.json:4` | `diegomanuel/airprompt` drives clone + plugin-install + issue links. Repo move to `farox-coop` breaks every fresh install until these are updated.                                                                       |
+| 4   | Personal identity hardcoded everywhere | `install.sh:19`, `bin/install.js:24-25,151`, `src/providers/claude.js:29`, `.claude-plugin/marketplace.json:5`, `.claude-plugin/plugin.json:4` | The previous personal repo slug drove clone + plugin-install + issue links. Repo move to `farox-coop` breaks every fresh install until these are updated.                                                                |
 | 5   | Only `claude` provider exists          | `src/providers/` = claude.js + provider.js + registry.js                                                                                       | codex/cursor/windsurf advertised in dispatcher + installer + help, but `--only codex` → `error: unknown agent: codex`. Codex users hit a hard wall.                                                                      |
 
 ## Should-fix before/with the coop rollout
@@ -87,7 +87,7 @@ High-level summary only. The full staged/commit breakdown lives in [PLAN - open 
 - [x] Auth token + WS Origin check (`server.js`) — the RCE hole.
 - [x] Node-side `isSafeRmTarget()` guard for all `fs.rmSync`.
 - [x] Add `LICENSE` (MIT, Farox Software Cooperative).
-- [x] Re-home identity: `diegomanuel/airprompt` → `farox-coop/airprompt` in code + manifest URLs (git remote set-url deferred to post-commit repo transfer).
+- [x] Re-home identity: previous personal repo slug replaced with `farox-coop/airprompt` in code + manifest URLs (git remote set-url deferred to post-commit repo transfer).
 - [x] Fix README: working Quick Start, Install section (one-liners), Troubleshooting, provider matrix ("Claude only today"), env-var reference.
 - [x] Either ship or de-advertise codex/cursor/windsurf (clarify "not yet implemented — coming soon" in `--only` + provider hints; detection loops left as-is).
 

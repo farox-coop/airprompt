@@ -36,7 +36,7 @@ AirPrompt currently has none of this. Installation is manual: clone repo, `npm i
 
 ```
 # One command. Installs AirPrompt for Claude Code. Auto-starts daemon. Wires everything.
-curl -fsSL https://raw.githubusercontent.com/diegomanuel/airprompt/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/main/install.sh | bash
 ```
 
 After this single command:
@@ -114,7 +114,7 @@ bin/install.js (unified installer, pure stdlib)
 
 | Line                              | Caveman original               | AirPrompt change                                                                                                                                                 |
 | --------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `REPO="JuliusBrussee/caveman"`    | Caveman repo                   | `REPO="diegomanuel/airprompt"`                                                                                                                                   |
+| `REPO="JuliusBrussee/caveman"`    | Caveman repo                   | `REPO="farox-coop/airprompt"`                                                                                                                                    |
 | `exec npx -y "github:$REPO" "$@"` | npx delegation (zero npm deps) | `git clone --depth 1 "https://github.com/${REPO}.git" "$TMP_DIR" && exec node "$TMP_DIR/bin/install.js" "$@"` (clone then exec — airprompt has runtime npm deps) |
 | Error messages say `caveman:`     | Brand prefix                   | `airprompt:`                                                                                                                                                     |
 
@@ -132,14 +132,14 @@ Everything else stays identical — the `BASH_SOURCE` local-clone detection, the
 # you'd pass to bin/install.js can be passed here; we just forward them.
 #
 # One-line install:
-#   curl -fsSL https://raw.githubusercontent.com/diegomanuel/airprompt/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/main/install.sh | bash
 #
 # Local clone:
 #   bash install.sh [flags]
 
 set -euo pipefail
 
-REPO="diegomanuel/airprompt"                         # ← CHANGED from JuliusBrussee/caveman
+REPO="farox-coop/airprompt"                         # ← CHANGED from JuliusBrussee/caveman
 
 # Require Node ≥18
 if ! command -v node >/dev/null 2>&1; then
@@ -180,7 +180,7 @@ Same strategy as `install.sh`. Copy caveman's `install.ps1` verbatim (79 lines).
 
 | Element            | Caveman original                         | AirPrompt change                                                                                       |
 | ------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `$Repo`            | `"JuliusBrussee/caveman"`                | `"diegomanuel/airprompt"`                                                                              |
+| `$Repo`            | `"JuliusBrussee/caveman"`                | `"farox-coop/airprompt"`                                                                               |
 | Curl-pipe fallback | `& npx -y "github:$Repo" @InstallerArgs` | `git clone --depth 1 "https://github.com/$Repo.git" $tmp; & node "$tmp/bin/install.js" @InstallerArgs` |
 | Error messages     | `caveman:` prefix                        | `airprompt:`                                                                                           |
 
@@ -202,7 +202,7 @@ Reuses caveman's `bin/install.js` structure (1531 lines, battle-tested). Pure st
 
 **What we adapt**:
 
-- `REPO` → `'diegomanuel/airprompt'`
+- `REPO` → `'farox-coop/airprompt'`
 - `PROVIDERS` → starts with just `claude` (extensible for future agents)
 - `HOOK_FILES` → airprompt hook files
 - `installClaude()` → airprompt's plugin install + hook wiring + daemon setup
@@ -236,7 +236,7 @@ install()
   2. If not a git repo, clone from GitHub
   3. If deps missing (no node_modules/), run npm install
   4. Install Claude Code plugin:
-     claude plugin marketplace add diegomanuel/airprompt
+     claude plugin marketplace add farox-coop/airprompt
      claude plugin install airprompt@airprompt
   5. Copy hook files to ~/.claude/hooks/:
      - airprompt-activate.js
@@ -325,7 +325,7 @@ Managed hook basenames for airprompt:
 {
   "name": "airprompt",
   "description": "Remote control and voice dictation for Claude Code via web terminal",
-  "author": { "name": "Farox", "url": "https://github.com/diegomanuel" },
+  "author": { "name": "Farox", "url": "https://farox.coop" },
   "hooks": {
     "SessionStart": [
       {
@@ -362,7 +362,7 @@ Managed hook basenames for airprompt:
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "airprompt",
   "description": "Remote control and voice dictation for Claude Code. Control sessions from your phone.",
-  "owner": { "name": "Farox", "url": "https://github.com/diegomanuel" },
+  "owner": { "name": "Farox", "url": "https://farox.coop" },
   "plugins": [
     {
       "name": "airprompt",
@@ -473,13 +473,13 @@ make setup
 
 ```
 # One command
-curl -fsSL https://raw.githubusercontent.com/diegomanuel/airprompt/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/main/install.sh | bash
 
 # Or local clone
 git clone <repo> && cd airprompt && bash install.sh
 
 # Or Claude Code plugin
-claude plugin marketplace add diegomanuel/airprompt
+claude plugin marketplace add farox-coop/airprompt
 claude plugin install airprompt@airprompt
 
 # Or npm (future)
@@ -546,7 +546,7 @@ npm install -g airprompt && airprompt install
 ### Step 6: Create Claude Code Plugin Manifests
 
 - `.claude-plugin/plugin.json` — SessionStart + Stop hooks with `${CLAUDE_PLUGIN_ROOT}` paths
-- `.claude-plugin/marketplace.json` — plugin listing pointing to `diegomanuel/airprompt`
+- `.claude-plugin/marketplace.json` — plugin listing pointing to `farox-coop/airprompt`
 
 ### Step 7: Update `package.json`
 

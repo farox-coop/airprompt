@@ -41,7 +41,7 @@ Addresses report blockers #3 and #4.
 - Files: `LICENSE` (new), `install.sh:8,19`, `install.ps1:7,29`, `bin/install.js:24`, `src/providers/claude.js:30`, `.claude-plugin/marketplace.json:5`, `.claude-plugin/plugin.json:4`, `test/unit/sync.test.sh:27-34`, `README.md:151`.
 - Scope:
   - Add `LICENSE` (MIT text, © Farox Software Cooperative).
-  - Re-home identity: replace `diegomanuel/airprompt` → `farox-coop/airprompt` and the personal owner URL → `https://farox.coop` across the files; `git remote set-url origin` to the coop repo (deferred to post-commit repo transfer).
+  - Re-home identity: replace the previous personal repo slug with `farox-coop/airprompt` and the personal owner URL with `https://farox.coop` across the files; `git remote set-url origin` to the coop repo (deferred to post-commit repo transfer).
 - Acceptance: `package.json` `"license": "MIT"` is backed by real text and linked from README; `curl|bash install.sh` clones from the coop org; plugin marketplace URL points at the coop.
 - Note: identity re-home is done in code; repo transfer (`git remote set-url origin` to the coop repo) is deferred until after this commit is pushed.
 
@@ -76,7 +76,7 @@ Addresses report blocker #5. Only `claude` exists; codex/cursor/windsurf are adv
 
 - add SSH-style device pairing + WebSocket Origin check so the daemon is no longer an open terminal on the LAN
 - guard Node-side `fs.rmSync` with the same containment rule the shell already enforces
-- add MIT LICENSE and re-home repo identity from `diegomanuel` to `farox-coop`
+- add MIT LICENSE and re-home repo identity from the previous personal account to `farox-coop`
 - fix the README so a fresh install actually works (installer-first Quick Start, troubleshooting, provider matrix)
 - stop advertising codex/cursor/windsurf until their adapters exist
 

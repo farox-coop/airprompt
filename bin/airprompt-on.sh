@@ -105,17 +105,15 @@ if [ "${AIRPROMPT_NO_TLS:-}" != "1" ] && { [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY
   fi
 fi
 
-DAEMON_ENV="$(daemon_env)"
-
 if [ ! -f "$PID_FILE" ]; then
   echo "Starting daemon..."
   cd "$DAEMON_DIR"
   # tmux: daemon owned by tmux server (immortal process), not this shell.
   # Avoids process-group death when the Bash tool/script shell exits.
   if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
-    tmux new-session -d -s airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log"
+    tmux new-session -d -s airprompt-daemon "$(daemon_cmd)"
   else
-    tmux respawn-pane -k -t airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log" 2>/dev/null || true
+    tmux respawn-pane -k -t airprompt-daemon "$(daemon_cmd)" 2>/dev/null || true
   fi
   for i in $(seq 1 20); do
     if curl -s "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" > /dev/null 2>&1; then

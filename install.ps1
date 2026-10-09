@@ -42,7 +42,7 @@ airprompt: Node.js (>=20) required. Install:
   }
 
   $nodeMajor = [int](& node -p "process.versions.node.split('.')[0]")
-  if ($nodeMajor -lt 18) {
+  if ($nodeMajor -lt 20) {
     Write-Error "airprompt: Node $nodeMajor too old. Need Node >=20. Upgrade: https://nodejs.org"
     exit 1
   }

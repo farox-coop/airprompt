@@ -58,12 +58,10 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 
-DAEMON_ENV="$(daemon_env)"
-
 # ── 2. Restart daemon inside tmux ─────────────────────────────────────
 cd "$DAEMON_DIR"
 if tmux has-session -t airprompt-daemon 2>/dev/null; then
-  tmux respawn-pane -k -t airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log" 2>/dev/null || {
+  tmux respawn-pane -k -t airprompt-daemon "$(daemon_cmd)" 2>/dev/null || {
     # respawn failed — kill zombie daemon session and create fresh one
     tmux kill-session -t airprompt-daemon 2>/dev/null || true
     rm -f "$PID_FILE"
@@ -72,7 +70,7 @@ fi
 
 # Fallback: create daemon session if it doesn't exist (e.g. killed above)
 if ! tmux has-session -t airprompt-daemon 2>/dev/null; then
-  tmux new-session -d -s airprompt-daemon "$DAEMON_ENV node server.js 2>&1 | tee /tmp/airprompt.log" || true
+  tmux new-session -d -s airprompt-daemon "$(daemon_cmd)" || true
 fi
 
 # ── 3. Wait for daemon to be ready ────────────────────────────────────

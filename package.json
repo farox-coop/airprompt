@@ -3,19 +3,17 @@
   "version": "1.0.0",
   "description": "Remote control interface for IDE/CLI terminals with voice dictation",
   "main": "server.js",
-  "files": [
-    "bin/",
-    "src/",
-    "public/",
-    "commands/",
-    "server.js",
-    "install.sh",
-    "install.ps1",
-    "version",
-    ".claude-plugin/"
-  ],
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/farox-coop/airprompt.git"
+  },
+  "homepage": "https://github.com/farox-coop/airprompt#readme",
+  "bugs": {
+    "url": "https://github.com/farox-coop/airprompt/issues"
+  },
   "scripts": {
-    "start": "nohup node server.js > /tmp/airprompt.log 2>&1 & echo \"AirPrompt daemon started\"",
+    "start": "umask 077; nohup node server.js > /tmp/airprompt.log 2>&1 & echo \"AirPrompt daemon started\"",
     "stop": "kill \"$(cat ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid} 2>/dev/null)\" 2>/dev/null; rm -f ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}",
     "register": "bash bin/airprompt on",
     "unregister": "bash bin/airprompt off",
@@ -24,7 +22,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
-  "author": "Farox",
+  "author": "Farox Software Cooperative (https://farox.coop)",
   "license": "MIT",
   "engines": {
     "node": ">=20"

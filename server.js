@@ -332,6 +332,34 @@ function recoverSessionsFromDisk() {
 
 function createApp() {
   const app = express();
+  app.disable('x-powered-by');
+
+  // Security headers. Deliberately no HSTS: the certificate is self-signed and
+  // the daemon can run in a plain-HTTP fallback, so pinning https for a year
+  // could lock a browser out of its own daemon. script-src stays strict (no
+  // inline scripts — that is the XSS-relevant half). style-src must allow
+  // inline styles: the vendored xterm DOM renderer builds its `.xterm-rows`
+  // rules as injected <style> elements and sets true-color cells through the
+  // style attribute, so a bare 'self' there leaves the terminal unstyled.
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "connect-src 'self' ws: wss:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+  app.use((_req, res, next) => {
+    res.setHeader('Content-Security-Policy', csp);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+  });
+
   app.use(express.json());
   // LAN PoC: always revalidate so dev edits show up without cache-busting.
   const noCache = {
@@ -1259,6 +1287,25 @@ function createApp() {
   }, PAIR_POLL_MS);
   httpServer.on('close', () => clearInterval(pairInterval));
   pairInterval.unref();
+
+  // JSON error handler. Without it Express's default handler replies with an
+  // HTML stack trace (absolute node_modules paths included) to any LAN client
+  // that sends a malformed request — a malformed /api/pair body is enough.
+  // Client errors keep their status but never their message; 5xx stay generic.
+  app.use((err, _req, res, next) => {
+    if (res.headersSent) return next(err);
+    const raw = Number(err && (err.status || err.statusCode));
+    const status = raw >= 400 && raw < 500 ? raw : 500;
+    log('warn', 'request failed', { status, error: (err && err.message) || 'unknown' });
+    // Same wording the upload route uses for its own body limit.
+    const message =
+      err && err.type === 'entity.too.large'
+        ? 'Payload too large'
+        : status >= 500
+          ? 'Internal error'
+          : 'Bad request';
+    res.status(status).json({ error: message });
+  });
 
   return { app, httpServer, wss, tlsOptions };
 }

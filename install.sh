@@ -29,7 +29,7 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
-if [ "$NODE_MAJOR" -lt 18 ]; then
+if [ "$NODE_MAJOR" -lt 20 ]; then
   echo "airprompt: Node $NODE_MAJOR too old. Need Node ≥20." >&2
   echo "  Upgrade: https://nodejs.org" >&2
   exit 1

@@ -6,6 +6,8 @@
 
 AirPrompt lets you view and interact with remote IDE/CLI sessions running on your local network machine from your mobile phone using voice prompts. Provider-agnostic: supports multiple IDEs via adapters (Claude Code, Codex, Cursor, Windsurf).
 
+**Status:** 1.0 — early, actively developed, single-user. AirPrompt is LAN-scoped and self-hosted, and a paired device gets an interactive terminal as your own OS user, so run it on a network you trust. See [SECURITY.md](SECURITY.md) for the security model and how to report a vulnerability.
+
 ## Requirements
 
 > Debian/Ubuntu commands shown; macOS uses `brew install tmux jq openssl` (see [Supported platforms](#supported-platforms)).
@@ -13,9 +15,11 @@ AirPrompt lets you view and interact with remote IDE/CLI sessions running on you
 - **Node.js** ≥ 20
 - **tmux** (`sudo apt install tmux`)
 - **curl** — API communication with daemon
+- **git** — the installer clones the repo into `~/.airprompt/`
 - **jq** (`sudo apt install jq`) — JSON parsing for daemon protocol detection and notifications
 - **openssl** — TLS certificate generation for HTTPS voice dictation
 - **Build tools** — `node-pty` compiles from source: `build-essential` + `python3` on Linux, Xcode Command Line Tools on macOS
+- **make** — optional, only for the [Make Targets](#make-targets) (tests, lint, cert regeneration)
 
 ## Supported platforms
 
@@ -197,18 +201,18 @@ Daemon output goes to `/tmp/airprompt.log`. Tail it with `make logs` or `tail -f
 
 All commands go through the unified dispatcher: `airprompt <command>` (`/airprompt <command>` inside Claude Code).
 
-| Command            | Action                                                                                                                                      |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `on [<name>]`      | Start daemon + register current session (optional display name)                                                                             |
-| `on --name <name>` | Same, explicit flag form                                                                                                                    |
-| `off`              | Unregister current session + hide statusline badge                                                                                          |
-| `status`           | Show daemon status and all active sessions                                                                                                  |
-| `name [<text>]`    | Set display name for current session (empty or "" clears it)                                                                                |
-| `clean`            | Full teardown — kill daemon, remove all sessions/config. Preserves install files (~/.airprompt/server.js) so autostart hook target survives |
-| `restart`          | Restart daemon — sessions survive via disk recovery                                                                                         |
-| `autostart on      | off`                                                                                                                                        | Auto-start AirPrompt on IDE session start |
-| `auth <cmd>`       | Manage paired devices: `list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>`, `name <seq> <name>`                           |
-| `help`             | Print usage                                                                                                                                 |
+| Command                | Action                                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `on [<name>]`          | Start daemon + register current session (optional display name)                                                                             |
+| `on --name <name>`     | Same, explicit flag form                                                                                                                    |
+| `off`                  | Unregister current session + hide statusline badge                                                                                          |
+| `status`               | Show daemon status and all active sessions                                                                                                  |
+| `name [<text>]`        | Set display name for current session (empty or "" clears it)                                                                                |
+| `clean`                | Full teardown — kill daemon, remove all sessions/config. Preserves install files (~/.airprompt/server.js) so autostart hook target survives |
+| `restart`              | Restart daemon — sessions survive via disk recovery                                                                                         |
+| `autostart on` / `off` | Auto-start AirPrompt on IDE session start                                                                                                   |
+| `auth <cmd>`           | Manage paired devices: `list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>`, `name <seq> <name>`                           |
+| `help`                 | Print usage                                                                                                                                 |
 
 **`/airprompt` with no arguments** runs `status` + `help` — shows daemon status followed by the command reference.
 
@@ -224,6 +228,18 @@ The daemon requires SSH-style device pairing: each browser holds an ECDSA P-256 
 - Manage devices: `airprompt auth list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>`, `name <seq> <name>`. Ordinals are stable — ordered by creation, never renumbered.
 - `airprompt clean` wipes all auth state — every device re-pairs.
 - If the daemon's key changes (reinstall/rotation), paired browsers show a "server identity changed" warning — use **Re-pair**.
+
+## Security model
+
+AirPrompt hands a paired phone an interactive terminal **as your own OS user**, so this is worth reading before you run it. The full policy, the threat model and the accepted risks live in [SECURITY.md](SECURITY.md).
+
+- **Single user, LAN-scoped, self-hosted.** No accounts and no roles — one device keypair is one device. Keep it on a network you trust, and never expose it to the internet.
+- **Only three surfaces are LAN-reachable:** the web UI, `/api/pair` (which only _adds_ a pending request) and `/api/upload` (gated by a single-use, device-bound token). Every other API route requires a loopback source, so a rogue LAN device cannot kill or register sessions.
+- **Approval happens on the host**, never on the requesting device: `airprompt auth list` → `airprompt auth allow <seq>`. The QR carries only the server's key fingerprint, no secret.
+- **TLS is required for pairing** (browser WebCrypto needs a secure context). The certificate is self-signed — accept the browser warning once, after which the phone pins the server's key and refuses to continue if it ever changes.
+- **Errors are JSON with no stack traces**, the UI ships a Content-Security-Policy with a strict `script-src` (`style-src` allows inline styles because the vendored terminal renderer requires them), uploads are name- and type-sanitized, and the daemon log is created `0600`.
+
+Report a vulnerability through [SECURITY.md](SECURITY.md) — never in a public issue.
 
 ## Make Targets
 

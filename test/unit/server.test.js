@@ -105,9 +105,9 @@ function get(path) {
         res.on('data', (c) => (buf += c));
         res.on('end', () => {
           try {
-            resolve({ status: res.statusCode, body: JSON.parse(buf) });
+            resolve({ status: res.statusCode, headers: res.headers, body: JSON.parse(buf) });
           } catch (e) {
-            resolve({ status: res.statusCode, body: buf });
+            resolve({ status: res.statusCode, headers: res.headers, body: buf });
           }
         });
       })
@@ -2112,4 +2112,42 @@ test('serves vendored xterm static assets from node_modules', async () => {
   const fit = await get('/vendor/xterm-addon-fit/lib/addon-fit.js');
   assert.strictEqual(fit.status, 200);
   assert.ok(fit.body.length > 100, 'addon-fit.js should be non-trivial');
+});
+
+// ── Security headers + error handler ──────────────────────────────────
+
+test('serves the security headers on a normal response', async () => {
+  const res = await get('/');
+  assert.strictEqual(res.status, 200);
+
+  const csp = res.headers['content-security-policy'];
+  assert.ok(csp, 'a Content-Security-Policy header must be present');
+  assert.ok(csp.includes("default-src 'self'"), 'CSP must restrict the default source');
+  assert.ok(csp.includes("script-src 'self'"), 'CSP must forbid inline scripts');
+  assert.ok(csp.includes("frame-ancestors 'none'"), 'CSP must forbid framing');
+  // xterm's DOM renderer injects <style> elements and style attributes, so
+  // style-src has to keep 'unsafe-inline' — dropping it leaves the terminal
+  // unstyled. Pinned here so the CSP cannot be tightened into a broken UI.
+  assert.ok(csp.includes("style-src 'self' 'unsafe-inline'"), 'style-src must permit xterm styles');
+
+  assert.strictEqual(res.headers['x-content-type-options'], 'nosniff');
+  assert.strictEqual(res.headers['x-frame-options'], 'DENY');
+  assert.strictEqual(res.headers['referrer-policy'], 'no-referrer');
+  assert.strictEqual(res.headers['x-powered-by'], undefined, 'must not advertise Express');
+});
+
+test('rejects malformed JSON with a JSON body, not an HTML stack page', async () => {
+  const res = await postRaw('/api/pair', Buffer.from('{not json'), {
+    'Content-Type': 'application/json',
+  });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(typeof res.body, 'object', 'response must be JSON, not an HTML error page');
+  assert.strictEqual(res.body.error, 'Bad request');
+});
+
+test('reports an oversized JSON body as 413, not a generic bad request', async () => {
+  // Comfortably past express.json()'s 100kb default body limit.
+  const res = await post('/api/pair', { name: 'x'.repeat(200000) });
+  assert.strictEqual(res.status, 413);
+  assert.strictEqual(res.body.error, 'Payload too large');
 });

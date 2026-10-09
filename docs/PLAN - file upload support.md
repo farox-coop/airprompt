@@ -168,7 +168,7 @@ Adjudicated during review, with primary evidence: `createImageBitmap`'s `imageOr
 
 **Server** — `src/uploads.js` + root helpers and guards; `/api/upload` + token lifecycle + error handler; submit detection + `sweepUploads()` wiring; shell purge in `off`/`clean` + `daemon_env()`.
 **Browser** — `public/upload.js` (sources, token, XHR, progress, injection); `public/upload-resize.js` + pref row; clipboard / paste / drag&drop.
-**Finish** — unit + integration tests, lint/format, `README.md` + `CHANGELOG.md`, then `make -C /home/diego/projects/airprompt test-all`.
+**Finish** — unit + integration tests, lint/format, `README.md` + `CHANGELOG.md`, then `make test-all` from the repo root.
 
 Acceptance for the finished commit:
 
@@ -204,7 +204,7 @@ Acceptance for the finished commit:
 
 ## Verification
 
-1. `make -C /home/diego/projects/airprompt test-all` (lint, format-check, agnostic-check, unit, integration).
+1. `make test-all` from the repo root (lint, format-check, agnostic-check, unit, integration).
 2. On the real phone over HTTPS: attach a screenshot, watch the progress bar, confirm the path appears in the terminal (not submitted), add an instruction, submit, confirm the CLI reads the image.
 3. Cleanup: the file exists after upload, is released on submit, disappears after the grace window, and the session dir is gone after `airprompt off` / `clean`; a `restart` keeps a live session's files.
 4. Guards: `AIRPROMPT_UPLOADS_DIR` pointing outside any `*airprompt*` root is refused by `_safe_rm_rf`; the default root purges cleanly.

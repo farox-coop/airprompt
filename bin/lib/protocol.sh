@@ -89,6 +89,13 @@ daemon_env() {
   printf '%s' "${parts[*]}"
 }
 
+# Full daemon launch command for a tmux pane: env assignments + the log. The
+# umask is what keeps the log 0600 — under AIRPROMPT_DEBUG it records session
+# working directories, tmux names and absolute upload paths.
+daemon_cmd() {
+  printf 'umask 077; %s node server.js 2>&1 | tee /tmp/airprompt.log' "$(daemon_env)"
+}
+
 # ── Ensure ~/bin/ binaries exist ────────────────────────────────────────
 # Called by on.sh and autostart.sh after clean to restore symlinks + wrappers.
 # Idempotent — only creates if missing.

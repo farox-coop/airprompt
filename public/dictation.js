@@ -129,13 +129,9 @@
     }
   }
 
-  // Update CSS placeholder texts via custom properties
-  const _i18nStyle = document.createElement('style');
-  _i18nStyle.textContent =
-    '\n' +
-    '#dictate-text:empty::after { content: var(--listen-text, "Listening\\2026"); }\n' +
-    '#dictate-overlay.speaking #dictate-text:empty::after { content: var(--speak-text, "\\25cf Speaking\\2026"); }\n';
-  document.head.appendChild(_i18nStyle);
+  // The listen/speak placeholder rules live in styles.css; only the custom
+  // properties above carry the translated text (a dynamic <style> would need
+  // 'unsafe-inline' in the CSP style-src).
 
   // ── Language management ──────────────────────────────────────────────
   const BASE_LANGS = [

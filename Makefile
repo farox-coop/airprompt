@@ -11,7 +11,7 @@ cert:
 	@bash bin/generate-cert.sh
 
 start:
-	@nohup node server.js > $(LOG_FILE) 2>&1 &
+	@umask 077; nohup node server.js > $(LOG_FILE) 2>&1 &
 	@for i in $$(seq 1 20); do \
 	  if [ -f $(PID_FILE) ] && kill -0 $$(cat $(PID_FILE) 2>/dev/null) 2>/dev/null; then break; fi; \
 	  sleep 0.5; \

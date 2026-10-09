@@ -12,14 +12,26 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Never cancel a release job: a cancelled run can leave a release with only
+  # one of its two install assets. workflow_dispatch runs all share
+  # refs/heads/main, so they would otherwise cancel each other mid-upload.
+  cancel-in-progress: false
+
 jobs:
   attach:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      # Tag values reach the shell through env, never interpolated into run: —
+      # `${{ }}` inside a run block would let a crafted tag inject commands.
       - name: Resolve release tag
         id: tag
-        run: |
-          echo "tag=${{ github.event.release.tag_name || github.event.inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag_name }}
+        run: echo "tag=${RELEASE_TAG:-$INPUT_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout the release tag
         uses: actions/checkout@v4
@@ -29,6 +41,5 @@ jobs:
       - name: Attach install.sh + install.ps1 as release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ steps.tag.outputs.tag }}" \
-            install.sh install.ps1 --clobber
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: gh release upload "$TAG" install.sh install.ps1 --clobber
