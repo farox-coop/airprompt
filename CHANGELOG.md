@@ -4,6 +4,8 @@ Release notes for AirPrompt, newest first. Each entry mirrors the [GitHub releas
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-09
+
 Attach images from your phone, plus a watchdog for flaky WiFi.
 
 ### Highlights
@@ -18,6 +20,19 @@ Attach images from your phone, plus a watchdog for flaky WiFi.
 - **Upload cleanup is time-based, not read-based** — the daemon cannot see when a CLI actually reads a file, so the grace window is what keeps a slow turn working while still letting nothing accumulate. Tune it with `AIRPROMPT_UPLOAD_GRACE_MS`, `AIRPROMPT_UPLOAD_TTL_MS` and `AIRPROMPT_UPLOAD_MAX_BYTES`.
 - **A `$HOME` (or `AIRPROMPT_UPLOADS_DIR`) containing spaces** makes the typed path ambiguous for the CLI — filenames themselves are always sanitized.
 - **Clipboard reads depend on the source app** — some Android galleries never put the image on the clipboard; when that happens 📋 says so rather than failing silently. 📎 picks a file directly and always works.
+
+### Hardening
+
+- **`SECURITY.md`** — the threat model, the accepted risks and a private route to report a vulnerability are now documented. Please report security issues privately, never in a public issue.
+- **Security headers and honest errors** — the daemon sends a Content-Security-Policy, `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy`, no longer advertises `X-Powered-By`, and answers malformed requests with JSON instead of an HTML stack trace that exposed absolute paths.
+- **Daemon log is created `0600`** instead of world-readable.
+- **Installer Node guard fixed** — `install.sh` and `install.ps1` accepted Node 18/19 even though ≥ 20 is required; they now check 20 up front.
+
+### Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/v1.1.0/install.sh | bash
+```
 
 ## [1.0.0] - 2026-09-01
 
@@ -50,5 +65,6 @@ curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/v1.0.0/install
 
 **Read more:** [README.md](https://github.com/farox-coop/airprompt/blob/v1.0.0/README.md) — full setup, provider matrix, troubleshooting, and configuration reference.
 
-[Unreleased]: https://github.com/farox-coop/airprompt/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/farox-coop/airprompt/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/farox-coop/airprompt/releases/tag/v1.1.0
 [1.0.0]: https://github.com/farox-coop/airprompt/releases/tag/v1.0.0

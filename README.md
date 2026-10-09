@@ -85,7 +85,7 @@ Accept the self-signed certificate warning on the phone and voice dictation work
 curl -fsSL https://github.com/farox-coop/airprompt/releases/latest/download/install.sh | bash
 
 # Pin a specific release instead:
-curl -fsSL https://github.com/farox-coop/airprompt/releases/download/v1.0.0/install.sh | bash
+curl -fsSL https://github.com/farox-coop/airprompt/releases/download/v1.1.0/install.sh | bash
 
 # PowerShell (Windows — daemon needs tmux, so CLI install only)
 irm https://github.com/farox-coop/airprompt/releases/latest/download/install.ps1 | iex

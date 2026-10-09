@@ -28,7 +28,7 @@ function Install-AirPrompt {
   $ErrorActionPreference = "Stop"
   $Repo = "farox-coop/airprompt"
   # Pinned install tag (immutable). `make set-release-tag TAG=vX.Y.Z` bumps this.
-  $Version = "v1.0.0"
+  $Version = "v1.1.0"
 
   # Require Node ≥20.
   $node = Get-Command node -ErrorAction SilentlyContinue

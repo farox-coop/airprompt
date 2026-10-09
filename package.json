@@ -1,6 +1,6 @@
 {
   "name": "airprompt",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Remote control interface for IDE/CLI terminals with voice dictation",
   "main": "server.js",
   "private": true,
