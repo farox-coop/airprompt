@@ -216,6 +216,24 @@ reject_element() { # reject_element <exact argument> <label>
   fi
 }
 
+expect_env_cleared() { # expect_env_cleared <label>
+  # The `env` that starts the IDE's process, and whether it clears the
+  # environment first. Read from the raw log, never from `ide_elements`: that
+  # helper starts at the `_` marker, and this `env` belongs to the command tmux
+  # is handed, which is before the IDE's own argv.
+  if awk '
+      /^ARG[0-9]+=<env>$/ { want = 1; next }
+      /^ARG[0-9]+=</ { if (want && $0 ~ /^ARG[0-9]+=<-i>$/) found = 1; want = 0 }
+      /^END$/ { want = 0 }
+      END { exit(found ? 0 : 1) }
+    ' "$TMUX_LOG"; then
+    printf 'ok   — %s\n' "$1"
+  else
+    printf 'FAIL — %s\n  no `env -i` in the tmux command line: the tmux server environment would reach the session\n' "$1"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
 expect_marker() { # expect_marker <marker-dir> <name> <label>
   local got
   got="$(marker_name "$1")"
@@ -405,6 +423,17 @@ expect "new-session" "$(ide_verb)" "claude: that empty-args fallback is a fresh 
 #     forward. The counter proves the IDE really ran (an empty argv cannot).
 out="$(TMUX=/tmp/fake,1,0 launch_stdout --provider claude --binary "$FAKE_BIN/recorder-count")"
 expect_exact "argc=0" "$out" "inside tmux: a direct exec with nothing to forward runs the IDE bare"
+
+# 22. The IDE's environment is the caller's and nothing else. A tmux session
+#     starts as a copy of the SERVER's environment — whichever client happened to
+#     start that server — so any var in the server and not in this launch (a
+#     per-project git scope, a port, a Docker project name, a token meant for one
+#     session) would reach the IDE silently and outlive whatever set it. `env -i`
+#     is what stops that, and it is pinned on both paths that start a process.
+argv="$(launch --provider claude --binary /bin/echo --name dev-22)"
+expect_env_cleared "a new session clears the environment before starting the IDE"
+argv="$(FAKE_TMUX_DEAD=1 launch --provider claude --binary /bin/echo --resume airprompt-dev-22)"
+expect_env_cleared "a respawn clears the environment before starting the IDE"
 
 if [ "$FAILURES" -gt 0 ]; then
   printf '\n%s check(s) failed.\n' "$FAILURES"

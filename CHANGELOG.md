@@ -12,6 +12,7 @@ Release notes for AirPrompt, newest first. Each entry mirrors the [GitHub releas
 
 ### Fixes
 
+- **A stale tmux server environment no longer reaches a session.** tmux keeps one environment for the whole server — the one of whichever client happened to start it — and every session created afterwards starts from a copy of that, so a variable belonging to some other launch (a per-project git scope, a port, a Docker project name, a token meant for one session) reached the IDE anyway, silently, and outlived whatever set it. The launcher now passes the environment with `env -i`, so a session's environment is exactly the launching shell's, which is what forwarding the environment has to mean.
 - **The CLI commands work on macOS again.** On plain HTTP — the default — `airprompt on|off|name|restart|status` aborted under macOS `/bin/bash` 3.2 with `AP_CURL_OPTS[@]: unbound variable`, because an empty array counts as unset with `set -u` before bash 4.4. Every expansion is now guarded, and `airprompt-launch` too (an empty argument list aborted a launch outright).
 - **A bare `--continue` now means what the IDE means by it.** `airprompt-launch --continue` used to be swallowed and quietly start a _new_ session; it now reaches the IDE as the CLI's own "continue the most recent conversation" flag (and `--continue <session_id>` keeps using AirPrompt's resume path).
 

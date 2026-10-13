@@ -186,7 +186,16 @@ SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
 # ones listed in update-environment (DISPLAY, SSH_*, etc.). Inline env vars
 # like CLAUDE_CODE_EFFORT_LEVEL=high airprompt-launch would never reach the
 # real IDE process. We collect everything except AirPrompt-internal vars
-# (AIRPROMPT_*) and pass them explicitly via `env` in every tmux command.
+# (AIRPROMPT_*) and pass them explicitly via `env -i` in every tmux command.
+#
+# `-i` is load-bearing, not tidiness. A tmux session's environment STARTS as a
+# copy of the server's, and the server's is the environment of whichever client
+# happened to start it — so any var in that server and not in this launch (a
+# per-project git scope, a port, a Docker project name, a token that belongs to
+# one session) reaches the IDE anyway, silently, and outlives whatever set it.
+# Those stale values are worse than missing ones: nothing on screen says where
+# they came from. With `-i` the IDE's environment is exactly this caller's,
+# which is what "forward the environment" has to mean.
 declare -a FORWARD_ENV=()
 while IFS='=' read -r name value; do
   case "$name" in
@@ -299,7 +308,7 @@ launch_tmux_capture() {
     env_args+=("$var")
   done
   tmux new-session -d -s "$session" \
-    env AIRPROMPT_CAPTURE="$capture_file" "${env_args[@]}" \
+    env -i AIRPROMPT_CAPTURE="$capture_file" "${env_args[@]}" \
     bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ "$@"
   tmux set-option -t "$session" focus-events on
 }
@@ -346,7 +355,7 @@ if [ -n "$RESUME_SESSION" ]; then
     if echo "$dead" | tr -d '[:space:]' | grep -q '1'; then
       AIRPROMPT_CAPTURE=$(mktemp)
       tmux respawn-pane -k -t "$RESUME_SESSION" \
-        env AIRPROMPT_CAPTURE="$AIRPROMPT_CAPTURE" "${FORWARD_ENV[@]}" \
+        env -i AIRPROMPT_CAPTURE="$AIRPROMPT_CAPTURE" "${FORWARD_ENV[@]}" \
         bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ "$REAL_BINARY" ${args[@]+"${args[@]}"} 2>/dev/null || {
         # respawn failed — kill zombie session and create new one
         tmux kill-session -t "$RESUME_SESSION" 2>/dev/null || true
