@@ -120,6 +120,12 @@ const CodexProvider = {
 
   commandPrefix: '$',
 
+  // No session-name flag declared: `codex` was not verifiable on the machine
+  // this was written on, and forwarding a flag a CLI does not know would abort
+  // its start. Fill it in here once the CLI's flag is confirmed (see
+  // provider.js), and airprompt-launch starts forwarding `--name` to it.
+  sessionNameFlag: null,
+
   // ── Detection (shared — see provider.js) ───────────────────────────────
 
   detectMatch,

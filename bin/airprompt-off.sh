@@ -77,8 +77,10 @@ if [ -n "$MY_DIR" ] && [ -f "${MY_DIR}/tmux" ]; then
   TMUX_TO_KILL=$(head -c 128 "${MY_DIR}/tmux" 2>/dev/null | tr -d '\n\r' || true)
 fi
 if [ -n "$TMUX_TO_KILL" ] && echo "$TMUX_TO_KILL" | grep -q '^airprompt-'; then
-  # Only kill if mirror marker exists — real sessions named airprompt-* must survive
-  if [ -f "${MY_DIR}/mirror" ]; then
+  # Only kill what the daemon owns — a `mirror` (activate.js) or a `standin` (the
+  # register route stood the session up). Real sessions named airprompt-* must
+  # survive, and without this fallback a stand-in would outlive its marker.
+  if [ -f "${MY_DIR}/mirror" ] || [ -f "${MY_DIR}/standin" ]; then
     tmux kill-session -t "$TMUX_TO_KILL" 2>/dev/null || true
     sleep 0.2
   fi
@@ -87,7 +89,7 @@ fi
 # ── Unregister from daemon (force: true — user explicitly asked) ────
 UNREG_OK=false
 if [ -n "$SESSION_ID" ]; then
-  RESP=$(curl -s "${AP_CURL_OPTS[@]}" -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+  RESP=$(curl -s ${AP_CURL_OPTS[@]+"${AP_CURL_OPTS[@]}"} -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
     -H "Content-Type: application/json" \
     -d "{\"sessionId\":\"${SESSION_ID}\",\"force\":true}" 2>/dev/null || echo "")
   if echo "$RESP" | grep -q '"ok":true'; then
@@ -122,7 +124,7 @@ if _safe_rm_rf "$SESSIONS_DIR"; then
       echo "Cleaning up dead session dir: $DN" >&2
       SID=$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r' || true)
       [ -z "$SID" ] && SID=$(echo "$DN" | tr -cd 'a-zA-Z0-9_-')
-      curl -s "${AP_CURL_OPTS[@]}" -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
+      curl -s ${AP_CURL_OPTS[@]+"${AP_CURL_OPTS[@]}"} -X POST "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions/unregister" \
         -H "Content-Type: application/json" \
         -d "{\"sessionId\":\"${SID}\"}" > /dev/null 2>&1 || true
       rm -rf "$d"
@@ -133,7 +135,7 @@ fi
 # ── Stop daemon if no sessions remain ────────────────────────────────
 # Count with python3 if available, fallback to grep counting — safer
 # than defaulting to "0" which would kill daemon with active sessions.
-REMAINING=$(curl -s "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "")
+REMAINING=$(curl -s ${AP_CURL_OPTS[@]+"${AP_CURL_OPTS[@]}"} "${AP_PROTO}://localhost:${DAEMON_PORT}/api/sessions" 2>/dev/null || echo "")
 # If curl failed or returned empty, default to "unreachable" — never
 # kill daemon on a failed fetch.  Empty "[]" = truly zero sessions.
 if [ -z "$REMAINING" ]; then

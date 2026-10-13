@@ -52,7 +52,7 @@ Tests are isolated from any real daemon. Unit tests use `createApp()` (a fresh s
 Providers live in `src/providers/`. The registry auto-discovers every `*.js` file there (skipping `provider.js` and `registry.js`), so adding a provider is one file — no edits to core code.
 
 1. Read the `Provider` contract in `src/providers/provider.js` (JSDoc typedefs + shared path utilities).
-2. Create `src/providers/<name>.js` implementing the contract: `id`, `label`, `mech`, `detect`, `profile`, `hookEvents`, `commandPrefix`, the `configDir()`/`sessionsDir()`/`hooksDir()`/… path resolvers, `detectMatch()`, `parseHookStdin()`/`formatHookOutput()`, `buildHookEntry()`, `install()`/`uninstall()`, and the `get*Files()` manifests.
+2. Create `src/providers/<name>.js` implementing the contract: `id`, `label`, `mech`, `detect`, `profile`, `hookEvents`, `commandPrefix`, `sessionNameFlag` (the CLI's own session-name flag, `null` when it has none), the `configDir()`/`sessionsDir()`/`hooksDir()`/… path resolvers, `detectMatch()`, `parseHookStdin()`/`formatHookOutput()`, `buildHookEntry()`, `install()`/`uninstall()`, and the `get*Files()` manifests.
 3. `test/unit/provider-interface.test.js` auto-discovers your provider and validates every required property and method — no new test file needed. Run `make test-unit`.
 4. Keep core/agnostic code free of provider names. `make agnostic-check` enforces this: no hardcoded `claude`, `codex`, `cursor`, etc. outside provider adapters, IDE-specific plugin dirs, and `docs/`. If your adapter needs provider-specific artifacts (e.g. `.codex-plugin/`), add that directory to the exemption list in `bin/airprompt-agnostic-check.sh`.
 

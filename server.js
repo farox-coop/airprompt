@@ -8,7 +8,15 @@ const path = require('path');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 const qrcode = require('qrcode-terminal');
-const { tmuxExists, sessionToJSON, getSessionsDir, safeRmSync } = require('./src/utils');
+const {
+  tmuxExists,
+  sessionToJSON,
+  getSessionsDir,
+  safeRmSync,
+  ownerMarkerDir,
+  markerSafeName,
+  reapOwnedStandIn,
+} = require('./src/utils');
 const { runStaleSweep } = require('./src/sweep');
 const auth = require('./src/auth');
 const uploads = require('./src/uploads');
@@ -117,6 +125,30 @@ function killTmuxSession(sessionName) {
   }
 }
 
+// Marks a tmux session the daemon stood up itself as a stand-in for a session
+// that registered with no live tmux. The `tmux`/`session` files go in beside the
+// marker for the same reason activate.js writes them: recovery reads them, and a
+// dir without `tmux` is treated as stale and removed at startup — which would
+// drop the ownership the marker exists to record.
+function standInDir(providerId, tmuxSession) {
+  return path.join(getSessionsDir(), `${providerId || 'unknown'}-${markerSafeName(tmuxSession)}`);
+}
+
+function markStandIn(providerId, tmuxSession, sessionId) {
+  try {
+    const dir = standInDir(providerId, tmuxSession);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tmux'), tmuxSession + '\n');
+    fs.writeFileSync(path.join(dir, 'provider'), (providerId || 'unknown') + '\n');
+    if (sessionId) fs.writeFileSync(path.join(dir, 'session'), sessionId + '\n');
+    fs.writeFileSync(path.join(dir, 'standin'), '');
+  } catch (_) {
+    /* best-effort: an unwritten marker means unregister will not recognise the
+       stand-in, and nothing else does either — the tmux session stays until it
+       is removed by hand (the repo has no other reaper for unowned sessions) */
+  }
+}
+
 // Send a message to every authenticated WS client only (no pre-auth leak).
 function broadcastAuthed(wss, msg) {
   wss.clients.forEach((client) => {
@@ -148,6 +180,10 @@ async function killSessionById(sessionId, wss) {
   }
   if (!tmuxExists(tmux)) {
     sessions.delete(sessionId);
+    // The session is gone, so take the stand-in marker with it — a marker left
+    // behind names a tmux *session*, and a later session of that name would be
+    // killed by a force unregister that found it.
+    reapOwnedStandIn(tmux, entry.providerId);
     broadcastSessionList(wss);
     return { ok: true, killed: false, reason: 'already dead' };
   }
@@ -177,7 +213,10 @@ async function killSessionById(sessionId, wss) {
     died = true;
   }
 
-  if (died) sessions.delete(sessionId);
+  if (died) {
+    sessions.delete(sessionId);
+    reapOwnedStandIn(tmux, entry.providerId);
+  }
   broadcastSessionList(wss);
   return { ok: true, killed: died, graceful: wasGraceful };
 }
@@ -430,6 +469,11 @@ function createApp() {
         if (!createTmuxSession(actualTmuxSession, cwd)) {
           return res.status(500).json({ error: 'Failed to create tmux session' });
         }
+        // Marked only when the daemon stood it up just now. A session that was
+        // already running under this name is not ours: `airprompt-launch --name
+        // <sessionId>` puts a user's IDE there, and adopting it would let a
+        // later unregister kill that session.
+        markStandIn(providerId, actualTmuxSession, sessionId);
       }
     }
 
@@ -498,8 +542,9 @@ function createApp() {
     }
     sessions.delete(sessionId);
     log('info', 'session unregistered', { sessionId, tmuxSession: entry.tmuxSession });
-    // Clean airprompt- prefixed sessions when orphaned — but ONLY if
-    // a mirror marker exists (created by activate.js for IDE outside tmux).
+    // Clean airprompt- prefixed sessions when orphaned — if the daemon stood this
+    // one up itself (a stand-in for a hook that registered with no live tmux), or
+    // a mirror marker exists (created by activate.js for an IDE outside tmux).
     // Real sessions named airprompt-* (on.sh without CREATED_SESSION) must survive.
     if (entry.tmuxSession && entry.tmuxSession.startsWith('airprompt-')) {
       let shared = false;
@@ -510,22 +555,15 @@ function createApp() {
         }
       }
       if (!shared) {
-        // Check mirror marker before killing
-        const sessionsDir = getSessionsDir();
-        const safeName =
-          entry.tmuxSession.replace(/[^a-zA-Z0-9_.-]/g, '') ||
-          entry.tmuxSession.replace(/[^a-zA-Z0-9]/g, '') ||
-          'unknown';
-        const mirrorFile = path.join(
-          sessionsDir,
-          `${entry.providerId || 'unknown'}-${safeName}`,
-          'mirror'
-        );
-        let isMirror = false;
-        try {
-          isMirror = fs.existsSync(mirrorFile);
-        } catch (_) {}
-        if (isMirror) killTmuxSession(entry.tmuxSession);
+        // Kill it only when the daemon owns it: a stand-in it stood up itself
+        // (`standin` marker), or a mirror (§ activate.js). Markers, not memory —
+        // ownership has to outlive a restart and be visible to every
+        // registration that shares this tmux session.
+        const owner = ownerMarkerDir(entry.tmuxSession, entry.providerId);
+        if (owner) {
+          killTmuxSession(entry.tmuxSession);
+          reapOwnedStandIn(entry.tmuxSession, entry.providerId);
+        }
       }
     }
     // Non-airprompt tmux sessions belong to real IDE instances — never kill them

@@ -118,7 +118,7 @@ node bin/install.js
 - `~/.airprompt/state/` — daemon.json, TLS cert/key, project names
 - `~/.airprompt/sessions/` — per-session markers (url, name)
 - `~/bin/airprompt` — symlink to the dispatcher (add `~/bin` to your PATH)
-- `~/bin/airprompt-{codex,cursor,windsurf}` — per-provider launch wrappers
+- `~/bin/airprompt-{claude,codex,cursor,windsurf}` — per-provider launch wrappers
 - Per-provider config: `~/.claude/hooks/` + `settings.json`; `~/.codex/hooks.json` + `config.toml` + `skills/`; `~/.cursor/hooks.json` + `commands/` + `rules/`; `~/.codeium/windsurf/hooks.json` + `skills/` + `rules/`
 - `/tmp/airprompt-server.pid` — daemon PID file
 - `/tmp/airprompt.log` — daemon log
@@ -135,18 +135,19 @@ airprompt clean
 
 Environment variables (all optional):
 
-| Variable                     | Default                     | Purpose                                                              |
-| ---------------------------- | --------------------------- | -------------------------------------------------------------------- |
-| `AIRPROMPT_PORT`             | `3210`                      | Daemon port                                                          |
-| `AIRPROMPT_STATE_DIR`        | `~/.airprompt/state`        | daemon.json, TLS cert/key, project names                             |
-| `AIRPROMPT_SESSIONS_DIR`     | `~/.airprompt/sessions`     | Per-session markers                                                  |
-| `AIRPROMPT_UPLOADS_DIR`      | `~/.airprompt/uploads`      | Files attached from the phone (must contain `airprompt` in its path) |
-| `AIRPROMPT_UPLOAD_MAX_BYTES` | `26214400` (25 MB)          | Per-file upload cap                                                  |
-| `AIRPROMPT_UPLOAD_TTL_MS`    | `86400000` (24 h)           | Backstop lifetime for an upload never released by a prompt           |
-| `AIRPROMPT_UPLOAD_GRACE_MS`  | `600000` (10 min)           | Grace window between a prompt submit and the file being reaped       |
-| `AIRPROMPT_PID_FILE`         | `/tmp/airprompt-server.pid` | Daemon PID file                                                      |
-| `AIRPROMPT_NO_TLS`           | unset                       | `1` disables HTTPS (breaks pairing + voice dictation)                |
-| `AIRPROMPT_DEBUG`            | unset                       | `1` enables verbose logging                                          |
+| Variable                     | Default                     | Purpose                                                               |
+| ---------------------------- | --------------------------- | --------------------------------------------------------------------- |
+| `AIRPROMPT_PORT`             | `3210`                      | Daemon port                                                           |
+| `AIRPROMPT_STATE_DIR`        | `~/.airprompt/state`        | daemon.json, TLS cert/key, project names                              |
+| `AIRPROMPT_SESSIONS_DIR`     | `~/.airprompt/sessions`     | Per-session markers                                                   |
+| `AIRPROMPT_UPLOADS_DIR`      | `~/.airprompt/uploads`      | Files attached from the phone (must contain `airprompt` in its path)  |
+| `AIRPROMPT_UPLOAD_MAX_BYTES` | `26214400` (25 MB)          | Per-file upload cap                                                   |
+| `AIRPROMPT_UPLOAD_TTL_MS`    | `86400000` (24 h)           | Backstop lifetime for an upload never released by a prompt            |
+| `AIRPROMPT_UPLOAD_GRACE_MS`  | `600000` (10 min)           | Grace window between a prompt submit and the file being reaped        |
+| `AIRPROMPT_PID_FILE`         | `/tmp/airprompt-server.pid` | Daemon PID file                                                       |
+| `AIRPROMPT_NO_TLS`           | unset                       | `1` disables HTTPS (breaks pairing + voice dictation)                 |
+| `AIRPROMPT_IDE_NAME_FLAG`    | provider's own              | Flag `airprompt-launch --name` forwards to the IDE; empty disables it |
+| `AIRPROMPT_DEBUG`            | unset                       | `1` enables verbose logging                                           |
 
 ### TLS certificate
 
@@ -296,7 +297,7 @@ AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter 
 - `/airprompt update [<tag>]` — Update install to a release tag (or latest main)
 - `/airprompt help` — Print usage
 
-**Manual launch / resume:** `airprompt-launch --provider claude` starts Claude inside a managed tmux session so AirPrompt can mirror it. Resume a previous session with `airprompt-launch --resume <session_id>` or `airprompt-launch --continue`. Handy in VS Code where there's no `$TMUX` — the launch script creates the tmux session itself.
+**Manual launch / resume:** `airprompt-launch --provider claude` starts Claude inside a managed tmux session so AirPrompt can mirror it. Resume a previous session with `airprompt-launch --resume <session_id>` or `airprompt-launch --continue <session_id>`; a bare `airprompt-launch --continue` is handed to the IDE as its own _continue the last conversation_ flag. Add `--name <name>` to name that session — the AirPrompt marker, the tmux session on a fresh launch, and (where the provider declares a name flag, e.g. Claude Code's `-n`) the CLI's own session name at launch. Handy in VS Code where there's no `$TMUX` — the launch script creates the tmux session itself.
 
 **Adding a new provider:** create one provider file + a single generic hook wrapper (provider id passed via argv). Provider auto-discovered by registry. Zero changes to core.
 

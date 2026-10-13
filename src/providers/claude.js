@@ -278,6 +278,13 @@ const ClaudeProvider = {
 
   commandPrefix: '/',
 
+  // The CLI's own name flag (`claude -n, --name <name>`). airprompt-launch
+  // forwards the name it was given so the tmux session, the AirPrompt marker
+  // and the surfaces Claude Code shows that name on — the prompt box, the
+  // `/resume` picker and the terminal title — all carry the same name. `null`
+  // when the CLI has no such flag.
+  sessionNameFlag: '-n',
+
   // ── Detection (shared — see provider.js) ────────────────────────────────
 
   detectMatch,

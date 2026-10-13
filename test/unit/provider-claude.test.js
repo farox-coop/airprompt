@@ -428,6 +428,7 @@ test('ClaudeProvider — has all required Provider interface properties', () => 
     'profile',
     'hookEvents',
     'commandPrefix',
+    'sessionNameFlag',
     'detectMatch',
     'parseHookStdin',
     'formatHookOutput',

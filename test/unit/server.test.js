@@ -116,12 +116,19 @@ function get(path) {
 }
 
 function createTmux(name) {
-  if (!TMUX_AVAILABLE) return;
-  try {
-    execSync(`tmux new-session -d -s "${name}" 2>/dev/null`);
-  } catch (e) {
-    /* ok */
+  if (!TMUX_AVAILABLE) return false;
+  // Retry, and report the outcome: `tmux new-session` can fail under load, and a
+  // silently absent session turns a later assertion into a misleading failure
+  // (the deactivate tests read "the session is alive" as their premise).
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      execSync(`tmux new-session -d -s "${name}" 2>/dev/null`);
+    } catch (e) {
+      /* retry below */
+    }
+    if (tmuxExists(name)) return true;
   }
+  return false;
 }
 
 function killTmux(name) {
@@ -133,7 +140,16 @@ function killTmux(name) {
   }
 }
 
+function tmuxExists(name) {
+  if (!TMUX_AVAILABLE) return false;
+  return spawnSync('tmux', ['has-session', '-t', name], { timeout: 2000 }).status === 0;
+}
+
 // ── Setup / Teardown ────────────────────────────────────────────────
+
+// Temp root for the hook-driven tests (markers, fixtures). Declared before the
+// hooks below so `before()` can point the server's sessions dir at it too.
+const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-deactivate-test-'));
 
 let TEST_STATE_DIR;
 let TEST_UPLOADS_DIR;
@@ -209,6 +225,10 @@ before(async () => {
   TEST_UPLOADS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-uploads-test-'));
   process.env.AIRPROMPT_STATE_DIR = TEST_STATE_DIR;
   process.env.AIRPROMPT_UPLOADS_DIR = TEST_UPLOADS_DIR;
+  // The server writes session markers (mirror/standin) through getSessionsDir(),
+  // so it needs the same temp root the hooks below already use — otherwise a
+  // test run litters the real ~/.airprompt/sessions.
+  process.env.AIRPROMPT_SESSIONS_DIR = path.join(TEMP_DIR, '.airprompt', 'sessions');
   process.env.AIRPROMPT_UPLOAD_MAX_BYTES = '4096';
   process.env.AIRPROMPT_PAIR_POLL_MS = '100'; // fast pairing-resolution poll in tests
   const { httpServer, wss: wssRef } = createApp();
@@ -230,6 +250,7 @@ after(() => {
   server.close();
   delete process.env.AIRPROMPT_STATE_DIR;
   delete process.env.AIRPROMPT_UPLOADS_DIR;
+  delete process.env.AIRPROMPT_SESSIONS_DIR;
   delete process.env.AIRPROMPT_UPLOAD_MAX_BYTES;
   delete process.env.AIRPROMPT_PAIR_POLL_MS;
   try {
@@ -237,6 +258,11 @@ after(() => {
   } catch (_) {}
   try {
     fs.rmSync(TEST_UPLOADS_DIR, { recursive: true, force: true });
+  } catch (_) {}
+  // The suite's own temp root (markers, hook fixtures) — one dir otherwise left
+  // behind in /tmp per run.
+  try {
+    fs.rmSync(TEMP_DIR, { recursive: true, force: true });
   } catch (_) {}
 });
 
@@ -1149,14 +1175,6 @@ test('input queue cleared on WS close', { skip: !TMUX_AVAILABLE }, async () => {
 
 // ── Deactivate hook guard tests ─────────────────────────────────────
 
-const TEMP_DIR = (() => {
-  const fs = require('fs');
-  const os = require('os');
-  const path = require('path');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-deactivate-test-'));
-  return dir;
-})();
-
 const DEACTIVATE_SCRIPT = require('path').join(
   __dirname,
   '..',
@@ -1229,7 +1247,10 @@ test(
   async () => {
     // Create a real tmux session that the deactivate guard will detect as alive
     const aliveSession = 'airprompt-guard-alive';
-    createTmux(aliveSession);
+    // A stand-in left by an older run would make the register below take the
+    // "already alive" branch, leaving the daemon nothing to reap — start clean.
+    killTmux('airprompt-test-guard-session');
+    assert.ok(createTmux(aliveSession), 'the alive tmux session must come up for this test');
     try {
       // Set up per-session dir as if /airprompt on was run from that session
       const fs = require('fs');
@@ -1259,10 +1280,22 @@ test(
       // Per-session dir must survive (guard prevented cleanup)
       assert.strictEqual(fs.existsSync(path.join(myDir, 'active')), true);
 
-      // Clean up
-      sessions.delete('test-guard-session');
+      // Clean up — through the API, so the daemon also takes down the
+      // `airprompt-test-guard-session` stand-in the register above created.
+      await post('/api/sessions/unregister', { sessionId: 'test-guard-session', force: true });
+      assert.strictEqual(
+        tmuxExists('airprompt-test-guard-session'),
+        false,
+        'unregister must reap the stand-in the daemon created'
+      );
     } finally {
+      // Whatever failed above, the stand-in must not outlive the test — the
+      // unregister is here rather than in the body for exactly that reason.
+      if (tmuxExists('airprompt-test-guard-session')) {
+        await post('/api/sessions/unregister', { sessionId: 'test-guard-session', force: true });
+      }
       killTmux(aliveSession);
+      killTmux('airprompt-test-guard-session');
       cleanupMarkers();
     }
   }
@@ -1637,7 +1670,7 @@ test(
   { skip: !TMUX_AVAILABLE },
   async () => {
     const mirrorSession = 'airprompt-deact-mirror-test';
-    createTmux(mirrorSession);
+    assert.ok(createTmux(mirrorSession), 'the mirror tmux session must come up for this test');
     try {
       const fs = require('fs');
       const path = require('path');
@@ -1682,7 +1715,11 @@ test(
   { skip: !TMUX_AVAILABLE },
   async () => {
     const realSession = 'airprompt-deact-real-test';
-    createTmux(realSession);
+    // A stand-in left by an older run of this suite would make the register below
+    // take the "already alive" branch, so no stand-in is created and the daemon
+    // has nothing to reap — start from a clean slate.
+    killTmux('airprompt-test-real-alive');
+    assert.ok(createTmux(realSession), 'the alive tmux session must come up for this test');
     try {
       const fs = require('fs');
       const path = require('path');
@@ -1715,7 +1752,15 @@ test(
       assert.strictEqual(sessions.has('test-real-alive'), true);
     } finally {
       killTmux(realSession);
-      sessions.delete('test-real-alive');
+      // Through the API, so the daemon also takes down the
+      // `airprompt-test-real-alive` stand-in the register above created.
+      await post('/api/sessions/unregister', { sessionId: 'test-real-alive', force: true });
+      assert.strictEqual(
+        tmuxExists('airprompt-test-real-alive'),
+        false,
+        'unregister must reap the stand-in the daemon created'
+      );
+      killTmux('airprompt-test-real-alive');
       cleanupMarkers();
     }
   }
@@ -1724,17 +1769,43 @@ test(
 // ── lastActivity tracking ─────────────────────────────────────────────
 
 test('session registration sets lastActivity', async () => {
-  await post('/api/sessions/register', {
-    sessionId: 'test-activity',
-    cwd: '/tmp',
-    providerId: TEST_PROVIDER,
-  });
-  assert.strictEqual(sessions.has('test-activity'), true);
-  assert.ok(
-    typeof sessions.get('test-activity').lastActivity === 'number',
-    'lastActivity must be a timestamp'
-  );
-  sessions.delete('test-activity');
+  // A stand-in left by an older run would make the register below take the
+  // "already alive" branch, leaving the daemon nothing to reap — start clean.
+  killTmux('airprompt-test-activity');
+  try {
+    await post('/api/sessions/register', {
+      sessionId: 'test-activity',
+      cwd: '/tmp',
+      providerId: TEST_PROVIDER,
+    });
+    assert.strictEqual(sessions.has('test-activity'), true);
+    assert.ok(
+      typeof sessions.get('test-activity').lastActivity === 'number',
+      'lastActivity must be a timestamp'
+    );
+    // Unregister through the API, not the map: the register above made the daemon
+    // stand up `airprompt-test-activity` (no live tmux was given), and only
+    // unregister takes it back down.
+    await post('/api/sessions/unregister', { sessionId: 'test-activity', force: true });
+    assert.strictEqual(
+      tmuxExists('airprompt-test-activity'),
+      false,
+      'unregister must reap the stand-in the daemon created'
+    );
+    assert.strictEqual(
+      fs.existsSync(
+        path.join(process.env.AIRPROMPT_SESSIONS_DIR, `${TEST_PROVIDER}-airprompt-test-activity`)
+      ),
+      false,
+      'the reaped stand-in must not leave its marker dir behind'
+    );
+  } finally {
+    // Whatever failed above, the stand-in must not outlive the test.
+    if (tmuxExists('airprompt-test-activity')) {
+      await post('/api/sessions/unregister', { sessionId: 'test-activity', force: true });
+    }
+    killTmux('airprompt-test-activity');
+  }
 });
 
 // ── Orphan killer (stale sweep) ──────────────────────────────────────
@@ -1757,6 +1828,367 @@ test('stale sweep removes session with dead tmux', () => {
     false,
     'dead-tmux session must be removed by sweep'
   );
+});
+
+test(
+  'stale sweep reaps an owned stand-in and leaves an unowned airprompt-* session alone',
+  { skip: !TMUX_AVAILABLE },
+  () => {
+    // The daemon only owns a session it stood up itself (a `standin` marker);
+    // everything else named airprompt-* — a launcher session, a user's — must live.
+    const sessionsDir = process.env.AIRPROMPT_SESSIONS_DIR;
+    const ownedName = 'airprompt-test-sweep-owned';
+    const plainName = 'airprompt-test-sweep-plain';
+    const ownedDir = path.join(sessionsDir, `${TEST_PROVIDER}-${ownedName}`);
+    try {
+      createTmux(ownedName);
+      createTmux(plainName);
+      fs.mkdirSync(ownedDir, { recursive: true });
+      // The `tmux` file is what identifies the dir as describing THIS session —
+      // markStandIn writes it, and ownership resolution validates against it.
+      // `url`/`active` are there too: activate.js writes into the same dir, and a
+      // cleanup that stopped at the marker files would leave it behind.
+      fs.writeFileSync(path.join(ownedDir, 'tmux'), ownedName + '\n');
+      fs.writeFileSync(path.join(ownedDir, 'standin'), '');
+      fs.writeFileSync(path.join(ownedDir, 'url'), 'https://127.0.0.1:3210\n');
+      fs.writeFileSync(path.join(ownedDir, 'active'), '');
+      const map = new Map([
+        [
+          'sweep-owned',
+          {
+            sessionId: 'sweep-owned',
+            cwd: '/tmp',
+            name: null,
+            tmuxSession: ownedName,
+            providerId: TEST_PROVIDER,
+            createdAt: new Date().toISOString(),
+            lastActivity: 0,
+          },
+        ],
+        [
+          'sweep-plain',
+          {
+            sessionId: 'sweep-plain',
+            cwd: '/tmp',
+            name: null,
+            tmuxSession: plainName,
+            providerId: TEST_PROVIDER,
+            createdAt: new Date().toISOString(),
+            lastActivity: 0,
+          },
+        ],
+      ]);
+      runStaleSweep(map, { orphanGraceMs: 1, now: Date.now() + 60000 });
+      assert.strictEqual(map.has('sweep-owned'), false, 'the owned stand-in must be reaped');
+      assert.strictEqual(
+        tmuxExists(ownedName),
+        false,
+        'the owned stand-in tmux session must be killed'
+      );
+      // The marker is the daemon's only ownership proof: one left behind would
+      // vouch for the tmux *name*, so a later session of that name (the user's
+      // own, say) would be killed by a force unregister that found it.
+      assert.strictEqual(
+        fs.existsSync(ownedDir),
+        false,
+        'the reaped stand-in must not leave its marker dir to vouch for the name'
+      );
+      assert.strictEqual(
+        tmuxExists(plainName),
+        true,
+        'an airprompt-* session the daemon does not own must survive the sweep'
+      );
+    } finally {
+      killTmux(ownedName);
+      killTmux(plainName);
+      try {
+        fs.rmSync(ownedDir, { recursive: true, force: true });
+      } catch (_) {}
+    }
+  }
+);
+
+test(
+  'stale sweep reaps an owned session shared by an equally idle sibling',
+  { skip: !TMUX_AVAILABLE },
+  () => {
+    // Two providers on one tmux session is supported, and the sweep must leave a
+    // session a *live* sibling is using — but two entries that are both long idle
+    // are one orphan, so the pair is reaped instead of leaking forever.
+    const sessionsDir = process.env.AIRPROMPT_SESSIONS_DIR;
+    const name = 'airprompt-test-sweep-shared';
+    const dir = path.join(sessionsDir, `${TEST_PROVIDER}-${name}`);
+    const entry = (id, providerId, ageMs) => [
+      id,
+      {
+        sessionId: id,
+        cwd: '/tmp',
+        name: null,
+        tmuxSession: name,
+        providerId,
+        createdAt: new Date().toISOString(),
+        lastActivity: Date.now() - ageMs,
+      },
+    ];
+    try {
+      createTmux(name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'tmux'), name + '\n');
+      fs.writeFileSync(path.join(dir, 'mirror'), '');
+
+      // A live sibling keeps it alive.
+      const withLive = new Map([
+        entry('live-a', TEST_PROVIDER, 9e6),
+        entry('live-b', 'other-prov', 1000),
+      ]);
+      runStaleSweep(withLive, { orphanGraceMs: 60_000, now: Date.now() });
+      assert.strictEqual(
+        tmuxExists(name),
+        true,
+        'a session a live sibling uses must survive the sweep'
+      );
+
+      // Both idle → one orphan → reaped.
+      const bothIdle = new Map([
+        entry('idle-a', TEST_PROVIDER, 9e6),
+        entry('idle-b', 'other-prov', 9e6),
+      ]);
+      runStaleSweep(bothIdle, { orphanGraceMs: 60_000, now: Date.now() });
+      assert.strictEqual(
+        tmuxExists(name),
+        false,
+        'an equally idle pair must be reaped, not leaked'
+      );
+    } finally {
+      killTmux(name);
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch (_) {}
+    }
+  }
+);
+
+test(
+  'stale sweep reaps an owned stand-in whose tmux is already gone',
+  { skip: !TMUX_AVAILABLE },
+  () => {
+    // The dead-tmux branch removes the entry on its own path, so it has to clean
+    // the marker dir too — a marker left behind vouches for the tmux *name*.
+    const sessionsDir = process.env.AIRPROMPT_SESSIONS_DIR;
+    const name = 'airprompt-test-sweep-deadtmux';
+    const dir = path.join(sessionsDir, `${TEST_PROVIDER}-${name}`);
+    try {
+      killTmux(name); // ensure it does not exist
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'tmux'), name + '\n');
+      fs.writeFileSync(path.join(dir, 'standin'), '');
+      const map = new Map([
+        [
+          'deadtmux',
+          {
+            sessionId: 'deadtmux',
+            cwd: '/tmp',
+            name: null,
+            tmuxSession: name,
+            providerId: TEST_PROVIDER,
+            createdAt: new Date().toISOString(),
+            lastActivity: 0,
+          },
+        ],
+      ]);
+      runStaleSweep(map, { orphanGraceMs: 1, now: Date.now() + 60000 });
+      assert.strictEqual(map.size, 0, 'the dead-tmux entry must be removed');
+      assert.strictEqual(
+        fs.existsSync(dir),
+        false,
+        'its stand-in marker dir must not survive the sweep'
+      );
+    } finally {
+      killTmux(name);
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch (_) {}
+    }
+  }
+);
+
+test(
+  'unregister leaves a session the daemon did not create alone',
+  { skip: !TMUX_AVAILABLE },
+  async () => {
+    // The daemon only owns a tmux session it stood up itself: when one is already
+    // running under the derived name (a user's `airprompt-launch --name <id>`), the
+    // register must not adopt it and a force unregister must not kill it.
+    const sessionsDir = process.env.AIRPROMPT_SESSIONS_DIR;
+    const name = 'airprompt-test-adopt';
+    const dir = path.join(sessionsDir, `${TEST_PROVIDER}-${name}`);
+    try {
+      killTmux(name);
+      assert.ok(createTmux(name), 'the pre-existing session must come up');
+      // A user launch writes tmux/provider/name and no marker of any kind.
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'tmux'), name + '\n');
+      fs.writeFileSync(path.join(dir, 'provider'), TEST_PROVIDER + '\n');
+      const reg = await post('/api/sessions/register', {
+        sessionId: 'test-adopt',
+        cwd: '/tmp',
+        providerId: TEST_PROVIDER,
+      });
+      assert.ok(reg && reg.body && reg.body.ok, 'register must succeed');
+      assert.strictEqual(
+        fs.existsSync(path.join(dir, 'standin')),
+        false,
+        'a session that was already running must not be adopted'
+      );
+      await post('/api/sessions/unregister', { sessionId: 'test-adopt', force: true });
+      assert.strictEqual(tmuxExists(name), true, "the user's session must survive unregister");
+    } finally {
+      killTmux(name);
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch (_) {}
+    }
+  }
+);
+
+test('unregister keeps a tmux session two providers share', { skip: !TMUX_AVAILABLE }, async () => {
+  const sessionsDir = process.env.AIRPROMPT_SESSIONS_DIR;
+  const name = 'airprompt-test-shared-unreg';
+  const dir = path.join(sessionsDir, `${TEST_PROVIDER}-${name}`);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tmux'), name + '\n');
+    fs.writeFileSync(path.join(dir, 'standin'), '');
+    createTmux(name);
+    await post('/api/sessions/register', {
+      sessionId: 'shared-a',
+      cwd: '/tmp',
+      tmuxSession: name,
+      providerId: TEST_PROVIDER,
+    });
+    await post('/api/sessions/register', {
+      sessionId: 'shared-b',
+      cwd: '/tmp',
+      tmuxSession: name,
+      providerId: 'other-prov',
+    });
+    await post('/api/sessions/unregister', { sessionId: 'shared-a', force: true });
+    assert.strictEqual(tmuxExists(name), true, 'the sibling still uses this tmux session');
+    await post('/api/sessions/unregister', { sessionId: 'shared-b', force: true });
+    assert.strictEqual(tmuxExists(name), false, 'the last user of it reaps it');
+  } finally {
+    killTmux(name);
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch (_) {}
+  }
+});
+
+test('ownerMarkerDir ignores a marker dir that names another tmux session', () => {
+  // The dir-name suffix alone must never vouch for a session: the dir's own
+  // `tmux` file decides, or `airprompt--airprompt-a` would match `airprompt-a`.
+  const { ownerMarkerDir } = require('../../src/utils');
+  const sessionsDir = process.env.AIRPROMPT_SESSIONS_DIR;
+  const foreign = path.join(sessionsDir, `${TEST_PROVIDER}-airprompt-test-victim`);
+  try {
+    fs.mkdirSync(foreign, { recursive: true });
+    fs.writeFileSync(path.join(foreign, 'tmux'), 'airprompt-test-something-else\n');
+    fs.writeFileSync(path.join(foreign, 'standin'), '');
+    assert.strictEqual(
+      ownerMarkerDir('airprompt-test-victim', TEST_PROVIDER, sessionsDir),
+      null,
+      'a dir naming a different session must not be adopted'
+    );
+    fs.writeFileSync(path.join(foreign, 'tmux'), 'airprompt-test-victim\n');
+    const owner = ownerMarkerDir('airprompt-test-victim', TEST_PROVIDER, sessionsDir);
+    assert.ok(owner && owner.kind === 'standin', 'the matching dir is recognised');
+  } finally {
+    try {
+      fs.rmSync(foreign, { recursive: true, force: true });
+    } catch (_) {}
+  }
+});
+
+test('stale sweep keeps a mirror dir but reaps a stand-in dir', { skip: !TMUX_AVAILABLE }, () => {
+  const sessionsDir = process.env.AIRPROMPT_SESSIONS_DIR;
+  const standinName = 'airprompt-test-sweep-kind-standin';
+  const mirrorName = 'airprompt-test-sweep-kind-mirror';
+  const standinDir = path.join(sessionsDir, `${TEST_PROVIDER}-${standinName}`);
+  const mirrorDir = path.join(sessionsDir, `${TEST_PROVIDER}-${mirrorName}`);
+  try {
+    for (const [dir, tmuxName, marker] of [
+      [standinDir, standinName, 'standin'],
+      [mirrorDir, mirrorName, 'mirror'],
+    ]) {
+      killTmux(tmuxName);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'tmux'), tmuxName + '\n');
+      fs.writeFileSync(path.join(dir, marker), '');
+    }
+    const map = new Map(
+      [
+        ['kind-standin', standinName],
+        ['kind-mirror', mirrorName],
+      ].map(([id, tmuxSession]) => [
+        id,
+        {
+          sessionId: id,
+          cwd: '/tmp',
+          name: null,
+          tmuxSession,
+          providerId: TEST_PROVIDER,
+          createdAt: new Date().toISOString(),
+          lastActivity: 0,
+        },
+      ])
+    );
+    runStaleSweep(map, { orphanGraceMs: 1, now: Date.now() + 60000 });
+    assert.strictEqual(fs.existsSync(standinDir), false, 'the stand-in dir belongs to the daemon');
+    assert.strictEqual(
+      fs.existsSync(mirrorDir),
+      true,
+      'a mirror dir belongs to activate.js and must survive'
+    );
+  } finally {
+    killTmux(standinName);
+    killTmux(mirrorName);
+    for (const dir of [standinDir, mirrorDir]) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch (_) {}
+    }
+  }
+});
+
+test('stale sweep refuses to kill when it cannot confirm clients', () => {
+  // "Could not ask tmux" must never read as "no clients attached" — the same
+  // discipline recoverSessionsFromDisk uses for its dead-session check.
+  const map = new Map([
+    [
+      'unconfirmed',
+      {
+        sessionId: 'unconfirmed',
+        cwd: '/tmp',
+        name: null,
+        tmuxSession: 'airprompt-test-unconfirmed',
+        providerId: TEST_PROVIDER,
+        createdAt: new Date().toISOString(),
+        lastActivity: 0,
+      },
+    ],
+  ]);
+  const stubbed = require('child_process').spawnSync;
+  const removed = runStaleSweep(map, {
+    orphanGraceMs: 1,
+    now: Date.now() + 60000,
+    spawnSync: (cmd, args) => {
+      if (args && args[0] === 'has-session') return { status: 0, stdout: '' };
+      return { status: null, stdout: null, error: new Error('tmux unavailable') };
+    },
+  });
+  assert.strictEqual(typeof stubbed, 'function');
+  assert.strictEqual(removed, 0, 'an unconfirmable client probe must not authorise a kill');
+  assert.strictEqual(map.has('unconfirmed'), true, 'the entry stays');
 });
 
 test('stale sweep does not kill session whose tmux is alive', { skip: !TMUX_AVAILABLE }, () => {
@@ -1790,18 +2222,50 @@ test('stale sweep does not kill session whose tmux is alive', { skip: !TMUX_AVAI
 
 // ── Daemon-core behavioral tests: register, unregister mirror-kill ───
 
-test('register accepts dot/space in tmuxSession', async () => {
-  const resp = await post('/api/sessions/register', {
-    sessionId: 'test-dots-' + Date.now(),
-    cwd: '/tmp',
-    tmuxSession: 'my.session with spaces',
-    providerId: TEST_PROVIDER,
-  });
-  // Server accepts dots/spaces in tmuxSession name (regex allows [a-zA-Z0-9_. -]).
-  // The register still returns 200 even when the session doesn't exist in tmux.
-  assert.ok(resp && resp.body && resp.body.ok, 'register with dots/spaces must succeed');
-  if (resp && resp.body && resp.body.sessionId) {
-    await post('/api/sessions/unregister', { sessionId: resp.body.sessionId, force: true });
+test('register accepts dot/space in tmuxSession', { skip: !TMUX_AVAILABLE }, async () => {
+  const sessionId = 'test-dots-' + Date.now();
+  const dottedId = sessionId + '-dot';
+  const liveName = 'my session with spaces';
+  const dottedName = 'my.session with spaces';
+  // A live session is what makes the assertion discriminating: a name the regex
+  // rejects falls back to `airprompt-<sessionId>` and still answers ok, so only a
+  // name kept verbatim proves the live branch was taken. Dots cannot be proven
+  // that way — tmux itself rewrites '.' to '_' in session names — so the dotted
+  // case only pins "no 400".
+  const alive =
+    spawnSync('tmux', ['new-session', '-d', '-s', liveName], { timeout: 2000 }).status === 0;
+  try {
+    const live = await post('/api/sessions/register', {
+      sessionId,
+      cwd: '/tmp',
+      tmuxSession: liveName,
+      providerId: TEST_PROVIDER,
+    });
+    assert.ok(live && live.body && live.body.ok, 'register with spaces must succeed');
+    if (alive) {
+      const entry = sessions.get(sessionId);
+      assert.ok(entry, 'the live session must be registered');
+      assert.strictEqual(entry.tmuxSession, liveName, 'a live spaced name must be kept as-is');
+      await post('/api/sessions/unregister', { sessionId, force: true });
+    }
+
+    const dotted = await post('/api/sessions/register', {
+      sessionId: dottedId,
+      cwd: '/tmp',
+      tmuxSession: dottedName,
+      providerId: TEST_PROVIDER,
+    });
+    assert.ok(dotted && dotted.body && dotted.body.ok, 'register with dots/spaces must succeed');
+    await post('/api/sessions/unregister', { sessionId: dottedId, force: true });
+  } finally {
+    // Those registers created REAL tmux sessions: a requested tmuxSession that is
+    // not alive makes the server stand up `airprompt-<sessionId>`. Unregister reaps
+    // a stand-in the daemon created, but the live spaced session above is the
+    // test's own, and a failure before the unregister would leave both behind —
+    // so the test removes them itself.
+    if (alive) spawnSync('tmux', ['kill-session', '-t', liveName], { timeout: 2000 });
+    spawnSync('tmux', ['kill-session', '-t', `airprompt-${sessionId}`], { timeout: 2000 });
+    spawnSync('tmux', ['kill-session', '-t', `airprompt-${dottedId}`], { timeout: 2000 });
   }
 });
 
@@ -1815,7 +2279,7 @@ test(
     const sid = 'test-mirror-kill';
     try {
       spawnSync('tmux', ['new-session', '-d', '-s', mirror], { timeout: 2000 });
-      // Create mirror marker file — simulates activate.js mirror creation
+      // Mirror marker file — simulates activate.js creating a mirror.
       const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
       const mirrorDir = path.join(sessionsDir, TEST_PROVIDER + '-' + mirror);
       fs.mkdirSync(mirrorDir, { recursive: true });
@@ -1835,6 +2299,13 @@ test(
       const resp2 = await post('/api/sessions/unregister', { sessionId: sid, force: true });
       assert.strictEqual(resp2.body && resp2.body.ok, true, 'force unregister must succeed');
       assert.strictEqual(sessions.has(sid), false, 'session must be removed');
+      // The kill is the point of the test — the finally below would hide a
+      // regression in it, so assert it here.
+      assert.strictEqual(
+        tmuxExists(mirror),
+        false,
+        'force unregister must kill the mirror tmux session'
+      );
     } finally {
       try {
         spawnSync('tmux', ['kill-session', '-t', mirror], { timeout: 2000 });

@@ -5,7 +5,12 @@
 # Usage:
 #   source "$(dirname "$0")/lib/protocol.sh"
 #   detect_protocol
-#   curl "${AP_CURL_OPTS[@]}" "${AP_PROTO}://localhost:${AP_PORT}/..."
+#   curl -s ${AP_CURL_OPTS[@]+"${AP_CURL_OPTS[@]}"} "${AP_PROTO}://localhost:${AP_PORT}/..."
+#
+# AP_CURL_OPTS is empty on plain HTTP (the default), so every expansion is
+# written ${AP_CURL_OPTS[@]+"${AP_CURL_OPTS[@]}"}: bash 3.2 (macOS /bin/bash)
+# reports an empty array as unbound under `set -u`. Same for any array a caller
+# passes to curl.
 #
 # State dir: ~/.airprompt/state/ (daemon.json, certs)
 

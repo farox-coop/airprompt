@@ -32,6 +32,7 @@ const { spawnSync } = require('child_process');
  *
  *   hookEvents: { sessionStart: string|null, stop: string|null, statusLine: string|null },
  *   commandPrefix: string,
+ *   sessionNameFlag: string|null,
  *
  *   detectMatch(spec: string): boolean,
  *

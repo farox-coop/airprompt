@@ -66,6 +66,7 @@ const REQUIRED_PROPS = [
   'profile',
   'hookEvents',
   'commandPrefix',
+  'sessionNameFlag',
   'detectMatch',
   'parseHookStdin',
   'formatHookOutput',
@@ -158,6 +159,25 @@ for (const prov of providers) {
       'commandPrefix must be non-empty string'
     );
   });
+
+  // ── sessionNameFlag (forwarded to the CLI by airprompt-launch) ─────────
+
+  test(`[${id}] sessionNameFlag is string or null`, () => {
+    const flag = prov.sessionNameFlag;
+    assert.ok(
+      flag === null || (typeof flag === 'string' && flag.length > 0),
+      `sessionNameFlag must be null or a non-empty string, got ${JSON.stringify(flag)}`
+    );
+  });
+
+  // A flag may only be declared once it has been checked against the real CLI —
+  // forwarding an unknown one aborts that CLI's start. `null` means "not
+  // verified"; setting one here needs the verification recorded in the adapter.
+  if (id !== 'claude') {
+    test(`[${id}] sessionNameFlag stays null until the CLI flag is verified`, () => {
+      assert.strictEqual(prov.sessionNameFlag, null);
+    });
+  }
 
   // ── hookEvents shape ──────────────────────────────────────────────────
 
@@ -400,6 +420,14 @@ test('registry — loadProvider("claude") returns ClaudeProvider', () => {
   const prov = registry.loadProvider('claude');
   assert.strictEqual(prov.id, 'claude');
   assert.strictEqual(prov.label, 'Claude Code');
+});
+
+test('claude — declares the CLI flag that names a session', () => {
+  registry.clearCache();
+  const prov = registry.loadProvider('claude');
+  // `claude -n, --name <name>` — airprompt-launch forwards it, so the tmux
+  // session, the AirPrompt marker and Claude Code's own session list agree.
+  assert.strictEqual(prov.sessionNameFlag, '-n');
 });
 
 test('registry — loadProvider throws for unknown provider', () => {

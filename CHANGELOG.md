@@ -4,6 +4,17 @@ Release notes for AirPrompt, newest first. Each entry mirrors the [GitHub releas
 
 ## [Unreleased]
 
+`airprompt-launch --name` now names the CLI's own session too.
+
+### Highlights
+
+- **`--name` now names the CLI's own session too** — `airprompt-launch --name <name>` already named the AirPrompt marker (and the tmux session on a fresh launch); where the IDE has a name flag of its own it now receives the same name, so at launch the name the CLI shows in its prompt box, its `/resume` picker and the terminal title is the same one the phone displays (renaming later with `/airprompt name` updates only the AirPrompt side). The flag is declared per provider (`sessionNameFlag` in `src/providers/*.js`; `-n` for Claude Code, `null` for the others until verified), and `AIRPROMPT_IDE_NAME_FLAG` overrides it either way — set it empty to disable the forwarding.
+
+### Fixes
+
+- **The CLI commands work on macOS again.** On plain HTTP — the default — `airprompt on|off|name|restart|status` aborted under macOS `/bin/bash` 3.2 with `AP_CURL_OPTS[@]: unbound variable`, because an empty array counts as unset with `set -u` before bash 4.4. Every expansion is now guarded, and `airprompt-launch` too (an empty argument list aborted a launch outright).
+- **A bare `--continue` now means what the IDE means by it.** `airprompt-launch --continue` used to be swallowed and quietly start a _new_ session; it now reaches the IDE as the CLI's own "continue the most recent conversation" flag (and `--continue <session_id>` keeps using AirPrompt's resume path).
+
 ## [1.1.0] - 2026-10-09
 
 Attach images from your phone, plus a watchdog for flaky WiFi.

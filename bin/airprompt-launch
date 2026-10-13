@@ -12,6 +12,14 @@
 #
 # --provider <id>   IDE provider (required). Uses provider's binary.
 # --binary <path>   Override the IDE binary path.
+# --name <name>     Name this session — the AirPrompt marker always, the tmux
+#                   session on a fresh launch — and, when the provider
+#                   declares a name flag of its own (src/providers/*.js,
+#                   `sessionNameFlag`), forward the same name to the IDE too.
+#                   Do not also pass the IDE's own flag: the name would be
+#                   set twice.
+#                   AIRPROMPT_IDE_NAME_FLAG overrides the provider's flag
+#                   (empty disables the forwarding).
 
 set -euo pipefail
 
@@ -80,6 +88,68 @@ if [ ! -x "$REAL_BINARY" ]; then
   exit 1
 fi
 
+# ── Self location + install root ────────────────────────────────────────
+# Resolve this script's real location by following symlinks, without
+# `readlink -f`/`realpath` (absent on macOS ≤12).
+_resolve_self() {
+  local self _n _link
+  self="${BASH_SOURCE[0]:-$0}"
+  _n=0
+  while [ -L "$self" ] && [ "$_n" -lt 20 ]; do
+    _n=$((_n + 1))
+    _link="$(readlink "$self" 2>/dev/null)" || break
+    case "$_link" in
+      /*) self="$_link" ;;
+      *)  self="$(cd "$(dirname "$self")" 2>/dev/null && pwd -P)/$_link" || break ;;
+    esac
+  done
+  self="$(cd "$(dirname "$self")" 2>/dev/null && pwd -P)/$(basename "$self")" || self="${BASH_SOURCE[0]:-$0}"
+  printf '%s' "$self"
+}
+
+# Install root — the directory holding bin/ and src/ (a dev checkout or
+# ~/.airprompt). Fails (non-zero) when the layout is not there, so a caller
+# can fall back instead of reading a bogus path.
+_resolve_root() {
+  local self parent
+  self="$(_resolve_self)"
+  parent="$(cd "$(dirname "$self")/.." 2>/dev/null && pwd -P)" || return 1
+  [ -d "$parent/src/providers" ] || return 1
+  printf '%s' "$parent"
+}
+
+# ── The IDE's own session-name flag ─────────────────────────────────────
+# `--name` is AirPrompt's flag: it names the marker dir and the tmux session.
+# Where the IDE has a name flag of its own, the same name is forwarded to it
+# too, so one flag names both sides and the CLI's own surfaces that show that
+# name — the prompt box, the `/resume` picker and the terminal title — agree
+# with the tmux session.
+#
+# The flag is provider knowledge, so it lives in the provider adapters
+# (src/providers/*.js, field `sessionNameFlag`) — this script stays
+# provider-agnostic on purpose (see bin/airprompt-agnostic-check.sh). The
+# lookup is best-effort: no node, no install root, unknown provider or a null
+# field all mean "no flag", never a failed launch.
+#
+# AIRPROMPT_IDE_NAME_FLAG overrides the lookup; set it empty to disable the
+# forwarding entirely.
+_ide_name_flag() {
+  if [ -n "${AIRPROMPT_IDE_NAME_FLAG+set}" ]; then
+    printf '%s' "$AIRPROMPT_IDE_NAME_FLAG"
+    return 0
+  fi
+  command -v node >/dev/null 2>&1 || return 0
+  local root flag
+  root="$(_resolve_root)" || return 0
+  flag="$(node -e 'try {
+      const registry = require(process.argv[1] + "/src/providers/registry");
+      const provider = registry.loadProvider(process.argv[2]);
+      const f = provider.sessionNameFlag;
+      process.stdout.write(typeof f === "string" ? f : "");
+    } catch (_) {}' "$root" "$PROVIDER_ID" 2>/dev/null)" || flag=""
+  printf '%s' "$flag"
+}
+
 # ── Self-install: ensure ~/bin/ has airprompt-launch + provider wrapper ─
 _ensure_launcher() {
   if [ "${AIRPROMPT_NO_SELF_INSTALL:-}" = "1" ]; then return 0; fi
@@ -88,21 +158,8 @@ _ensure_launcher() {
   local home_bin="${HOME}/bin"
   mkdir -p "$home_bin" 2>/dev/null || true
 
-  # Resolve this script's real location (follow symlinks) without
-  # `readlink -f`/`realpath` (absent on macOS ≤12).
-  local self _n
-  self="${BASH_SOURCE[0]:-$0}"
-  _n=0
-  while [ -L "$self" ] && [ "$_n" -lt 20 ]; do
-    _n=$((_n + 1))
-    local _link
-    _link="$(readlink "$self" 2>/dev/null)" || break
-    case "$_link" in
-      /*) self="$_link" ;;
-      *)  self="$(cd "$(dirname "$self")" 2>/dev/null && pwd -P)/$_link" || break ;;
-    esac
-  done
-  self="$(cd "$(dirname "$self")" 2>/dev/null && pwd -P)/$(basename "$self")" || self="${BASH_SOURCE[0]:-$0}"
+  local self
+  self="$(_resolve_self)"
 
   # Symlink: ~/bin/airprompt-launch → this script
   local launch_link="${home_bin}/airprompt-launch"
@@ -163,6 +220,9 @@ save_session_marker() {
 RESUME_SESSION=""
 RESUME_IDE_ID=""   # set when <id> is an IDE session ID, not tmux
 SESSION_NAME=""       # human-readable name for the session
+# Every expansion of `args` is written ${args[@]+"${args[@]}"} on purpose: bash
+# 3.2 (macOS /bin/bash) reports an empty array as unbound under `set -u`, and
+# `args` is empty whenever the IDE is given no arguments of its own.
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -176,12 +236,20 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     --continue)
-      if [ $# -ge 2 ] && echo "$2" | grep -qv '^-'; then
-        RESUME_SESSION="$2"
-        shift 2
-      else
-        shift
-      fi
+      # With a session name or id this is AirPrompt's resume path, like `--resume`.
+      # Bare, it is the IDE's own flag ("continue the most recent conversation"),
+      # which the user typed and therefore reaches the IDE as typed — AirPrompt
+      # does not decide for the CLI what it supports.
+      case "${2:-}" in
+        -* | "")
+          args+=("--continue")
+          shift
+          ;;
+        *)
+          RESUME_SESSION="$2"
+          shift 2
+          ;;
+      esac
       ;;
     --name)
       if [ $# -lt 2 ]; then
@@ -198,18 +266,34 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ── Forward the session name to the IDE (when it has a name flag) ───────
+# Put in front of the user's own args: a `--` terminator among them ends the
+# IDE's option parsing, and the pair appended behind one would be read as
+# positional text instead of a flag. Everything else still reaches the IDE
+# exactly as typed. An IDE that declares no name flag is left alone — a flag it
+# does not know would abort its start.
+if [ -n "$SESSION_NAME" ]; then
+  IDE_NAME_FLAG="$(_ide_name_flag)"
+  if [ -n "$IDE_NAME_FLAG" ]; then
+    args=("$IDE_NAME_FLAG" "$SESSION_NAME" ${args[@]+"${args[@]}"})
+  elif [ "${AIRPROMPT_DEBUG:-}" = "1" ]; then
+    echo "airprompt-launch: no session-name flag resolved for provider '$PROVIDER_ID'" >&2
+    echo "  (it declares none, or the lookup failed); the AirPrompt marker — and," >&2
+    echo "  on a fresh launch, the tmux session — carry the name '$SESSION_NAME'." >&2
+  fi
+fi
+
 # ── Helper: run IDE inside tmux with pane-capture on exit ──────────
-# Usage: launch_with_capture <tmux_session> <capture_file> [ide-args...]
+# Usage: launch_tmux_capture <tmux_session> <capture_file> [ide-args...]
 # The wrapper bash script owns the capture file — it writes the last 100
 # lines of pane output when IDE exits. The caller reads + cleans up.
 launch_tmux_capture() {
   local session="$1"
   local capture_file="$2"
   shift 2
-  # Build a safe command string: each arg is %q-escaped by bash,
-  # so spaces/newlines/metachars in env values or IDE args survive.
-  # FORWARD_ENV values are already quoted by the read loop (line 123-125).
-  # We pass the real command via argv to bash -c 'exec "$@"' — no injection.
+  # Args reach the IDE as argv, one element per argument (`bash -c … _ "$@"`),
+  # so spaces/newlines/metachars in env values or IDE args survive untouched
+  # and no shell re-parses them — no injection, no escaping needed.
   local env_args=()
   for var in "${FORWARD_ENV[@]}"; do
     env_args+=("$var")
@@ -263,13 +347,13 @@ if [ -n "$RESUME_SESSION" ]; then
       AIRPROMPT_CAPTURE=$(mktemp)
       tmux respawn-pane -k -t "$RESUME_SESSION" \
         env AIRPROMPT_CAPTURE="$AIRPROMPT_CAPTURE" "${FORWARD_ENV[@]}" \
-        bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ "$REAL_BINARY" "${args[@]}" 2>/dev/null || {
+        bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ "$REAL_BINARY" ${args[@]+"${args[@]}"} 2>/dev/null || {
         # respawn failed — kill zombie session and create new one
         tmux kill-session -t "$RESUME_SESSION" 2>/dev/null || true
         RESUME_IDE_ID=""
         RESUME_SESSION="airprompt-$$-$(date +%s)"
         save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
-        launch_tmux_capture "$RESUME_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_BINARY" "${args[@]}"
+        launch_tmux_capture "$RESUME_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_BINARY" ${args[@]+"${args[@]}"}
       }
       attach_and_capture "$RESUME_SESSION" "$AIRPROMPT_CAPTURE"
       exit 0
@@ -286,7 +370,7 @@ if [ -n "$RESUME_SESSION" ]; then
     TMUX_SESSION="airprompt-$$-$(date +%s)"
     save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
     AIRPROMPT_CAPTURE=$(mktemp)
-    launch_tmux_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_BINARY" --resume "$RESUME_IDE_ID"
+    launch_tmux_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_BINARY" --resume "$RESUME_IDE_ID" ${args[@]+"${args[@]}"}
     attach_and_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE"
     exit 0
   fi
@@ -296,7 +380,7 @@ fi
 if [ -n "${TMUX:-}" ]; then
   SESSION_NAME_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
   save_session_marker "$SESSION_NAME_TMUX" "$SESSION_NAME"
-  exec "$REAL_BINARY" "${args[@]}"
+  exec "$REAL_BINARY" ${args[@]+"${args[@]}"}
 fi
 
 # ── Not in tmux — create a tmux session and run IDE inside ────────
@@ -309,5 +393,5 @@ fi
 save_session_marker "$TMUX_SESSION" "$SESSION_NAME"
 
 AIRPROMPT_CAPTURE=$(mktemp)
-launch_tmux_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_BINARY" "${args[@]}"
+launch_tmux_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE" "$REAL_BINARY" ${args[@]+"${args[@]}"}
 attach_and_capture "$TMUX_SESSION" "$AIRPROMPT_CAPTURE"

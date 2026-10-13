@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PROVIDERS=(claude codex cursor windsurf gemini)
+PROVIDERS=(claude codex cursor windsurf)
 
 # Files/dirs exempt from scanning (these ARE provider-specific by design).
 EXEMPT_FILES=(
@@ -28,7 +28,6 @@ EXEMPT_FILES=(
   "src/providers/codex.js"
   "src/providers/cursor.js"
   "src/providers/windsurf.js"
-  "src/providers/gemini.js"
   "src/hooks/airprompt-activate.js"
   "src/hooks/airprompt-deactivate.js"
   "src/hooks/core/resolve-provider.js"
@@ -39,7 +38,6 @@ EXEMPT_DIRS=(
   ".codex-plugin"
   ".cursor-plugin"
   ".windsurf-plugin"
-  ".gemini-plugin"
   ".claude/skills"
   "docs"
   "test"

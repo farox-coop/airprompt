@@ -131,6 +131,68 @@ function tmuxState(sessionName) {
   }
 }
 
+// ── Session-marker ownership ──────────────────────────────────────────────
+//
+// A tmux session the daemon owns carries a marker file in its per-session dir:
+// `standin` (the register route stood the session up itself, because the client
+// had no live tmux) or `mirror` (activate.js, for an IDE running outside tmux).
+// Ownership is recorded under the provider that created it, but the entry being
+// unregistered or swept may belong to a *different* provider — two providers can
+// share one tmux session — so every dir is considered. A dir only counts when its
+// own `tmux` file names this exact session: matching on the name suffix alone
+// would let `-airprompt-a` match `airprompt--airprompt-a`.
+//
+// The dir-name component a tmux session's marker dir uses — one sanitizer, so
+// every writer and reader agrees on which dir belongs to which session.
+function markerSafeName(tmuxSession) {
+  return (
+    String(tmuxSession || '').replace(/[^a-zA-Z0-9_.-]/g, '') ||
+    String(tmuxSession || '').replace(/[^a-zA-Z0-9]/g, '') ||
+    'unknown'
+  );
+}
+
+// @returns {{dir: string, kind: 'standin'|'mirror'}|null}
+function ownerMarkerDir(tmuxSession, providerId, sessionsDirOverride) {
+  if (!tmuxSession) return null;
+  const sessionsDir = sessionsDirOverride || getSessionsDir();
+  const safeName = markerSafeName(tmuxSession);
+
+  const candidates = [path.join(sessionsDir, `${providerId || 'unknown'}-${safeName}`)];
+  try {
+    for (const entry of fs.readdirSync(sessionsDir)) {
+      const dir = path.join(sessionsDir, entry);
+      if (!candidates.includes(dir)) candidates.push(dir);
+    }
+  } catch (_) {
+    /* unreadable sessions dir — only the provider-local candidate is tried */
+  }
+
+  for (const dir of candidates) {
+    try {
+      const tmuxFile = path.join(dir, 'tmux');
+      if (!fs.existsSync(tmuxFile)) continue;
+      if (fs.readFileSync(tmuxFile, 'utf8').trim() !== tmuxSession) continue;
+      if (fs.existsSync(path.join(dir, 'standin'))) return { dir, kind: 'standin' };
+      if (fs.existsSync(path.join(dir, 'mirror'))) return { dir, kind: 'mirror' };
+    } catch (_) {}
+  }
+  return null;
+}
+
+// Reap the marker dir of a stand-in the daemon stood up itself. Called from
+// every path that removes such a session (unregister, the kill endpoint, both
+// sweep branches) so the marker never outlives the session it vouches for: a
+// leftover marker names a tmux *session*, so a later session of that name — the
+// user's own, say — could be killed by a force unregister that found it.
+// A mirror dir belongs to activate.js and is left alone.
+// @returns {boolean} true when a stand-in dir was removed
+function reapOwnedStandIn(tmuxSession, providerId, sessionsDirOverride) {
+  const owner = ownerMarkerDir(tmuxSession, providerId, sessionsDirOverride);
+  if (!owner || owner.kind !== 'standin') return false;
+  return safeRmSync(owner.dir);
+}
+
 // ── sessionToJSON — canonical serialisation ───────────────────────────────
 //
 // Every session served by the daemon (REST + WebSocket) goes through this.
@@ -191,6 +253,9 @@ function sessionToJSON(entry, sessionsDirOverride) {
 module.exports = {
   tmuxExists,
   tmuxState,
+  ownerMarkerDir,
+  markerSafeName,
+  reapOwnedStandIn,
   sessionToJSON,
   getSessionsDir,
   isSafeRmTarget,

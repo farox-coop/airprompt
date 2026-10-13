@@ -82,6 +82,10 @@ const CursorProvider = {
 
   commandPrefix: '/',
 
+  // No session-name flag declared — same reasoning as codex.js: an unverified
+  // flag would abort the CLI's start, so forwarding stays off until confirmed.
+  sessionNameFlag: null,
+
   // ── Detection (shared — see provider.js) ───────────────────────────────
 
   detectMatch,

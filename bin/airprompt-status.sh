@@ -70,4 +70,4 @@ else
 fi
 
 # ── Sessions from daemon → format with Node.js ────────────────────────
-curl -s "${AP_CURL_OPTS[@]}" "${API_URL}/api/sessions" 2>/dev/null | node "$FORMATTER"
+curl -s ${AP_CURL_OPTS[@]+"${AP_CURL_OPTS[@]}"} "${API_URL}/api/sessions" 2>/dev/null | node "$FORMATTER"
