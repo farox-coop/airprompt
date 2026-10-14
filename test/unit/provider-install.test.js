@@ -66,6 +66,7 @@ function makeCtx(targetDir, configDir) {
 // Redirect os.homedir() + all provider env vars under tmp for the test's duration.
 function setupInstallEnv(t) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-install-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const targetDir = makeTarget(tmp);
   const stateDir = path.join(tmp, '.airprompt', 'state');
   fs.mkdirSync(stateDir, { recursive: true });

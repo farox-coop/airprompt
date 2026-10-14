@@ -71,7 +71,7 @@ if [ -z "$CMD" ]; then
   echo "Commands:"
   echo "  on [<name>]         Start daemon + register session (optional name)"
   echo "  on --name <name>    Same, explicit flag form"
-  echo "  off                 Unregister session + hide statusline badge"
+  echo "  off [<sessionId>]   Unregister session + hide statusline badge"
   echo "  auth list|allow|deny|revoke|name  Manage paired devices (device pairing)"
   echo "  status              Show daemon status and active sessions"
   echo "  clean               Full teardown — kill all sessions, remove markers"
@@ -109,13 +109,14 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
       echo "Commands:"
       echo "  on [<name>]         Start daemon + register session (optional name)"
       echo "  on --name <name>    Same, explicit flag form"
-      echo "  off                 Unregister session + hide statusline badge"
+      echo "  off [<sessionId>]   Unregister session + hide statusline badge"
       echo "  auth list|allow|deny|revoke|name  Manage paired devices (device pairing)"
       echo "  status              Show daemon status and active sessions"
       echo "  clean               Full teardown — kill all sessions, remove markers"
       echo "  restart             Restart daemon — sessions survive via disk recovery"
       echo "  name [<text>]       Set or clear session name (empty or \"\" clears)"
       echo "  autostart on|off    Auto-start AirPrompt on IDE session start"
+      echo "  update [<tag>]      Update install to a release tag (or latest main)"
       echo "  help                Show this help"
       echo ""
       echo "Entrypoint: always use 'airprompt <command>' — never call bin/airprompt-*.sh directly."
@@ -140,6 +141,11 @@ for d in "${AIRPROMPT_INSTALL_DIR:-}" ~/.airprompt ~/projects/airprompt; do
         else
           exec bash "$SUB"
         fi
+        ;;
+      off)
+        # An explicit sessionId targets that session; no argument keeps the
+        # current-session form (airprompt-off.sh resolves it from $TMUX itself).
+        exec bash "$SUB" "$@"
         ;;
       name)
         exec bash "$SUB" "$@"

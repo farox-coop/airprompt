@@ -24,16 +24,18 @@ function run(extraEnv) {
   return spawnSync(process.execPath, [SCRIPT], { env, encoding: 'utf8' });
 }
 
-test('resolve-provider.js — detects codex via dir when no CLI binary is present', () => {
+test('resolve-provider.js — detects codex via dir when no CLI binary is present', (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-provider-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   fs.mkdirSync(path.join(tmp, '.codex'), { recursive: true });
   const r = run({ HOME: tmp, PATH: '/usr/bin:/bin' });
   assert.strictEqual(r.status, 0, `stderr: ${r.stderr}`);
   assert.strictEqual(r.stdout.trim(), 'codex');
 });
 
-test('resolve-provider.js — exits 1 when no provider detected', () => {
+test('resolve-provider.js — exits 1 when no provider detected', (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-provider-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const r = run({ HOME: tmp, PATH: '/usr/bin:/bin' });
   assert.strictEqual(r.status, 1);
   assert.ok(r.stderr.includes('no provider detected'), `stderr: ${r.stderr}`);

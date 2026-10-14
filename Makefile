@@ -53,6 +53,8 @@ test-unit:
 	@bash test/unit/status-formatter.test.sh
 	@bash test/unit/protocol.test.sh
 	@bash test/unit/launch-name.test.sh
+	@bash test/unit/dispatch-args.test.sh
+	@bash test/unit/off-target.test.sh
 
 test-integration:
 	@bash test/integration/run.sh

@@ -17,6 +17,54 @@ const auth = require('../../src/auth');
 
 const TEST_PROVIDER = 'test-prov';
 
+// This file must not care which tmux server the runner happens to sit in. Every
+// tmux call it makes has to reach the SAME server: the helpers below and the
+// in-process server inherit this process's environment, while the deactivate
+// hook is spawned with TMUX deleted (runDeactivate), so IT resolves the default
+// socket. Inheriting an ambient TMUX — running the suite from a pane on a
+// non-default socket via `tmux -S`, or a nested server — splits those two and
+// fails the deactivate-hook tests here for reasons that have nothing to do with
+// the code under test. Pinning the file to the default socket makes all three
+// agree. The cost of that pin, stated plainly: this file's tmux work targets the
+// DEFAULT server in every posture, so a run started on a private socket still
+// creates (and kills) its sessions on the default one. Most are named
+// `airprompt-test-*`; two are deliberately ordinary (`real-tmux-session`,
+// `my session with spaces`) because they prove a real session is left alone —
+// which is also why TMUX_TMPDIR, not a private TMUX, is the way to sandbox this
+// file on a machine whose default server matters.
+// The capability to hand the hook a tmux context is unaffected: runDeactivate
+// only deletes TMUX when the caller did not supply one through envOverrides.
+delete process.env.TMUX;
+delete process.env.TMUX_PANE;
+
+// The only sessions this file may neither adopt nor kill are the two whose
+// fixture names are deliberately ordinary — they exist to prove a REAL session
+// is left alone, so one already on the server is somebody's. Every other fixture
+// is namespaced to this suite, and a leftover from an interrupted run has to
+// stay reapable: refusing those wedged the file, failing identically on every
+// later run until a person removed the session by hand.
+const FOREIGN_TMUX_NAMES = new Set(['my session with spaces']);
+
+// The two fixtures whose kill is issued THROUGH the daemon's API carry this
+// run's pid. The daemon cannot see FOREIGN_TMUX_NAMES, so the only way to
+// guarantee it only ever kills a session this run created is for the name to be
+// one no earlier run and no person's session can already hold.
+const RUN = '-' + process.pid;
+
+// ...and only when it is ALREADY there. Creating one that does not exist is what
+// several tests do on purpose, and a leftover under any other fixture name is
+// this suite's own — refusing those wedged the file, failing identically on
+// every later run until a person removed the session by hand.
+const PREEXISTING_TMUX = new Set(
+  (rawTmux(['ls', '-F', '#{session_name}'], { timeout: 2000, encoding: 'utf8' }).stdout || '')
+    .split('\n')
+    .filter(Boolean)
+);
+
+function isForeignSession(name) {
+  return FOREIGN_TMUX_NAMES.has(name) && PREEXISTING_TMUX.has(name);
+}
+
 const TMUX_AVAILABLE = (() => {
   try {
     execSync('which tmux 2>/dev/null');
@@ -115,8 +163,24 @@ function get(path) {
   });
 }
 
+// Raw tmux calls that bypass the create/kill helpers still have to obey the same
+// rule: a session that was already on the server before this file ran belongs to
+// whoever is running the suite, and no kill may take it. Wrapping every call is
+// what turns that from a hope into a rule.
+function rawTmux(args, opts) {
+  const t = args.indexOf('-t');
+  if (args[0] === 'kill-session' && t !== -1 && isForeignSession(args[t + 1])) {
+    return { status: 1, stdout: '', stderr: '' };
+  }
+  return spawnSync('tmux', args, { timeout: 2000, encoding: 'utf8', ...opts });
+}
+
 function createTmux(name) {
   if (!TMUX_AVAILABLE) return false;
+  // Refuse to adopt one that was already there: `new-session` would fail and
+  // `tmuxExists` would still report success, quietly pointing the test at a
+  // session it did not create.
+  if (isForeignSession(name)) return false;
   // Retry, and report the outcome: `tmux new-session` can fail under load, and a
   // silently absent session turns a later assertion into a misleading failure
   // (the deactivate tests read "the session is alive" as their premise).
@@ -133,6 +197,7 @@ function createTmux(name) {
 
 function killTmux(name) {
   if (!TMUX_AVAILABLE) return;
+  if (isForeignSession(name)) return; // not ours to kill
   try {
     execSync(`tmux kill-session -t "${name}" 2>/dev/null`);
   } catch (e) {
@@ -142,7 +207,7 @@ function killTmux(name) {
 
 function tmuxExists(name) {
   if (!TMUX_AVAILABLE) return false;
-  return spawnSync('tmux', ['has-session', '-t', name], { timeout: 2000 }).status === 0;
+  return rawTmux(['has-session', '-t', name], { timeout: 2000 }).status === 0;
 }
 
 // ── Setup / Teardown ────────────────────────────────────────────────
@@ -240,6 +305,17 @@ before(async () => {
 });
 
 after(() => {
+  // The WS tests make the daemon stand up a grouped web mirror for their
+  // test-scoped session, and each test's own cleanup removes only the base
+  // session — the group member outlives it. The mirror's name is built from that
+  // test's sessionId, so this matches exactly the ones the suite made and no
+  // real session's mirror (those carry the full `airprompt-…` name after
+  // `airprompt-web-`).
+  const listed = rawTmux(['ls', '-F', '#{session_name}'], { timeout: 2000, encoding: 'utf8' });
+  for (const name of (listed.stdout || '').split('\n')) {
+    if (name.startsWith('airprompt-web-test-'))
+      rawTmux(['kill-session', '-t', name], { timeout: 2000 });
+  }
   // Force-close any lingering WS clients so server.close() can complete —
   // otherwise a non-drained socket holds the node --test process open.
   for (const client of wss.clients) {
@@ -1548,7 +1624,7 @@ test('POST /api/sessions/kill handles already-dead tmux', async () => {
   // Kill the tmux session directly so kill endpoint sees a dead session
   const entry = sessions.get('test-kill-dead');
   if (entry && entry.tmuxSession)
-    spawnSync('tmux', ['kill-session', '-t', entry.tmuxSession], { timeout: 2000 });
+    rawTmux(['kill-session', '-t', entry.tmuxSession], { timeout: 2000 });
   // Wait for tmux to fully clean up
   await new Promise(function (r) {
     setTimeout(r, 100);
@@ -1566,12 +1642,12 @@ test(
   { skip: !TMUX_AVAILABLE },
   async () => {
     // Create a real airprompt tmux session
-    spawnSync('tmux', ['new-session', '-d', '-s', 'airprompt-test-kill-live'], { timeout: 2000 });
+    rawTmux(['new-session', '-d', '-s', `airprompt-test-kill-live${RUN}`], { timeout: 2000 });
     // Register via API
     await post('/api/sessions/register', {
       sessionId: 'test-kill-live',
       cwd: '/tmp',
-      tmuxSession: 'airprompt-test-kill-live',
+      tmuxSession: `airprompt-test-kill-live${RUN}`,
       providerId: TEST_PROVIDER,
     });
     assert.ok(sessions.has('test-kill-live'), 'session should be registered');
@@ -1581,7 +1657,7 @@ test(
     assert.strictEqual(res.body.ok, true);
     assert.ok(!sessions.has('test-kill-live'), 'session removed from memory');
     // Verify tmux session is dead
-    const { status } = spawnSync('tmux', ['has-session', '-t', 'airprompt-test-kill-live'], {
+    const { status } = rawTmux(['has-session', '-t', `airprompt-test-kill-live${RUN}`], {
       timeout: 2000,
     });
     assert.notStrictEqual(status, 0, 'tmux session should be gone');
@@ -1701,7 +1777,7 @@ test(
       );
 
       // Tmux session killed by deactivate
-      const s = spawnSync('tmux', ['has-session', '-t', mirrorSession], { timeout: 2000 });
+      const s = rawTmux(['has-session', '-t', mirrorSession], { timeout: 2000 });
       assert.notStrictEqual(s.status, 0, 'mirror tmux session must be killed');
     } finally {
       killTmux(mirrorSession);
@@ -2196,7 +2272,7 @@ test('stale sweep does not kill session whose tmux is alive', { skip: !TMUX_AVAI
   // Must survive the sweep — tmuxExists returns true → skip.
   const DAEMON_TMUX = 'airprompt-daemon-test-sweep';
   try {
-    spawnSync('tmux', ['new-session', '-d', '-s', DAEMON_TMUX], { timeout: 2000 });
+    rawTmux(['new-session', '-d', '-s', DAEMON_TMUX], { timeout: 2000 });
     sessions.set('alive-daemon', {
       sessionId: 'alive-daemon',
       cwd: '/tmp',
@@ -2215,7 +2291,7 @@ test('stale sweep does not kill session whose tmux is alive', { skip: !TMUX_AVAI
     sessions.delete('alive-daemon');
   } finally {
     try {
-      spawnSync('tmux', ['kill-session', '-t', DAEMON_TMUX], { timeout: 2000 });
+      rawTmux(['kill-session', '-t', DAEMON_TMUX], { timeout: 2000 });
     } catch (_) {}
   }
 });
@@ -2232,8 +2308,7 @@ test('register accepts dot/space in tmuxSession', { skip: !TMUX_AVAILABLE }, asy
   // name kept verbatim proves the live branch was taken. Dots cannot be proven
   // that way — tmux itself rewrites '.' to '_' in session names — so the dotted
   // case only pins "no 400".
-  const alive =
-    spawnSync('tmux', ['new-session', '-d', '-s', liveName], { timeout: 2000 }).status === 0;
+  const alive = rawTmux(['new-session', '-d', '-s', liveName], { timeout: 2000 }).status === 0;
   try {
     const live = await post('/api/sessions/register', {
       sessionId,
@@ -2263,9 +2338,9 @@ test('register accepts dot/space in tmuxSession', { skip: !TMUX_AVAILABLE }, asy
     // a stand-in the daemon created, but the live spaced session above is the
     // test's own, and a failure before the unregister would leave both behind —
     // so the test removes them itself.
-    if (alive) spawnSync('tmux', ['kill-session', '-t', liveName], { timeout: 2000 });
-    spawnSync('tmux', ['kill-session', '-t', `airprompt-${sessionId}`], { timeout: 2000 });
-    spawnSync('tmux', ['kill-session', '-t', `airprompt-${dottedId}`], { timeout: 2000 });
+    if (alive) rawTmux(['kill-session', '-t', liveName], { timeout: 2000 });
+    rawTmux(['kill-session', '-t', `airprompt-${sessionId}`], { timeout: 2000 });
+    rawTmux(['kill-session', '-t', `airprompt-${dottedId}`], { timeout: 2000 });
   }
 });
 
@@ -2275,10 +2350,10 @@ test(
   async () => {
     const fs = require('fs');
     const path = require('path');
-    const mirror = 'airprompt-mirror-kill-test';
+    const mirror = `airprompt-mirror-kill-test${RUN}`;
     const sid = 'test-mirror-kill';
     try {
-      spawnSync('tmux', ['new-session', '-d', '-s', mirror], { timeout: 2000 });
+      rawTmux(['new-session', '-d', '-s', mirror], { timeout: 2000 });
       // Mirror marker file — simulates activate.js creating a mirror.
       const sessionsDir = path.join(TEMP_DIR, '.airprompt', 'sessions');
       const mirrorDir = path.join(sessionsDir, TEST_PROVIDER + '-' + mirror);
@@ -2308,7 +2383,7 @@ test(
       );
     } finally {
       try {
-        spawnSync('tmux', ['kill-session', '-t', mirror], { timeout: 2000 });
+        rawTmux(['kill-session', '-t', mirror], { timeout: 2000 });
       } catch (_) {}
       if (sessions.has(sid)) sessions.delete(sid);
     }

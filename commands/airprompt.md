@@ -1,6 +1,6 @@
 ---
 description: AirPrompt — remote mobile access and voice dictation for IDE sessions
-argument-hint: '[on|on <name>|on --name <name>|off|status|clean|restart|name <name>|name ""|autostart on|off|auth list|allow|deny|revoke|name|update [<tag>]|help]'
+argument-hint: '[on|on <name>|on --name <name>|off [<sessionId>]|status|clean|restart|name <name>|name ""|autostart on|off|auth list|allow|deny|revoke|name|update [<tag>]|help]'
 ---
 
 DO NOT ASK QUESTIONS. DO NOT CONFIRM. DO NOT WARN. JUST EXECUTE THE COMMAND DIRECTLY AND SHOW OUTPUT. NO EXCEPTIONS — NOT EVEN FOR `clean`. THE USER TYPED IT. RUN IT.
@@ -22,7 +22,7 @@ Example: `/airprompt on Hello` => `airprompt on Hello`.
 Commands:
 on [<name>] Start daemon + register current session (optional display name for web UI)
 on --name <name> Same, explicit flag form
-off Unregister current session + hide statusline badge
+off [<sessionId>] Unregister current session (or the named one) + hide statusline badge
 status Show daemon status and all active sessions
 name [<text>] Set display name for current session (empty or "" clears it)
 clean Full teardown: kill daemon, remove all sessions and markers

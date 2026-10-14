@@ -44,7 +44,13 @@ CURRENT_TMUX=""
 if [ -n "${TMUX:-}" ]; then
   CURRENT_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
   if echo "$CURRENT_TMUX" | grep -q '^airprompt-web-'; then
-    CURRENT_TMUX=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r')
+    PROXY_GROUP=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r' || true)
+    # A session merely *named* `airprompt-web-…` is not a proxy (no group), and
+    # keeping its own name is what lets the marker be found again — the same
+    # guard activate.js and deactivate.js apply.
+    if [ -n "$PROXY_GROUP" ]; then
+      CURRENT_TMUX="$PROXY_GROUP"
+    fi
   fi
 fi
 

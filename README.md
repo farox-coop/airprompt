@@ -36,20 +36,20 @@ Linux, macOS, and WSL are supported. macOS uses Homebrew (`brew install tmux jq 
 
 Every tmux feature AirPrompt depends on, where it's used, and why:
 
-| tmux command                   | Used in                                                                  | Purpose                                                                      |
-| ------------------------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `new-session -d`               | `on.sh`, `activate.js`, `server.js`                                      | Create detached sessions (mirror + daemon + web proxy)                       |
-| `attach-session`               | `server.js`                                                              | Web client connects to tmux session via node-pty                             |
-| `has-session`                  | `on.sh`, `restart.sh`, `activate.js`, `airprompt-launch`, `src/utils.js` | Check if session exists                                                      |
-| `kill-session`                 | `server.js`, `clean.sh`, `off.sh`                                        | Destroy sessions (mirror, daemon, cleanup)                                   |
-| `send-keys`                    | `server.js`                                                              | Inject `/airprompt off` into session without attaching                       |
-| `list-clients`                 | `server.js`, `src/utils.js`                                              | Detect orphaned mirror sessions (no attached clients)                        |
-| `display-message`              | `activate.js`, `server.js`                                               | Read session name `#S`, group `#{session_group}`, cwd `#{pane_current_path}` |
-| `set-option`                   | `server.js`, `airprompt-launch`                                          | Disable status bar in web sessions, enable focus-events                      |
-| `load-buffer` / `save-buffer`  | `server.js`                                                              | Clipboard sync between web client and session                                |
-| `list-panes -F '#{pane_dead}'` | `airprompt-launch`                                                       | Detect zombie panes from previous `/exit`                                    |
-| `respawn-pane -k`              | `airprompt-launch`, `on.sh`                                              | Revive zombie pane or restart daemon                                         |
-| Session grouping (`-t parent`) | `server.js`                                                              | Web proxy sessions inherit from real session — kill parent, children die     |
+| tmux command                              | Used in                                                                                                        | Purpose                                                                      |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `new-session -d`                          | `on.sh`, `activate.js`, `server.js`                                                                            | Create detached sessions (mirror + daemon + web proxy)                       |
+| `attach-session`                          | `server.js`                                                                                                    | Web client connects to tmux session via node-pty                             |
+| `has-session`                             | `on.sh`, `restart.sh`, `activate.js`, `airprompt-launch`, `src/utils.js`                                       | Check if session exists                                                      |
+| `kill-session`                            | `server.js`, `clean.sh`, `off.sh`                                                                              | Destroy sessions (mirror, daemon, cleanup)                                   |
+| `send-keys`                               | `server.js`                                                                                                    | Inject `/airprompt off` into session without attaching                       |
+| `list-clients`                            | `src/utils.js`, `src/sweep.js`                                                                                 | Detect orphaned mirror sessions (no attached clients)                        |
+| `display-message`                         | `activate.js`, `deactivate.js`, `server.js`, `airprompt-launch`, `on.sh`, `off.sh`, `name.sh`, `statusline.sh` | Read session name `#S`, group `#{session_group}`, cwd `#{pane_current_path}` |
+| `set-option`                              | `server.js`, `airprompt-launch`                                                                                | Disable status bar in web sessions, enable focus-events                      |
+| `load-buffer` / `save-buffer`             | `server.js`                                                                                                    | Clipboard sync between web client and session                                |
+| `list-panes -F '#{pane_id} #{pane_dead}'` | `airprompt-launch`                                                                                             | Find the zombie pane from a previous `/exit` to respawn                      |
+| `respawn-pane -k`                         | `airprompt-launch`, `on.sh`, `restart.sh`                                                                      | Revive zombie pane or restart daemon                                         |
+| Session grouping (`-t parent`)            | `server.js`                                                                                                    | Web proxy sessions inherit from real session — kill parent, children die     |
 
 ## Quick Start
 
@@ -206,12 +206,13 @@ All commands go through the unified dispatcher: `airprompt <command>` (`/airprom
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `on [<name>]`          | Start daemon + register current session (optional display name)                                                                             |
 | `on --name <name>`     | Same, explicit flag form                                                                                                                    |
-| `off`                  | Unregister current session + hide statusline badge                                                                                          |
+| `off [<sessionId>]`    | Unregister the current session (or the named one) + hide statusline badge                                                                   |
 | `status`               | Show daemon status and all active sessions                                                                                                  |
 | `name [<text>]`        | Set display name for current session (empty or "" clears it)                                                                                |
 | `clean`                | Full teardown — kill daemon, remove all sessions/config. Preserves install files (~/.airprompt/server.js) so autostart hook target survives |
 | `restart`              | Restart daemon — sessions survive via disk recovery                                                                                         |
 | `autostart on` / `off` | Auto-start AirPrompt on IDE session start                                                                                                   |
+| `update [<tag>]`       | Update install to a release tag (or latest main)                                                                                            |
 | `auth <cmd>`           | Manage paired devices: `list` (alias `devices`), `allow <seq>`, `deny <seq>`, `revoke <seq>`, `name <seq> <name>`                           |
 | `help`                 | Print usage                                                                                                                                 |
 
@@ -288,7 +289,7 @@ AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter 
 **Claude Code:**
 
 - `/airprompt on` — Register session and enable remote access
-- `/airprompt off` — Unregister session and hide statusline badge
+- `/airprompt off [<sessionId>]` — Unregister the current session (or the named one) and hide statusline badge
 - `/airprompt status` — Show daemon status and all active sessions
 - `/airprompt name <text>` — Set session display name (empty or "" clears)
 - `/airprompt autostart on|off` — Auto-start on IDE session start
@@ -297,7 +298,7 @@ AirPrompt uses a provider adapter pattern — each IDE/CLI gets its own adapter 
 - `/airprompt update [<tag>]` — Update install to a release tag (or latest main)
 - `/airprompt help` — Print usage
 
-**Manual launch / resume:** `airprompt-launch --provider claude` starts Claude inside a managed tmux session so AirPrompt can mirror it. Resume a previous session with `airprompt-launch --resume <session_id>` or `airprompt-launch --continue <session_id>`; a bare `airprompt-launch --continue` is handed to the IDE as its own _continue the last conversation_ flag. Add `--name <name>` to name that session — the AirPrompt marker, the tmux session on a fresh launch, and (where the provider declares a name flag, e.g. Claude Code's `-n`) the CLI's own session name at launch. Handy in VS Code where there's no `$TMUX` — the launch script creates the tmux session itself.
+**Manual launch / resume:** `airprompt-launch --provider claude` starts Claude inside a managed tmux session so AirPrompt can mirror it. Resume a previous session with `airprompt-launch --resume <session_id>` or `airprompt-launch --continue <session_id>`; a bare `airprompt-launch --continue` is handed to the IDE as its own _continue the last conversation_ flag, and `--resume` with an empty value is refused rather than silently starting a new session. Add `--name <name>` to name that session — the AirPrompt marker, the tmux session on a fresh launch, and (where the provider declares a name flag, e.g. Claude Code's `-n`) the CLI's own session name at launch. Handy in VS Code where there's no `$TMUX` — the launch script creates the tmux session itself.
 
 **Adding a new provider:** create one provider file + a single generic hook wrapper (provider id passed via argv). Provider auto-discovered by registry. Zero changes to core.
 

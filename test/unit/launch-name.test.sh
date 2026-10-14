@@ -43,7 +43,21 @@ mkdir -p "$FAKE_BIN" "$NODE_FREE_BIN" "$NO_NODE_BIN"
 cat > "$FAKE_BIN/tmux" <<'FAKETMUX'
 #!/bin/bash
 if [ "$1" = "has-session" ] && [ -n "${FAKE_TMUX_NO_SESSION:-}" ]; then exit 1; fi
-if [ "$1" = "list-panes" ] && [ -n "${FAKE_TMUX_DEAD:-}" ]; then printf '1\n'; exit 0; fi
+# The name the launcher reads back for the pane it is already in. Answered and
+# NOT recorded: the launcher captures this stdout, so log lines would be read as
+# part of the name. `-` not `:-`, so an explicitly empty value stays empty and
+# the "no name to mark" case is reachable.
+if [ "$1" = "display-message" ]; then
+  case "${3:-}" in
+    '#{session_group}') printf '%s\n' "${FAKE_TMUX_GROUP-fake-group}" ;;
+    *)                  printf '%s\n' "${FAKE_TMUX_SESSION-fake-session}" ;;
+  esac
+  exit 0
+fi
+# Matches the real `-F '#{pane_id} #{pane_dead}'`: the launcher resolves the
+# DEAD pane's id (a bare session target would hit the session's ACTIVE pane).
+if [ "$1" = "list-panes" ] && [ -n "${FAKE_TMUX_DEAD:-}" ]; then printf '%%9 1\n'; exit 0; fi
+if [ "$1" = "list-panes" ]; then printf '%%9 0\n'; exit 0; fi
 if [ "$1" = "respawn-pane" ] && [ -n "${FAKE_TMUX_RESPAWN_FAIL:-}" ]; then exit 1; fi
 i=0
 for a in "$@"; do
@@ -100,6 +114,7 @@ export AIRPROMPT_SESSIONS_DIR="$TEST_DIR/sessions"
 # documents, so an exported one would otherwise redirect every case, and an
 # exported AIRPROMPT_DEBUG would silence case 15's "quiet by default" check.
 unset TMUX
+unset TMUX_PANE
 unset AIRPROMPT_IDE_NAME_FLAG
 unset AIRPROMPT_DEBUG
 
@@ -195,11 +210,14 @@ reject() { # reject <substring> <argv> <label>
   esac
 }
 
+# `grep -qxF` reads a process substitution — neither a pipeline nor a command
+# substitution, and both halves of that matter. Not a pipeline: `grep -q` exits
+# at the first match, and `set -o pipefail` would turn the producer's resulting
+# SIGPIPE into a false FAIL. Not a command substitution: `$( )` strips TRAILING
+# newlines, so an empty argument in last position — exactly where a dropped empty
+# one shows up — would vanish before `grep` ever saw it.
 expect_element() { # expect_element <exact argument> <label>
-  # `grep -qxF` on a here-string, never on a pipe: `grep -q` exits at the first
-  # match, which SIGPIPEs the producer, and `set -o pipefail` turns that into a
-  # non-zero pipeline — a false FAIL here, and worse, a silent `ok` below.
-  if grep -qxF -- "$1" <<<"$(ide_elements)"; then
+  if grep -qxF -- "$1" < <(ide_elements); then
     printf 'ok   — %s\n' "$2"
   else
     printf 'FAIL — %s\n  expected one whole argv element: <%s>\n  got: %s\n' "$2" "$1" "$(ide_argv)"
@@ -208,7 +226,7 @@ expect_element() { # expect_element <exact argument> <label>
 }
 
 reject_element() { # reject_element <exact argument> <label>
-  if grep -qxF -- "$1" <<<"$(ide_elements)"; then
+  if grep -qxF -- "$1" < <(ide_elements); then
     printf 'FAIL — %s\n  did not expect the whole argv element: <%s>\n  got: %s\n' "$2" "$1" "$(ide_argv)"
     FAILURES=$((FAILURES + 1))
   else
@@ -216,22 +234,117 @@ reject_element() { # reject_element <exact argument> <label>
   fi
 }
 
+# The command tmux is handed as the pane's process — the `bash -c` string. That
+# string is where the environment work happens, so it is what these two read.
+# Read from the raw log, never from `ide_elements`: that helper starts at the `_`
+# marker, which is further along.
+pane_command() {
+  awk '
+    /^ARG[0-9]+=<bash>$/ { at_bash = 1; next }
+    /^ARG[0-9]+=<-c>$/ { if (at_bash) want = 1; at_bash = 0; next }
+    /^ARG[0-9]+=</ {
+      if (want) { sub(/^ARG[0-9]+=</, ""); sub(/>$/, ""); print; exit }
+      at_bash = 0
+    }
+  ' "$TMUX_LOG"
+}
+
+# Both of these assert the SHAPE of the pane command, not the presence of a
+# substring. A grep for `env -i` or for the literal `TMUX=$TMUX` is satisfied by
+# a command that merely mentions them — e.g. one that echoes the three vars and
+# then execs `env -i "$@"` with no hand-back at all, which is exactly the
+# regression they exist to catch. Anchoring costs nothing and closes that.
 expect_env_cleared() { # expect_env_cleared <label>
-  # The `env` that starts the IDE's process, and whether it clears the
-  # environment first. Read from the raw log, never from `ide_elements`: that
-  # helper starts at the `_` marker, and this `env` belongs to the command tmux
-  # is handed, which is before the IDE's own argv.
+  if grep -qE '^exec env -i ' <<<"$(pane_command)"; then
+    printf 'ok   — %s\n' "$1"
+  else
+    printf 'FAIL — %s\n  the pane command does not begin with `exec env -i`: the tmux server environment would reach the session\n  got: %s\n' "$1" "$(pane_command)"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+expect_tmux_vars_kept() { # expect_tmux_vars_kept <label>
+  # The whole command, anchored: `env -i` must be handed the pane-owned values
+  # as its first three operands, in order, and then the caller's `"$@"`. tmux
+  # injects TMUX, TMUX_PANE and TERM into the pane's process and they are in no
+  # forwarded list, so the pane command is the only place still holding them —
+  # without the first two the IDE reports "not inside tmux" while it is
+  # demonstrably inside one, and without TERM it addresses a terminal it is not
+  # talking to.
+  local cmd
+  cmd="$(pane_command)"
+  if grep -qE '^exec env -i "TMUX=\$TMUX" "TMUX_PANE=\$TMUX_PANE" "TERM=\$TERM" "\$@"$' <<<"$cmd"; then
+    printf 'ok   — %s\n' "$1"
+  else
+    printf 'FAIL — %s\n  the pane command does not hand TMUX/TMUX_PANE/TERM to `env -i`\n  got: %s\n' "$1" "$cmd"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+expect_forwarded_element() { # expect_forwarded_element <NAME=value> <label>
+  # The forwarded list reaches tmux as its own argv elements, between the pane
+  # command and the wrapper — never inside `pane_command()`, whose text is a
+  # fixed literal. So the assertions above cannot see whether anything was
+  # forwarded at all: they would all pass with FORWARD_ENV emptied. This is the
+  # positive half.
+  if grep -qF -- "<$1>" "$TMUX_LOG"; then
+    printf 'ok   — %s\n' "$2"
+  else
+    printf 'FAIL — %s\n  <%s> is not in the tmux argv: the caller environment would not reach the IDE\n' "$2" "$1"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+expect_no_forwarded_tmux() { # expect_no_forwarded_tmux <label>
+  # The values tmux owns for a pane — TMUX, TMUX_PANE, TERM — come from tmux and
+  # are handed back by the pane command. A copy forwarded from the launcher's own
+  # environment is applied AFTER that set and wins (`env` is last-wins): the
+  # outer session's values when the launcher itself runs inside tmux, or an empty
+  # pair that re-creates the very bug this guards. Nothing tmux owns may appear
+  # in the forwarded list. Matched after the `<` so the pane command's own
+  # `"TMUX=$TMUX"` cannot count, and only up to the `_` marker: past it lies the
+  # IDE's own argv, where an argument that merely reads `TMUX=…` is the user's
+  # text, not a forwarded var.
   if awk '
-      /^ARG[0-9]+=<env>$/ { want = 1; next }
-      /^ARG[0-9]+=</ { if (want && $0 ~ /^ARG[0-9]+=<-i>$/) found = 1; want = 0 }
-      /^END$/ { want = 0 }
-      END { exit(found ? 0 : 1) }
+      /^ARG[0-9]+=</ {
+        v = $0
+        sub(/^ARG[0-9]+=</, "", v)
+        sub(/>$/, "", v)
+        if (v == "_") done = 1
+        if (!done && (v ~ /^TMUX=/ || v ~ /^TMUX_PANE=/ || v ~ /^TERM=/)) found = 1
+      }
+      END { exit(found ? 1 : 0) }
     ' "$TMUX_LOG"; then
     printf 'ok   — %s\n' "$1"
   else
-    printf 'FAIL — %s\n  no `env -i` in the tmux command line: the tmux server environment would reach the session\n' "$1"
+    printf 'FAIL — %s\n  a caller TMUX/TMUX_PANE/TERM is forwarded and would override the handed-back set\n' "$1"
     FAILURES=$((FAILURES + 1))
   fi
+}
+
+expect_no_marker_for() { # expect_no_marker_for <name> <label>
+  # A marker keyed on something that is not a tmux session records a tmux name
+  # that can never exist — junk the sweep has to reap.
+  if [ -d "$AIRPROMPT_SESSIONS_DIR/claude-$1" ]; then
+    printf 'FAIL — %s\n  a marker dir was keyed on a non-tmux name: claude-%s\n' "$2" "$1"
+    FAILURES=$((FAILURES + 1))
+  else
+    printf 'ok   — %s\n' "$2"
+  fi
+}
+
+respawn_target() { # the -t argument of the respawn-pane invocation in the log
+  awk '
+    /^ARG[0-9]+=<respawn-pane>$/ { in_respawn = 1; next }
+    in_respawn && /^ARG[0-9]+=<-t>$/ { want = 1; next }
+    want {
+      v = $0
+      sub(/^ARG[0-9]+=</, "", v)
+      sub(/>$/, "", v)
+      print v
+      exit
+    }
+  ' "$TMUX_LOG"
 }
 
 expect_marker() { # expect_marker <marker-dir> <name> <label>
@@ -359,6 +472,14 @@ expect_marker "claude-airprompt-dev-8" "dev-8" "no node on PATH: the AirPrompt m
 argv="$(FAKE_TMUX_DEAD=1 launch --provider claude --binary /bin/echo --resume airprompt-dev-10 --name dev-10 --foo)"
 expect_exact "/bin/echo -n dev-10 --foo" "$argv" "claude: a dead pane is respawned with the name and the user's args"
 expect "respawn-pane" "$(ide_verb)" "claude: that launch is the respawn, not a replacement session"
+# Respawn the DEAD pane by id. A bare session target resolves to the session's
+# ACTIVE pane, so on a session with a dead pane and a live one it would replace
+# the live pane — killing the process the user is coming back to.
+expect_exact "%9" "$(respawn_target)" "claude: the respawn targets the dead pane's id, not the session"
+# The marker is written for a resumed tmux session as well as a fresh one. Its
+# absence is invisible to the id-resume case (which asserts only that no marker
+# is keyed on the id), so a regression that drops the call needs this positive.
+expect_marker "claude-airprompt-dev-10" "dev-10" "claude: the resume-tmux path still writes its marker"
 
 # 11. A launch with no IDE args of its own: the forwarded pair is the whole
 #     argument list.
@@ -421,8 +542,13 @@ expect "new-session" "$(ide_verb)" "claude: that empty-args fallback is a fresh 
 
 # 21. The last empty-`args` site: the direct exec, inside tmux, with nothing to
 #     forward. The counter proves the IDE really ran (an empty argv cannot).
-out="$(TMUX=/tmp/fake,1,0 launch_stdout --provider claude --binary "$FAKE_BIN/recorder-count")"
+out="$(FAKE_TMUX_SESSION='' TMUX=/tmp/fake,1,0 launch_stdout --provider claude --binary "$FAKE_BIN/recorder-count")"
 expect_exact "argc=0" "$out" "inside tmux: a direct exec with nothing to forward runs the IDE bare"
+# The fast path marks the session it is already in — but only once it has that
+# session's name. A TMUX whose server is gone yields none (the fake answers with
+# nothing here), and marking anyway would file the dir under
+# save_session_marker's `airprompt-unknown` fallback.
+expect_no_marker_for "airprompt-unknown" "inside tmux: no marker is filed on the unknown-session fallback"
 
 # 22. The IDE's environment is the caller's and nothing else. A tmux session
 #     starts as a copy of the SERVER's environment — whichever client happened to
@@ -432,8 +558,76 @@ expect_exact "argc=0" "$out" "inside tmux: a direct exec with nothing to forward
 #     is what stops that, and it is pinned on both paths that start a process.
 argv="$(launch --provider claude --binary /bin/echo --name dev-22)"
 expect_env_cleared "a new session clears the environment before starting the IDE"
+expect_tmux_vars_kept "a new session keeps the pane-owned TMUX/TMUX_PANE/TERM"
 argv="$(FAKE_TMUX_DEAD=1 launch --provider claude --binary /bin/echo --resume airprompt-dev-22)"
 expect_env_cleared "a respawn clears the environment before starting the IDE"
+expect_tmux_vars_kept "a respawn keeps them too"
+
+# 23. `--resume` takes either a tmux session name or the IDE's own session id,
+#     and only a real tmux session may get a marker. Keyed on an id, the marker
+#     records a tmux name that can never exist — the junk dir the sweep reaps.
+argv="$(FAKE_TMUX_NO_SESSION=1 launch --provider claude --binary /bin/echo --resume 3be36f4d-8c08-440b-9610-208bec85c887)"
+expect "3be36f4d-8c08-440b-9610-208bec85c887" "$argv" "resume by IDE id still reaches the IDE"
+expect_no_marker_for "3be36f4d-8c08-440b-9610-208bec85c887" "resume by IDE id writes no marker keyed on that id"
+
+# 24. Launching from inside tmux must not forward the OUTER session's tmux
+#     identity into the new pane — the forwarded copy lands after the handed-back
+#     pair and wins, so the IDE would be attributed to the session it left.
+TMUX=/tmp/fake,1,0 TMUX_PANE=%9 FAKE_TMUX_DEAD=1 launch --provider claude --binary /bin/echo --resume airprompt-dev-24 >/dev/null
+expect_no_forwarded_tmux "inside tmux: the outer tmux identity is not forwarded into the pane"
+expect_env_cleared "inside tmux: that pane still clears the environment first"
+expect_tmux_vars_kept "inside tmux: that pane still hands the pane-owned set back"
+
+# 25. The other half of that guard: with a name to key on, the marker IS written.
+#     Dropping the write altogether would satisfy every negative assertion above.
+out="$(TMUX=/tmp/fake,1,0 launch_stdout --provider claude --binary "$FAKE_BIN/recorder-count" --name dev-25)"
+expect_marker "claude-fake-session" "dev-25" "inside tmux: the marker is keyed on the session the pane reports"
+
+# 26. An empty --resume value is refused. Falling through instead started a
+#     fresh session: no resume, no complaint, and one nobody asked for.
+out="$(launch_stderr --provider claude --binary /bin/echo --resume '')"
+expect "requires a session name or ID" "$out" "claude: --resume with an empty value is refused"
+
+# 27. A launch from a web-proxy pane is keyed on the session the proxy drives,
+#     not on the proxy itself — the same mapping every other call site applies.
+#     Keyed on the proxy, the marker is invisible to `airprompt off`/`name`,
+#     which resolve the real session from its group.
+out="$(FAKE_TMUX_SESSION=airprompt-web-phone FAKE_TMUX_GROUP=airprompt-real TMUX=/tmp/fake,1,0 launch_stdout --provider claude --binary "$FAKE_BIN/recorder-count" --name dev-27)"
+expect_marker "claude-airprompt-real" "dev-27" "inside a web-proxy pane: the marker is keyed on the session the proxy drives"
+
+# 28. `--continue` with an empty value consumes it. The empty string would
+#     otherwise re-enter the parse loop and reach the IDE as an argument, and
+#     for a CLI an empty positional is a prompt — not nothing. The empty
+#     element is asserted on the element list, which needs `reject_element`'s
+#     sentinel to survive in last position; the joined line would show it too,
+#     as the trailing space the exact-match below trips over.
+argv="$(launch --provider claude --binary /bin/echo --continue '')"
+expect_exact "/bin/echo --continue" "$argv" "claude: --continue with an empty value is not split into two arguments"
+reject_element "" "claude: no empty argument reaches the IDE"
+
+# 29. Empty and flag-valued operands are refused for --name and --resume alike.
+#     Empty would look like it worked (unnamed session, or a fresh launch that
+#     silently is not a resume); a flag would be swallowed as the operand,
+#     destroying the flag the user did type.
+out="$(launch_stderr --provider claude --binary /bin/echo --name '')"
+expect "requires a name" "$out" "claude: --name with an empty value is refused"
+out="$(launch_stderr --provider claude --binary /bin/echo --name --resume ideid)"
+expect "requires a name" "$out" "claude: --name does not swallow a following flag as its name"
+out="$(launch_stderr --provider claude --binary /bin/echo --resume --name x)"
+expect "requires a session name or ID" "$out" "claude: --resume does not swallow a following flag as its session"
+
+# 30. An ungrouped session *named* `airprompt-web-…` is not a proxy: mapping it
+#     to its (empty) group would drop the marker entirely. `--name web-x`
+#     produces exactly such a name.
+out="$(FAKE_TMUX_SESSION=airprompt-web-fake FAKE_TMUX_GROUP='' TMUX=/tmp/fake,1,0 launch_stdout --provider claude --binary "$FAKE_BIN/recorder-count" --name dev-31)"
+expect_marker "claude-airprompt-web-fake" "dev-31" "an ungrouped airprompt-web-* session keeps its own name as the marker key"
+
+# 32. A caller variable has to reach the pane's argv — the positive half of the
+#     environment story. That the environment is CLEARED is asserted three times
+#     over; that the caller's own environment still arrives was asserted nowhere,
+#     so emptying FORWARD_ENV would leave every one of those assertions green.
+R12_FWD_SENTINEL=keepme launch --provider claude --binary /bin/echo --name dev-32 >/dev/null
+expect_forwarded_element "R12_FWD_SENTINEL=keepme" "a caller variable is forwarded into the pane's argv"
 
 if [ "$FAILURES" -gt 0 ]; then
   printf '\n%s check(s) failed.\n' "$FAILURES"

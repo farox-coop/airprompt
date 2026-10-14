@@ -49,16 +49,20 @@ ORIG_PWD="$PWD"
 
 # ── Generate stable session ID (based on tmux, not shell PID) ────────
 if [ -n "${TMUX:-}" ]; then
-  TMUX_SESSION=$(tmux display-message -p '#S' 2>/dev/null)
+  # `|| true` on both: a `$TMUX` whose server is gone makes tmux fail here, and
+  # under `set -e` that aborted the whole command with nothing printed.
+  TMUX_SESSION=$(tmux display-message -p '#S' 2>/dev/null || true)
   if echo "$TMUX_SESSION" | grep -q '^airprompt-web-'; then
-    # Resolve web proxy session to parent group — same logic as statusline script.
-    PARENT_GROUP=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r')
+    # Resolve a web proxy session to the session it drives. Only a session that
+    # really has a group is a proxy: one merely *named* `airprompt-web-…`
+    # (`--name web-x` produces exactly that) keeps its own name, which is what
+    # the statusline, off.sh, name.sh and the launcher all do.
+    PARENT_GROUP=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r' || true)
     if [ -n "${PARENT_GROUP:-}" ]; then
       echo "Resolved web proxy session ($TMUX_SESSION) to parent group: $PARENT_GROUP" >&2
       TMUX_SESSION="$PARENT_GROUP"
     else
-      echo "Warning: web proxy session ($TMUX_SESSION) has no parent group — will create new session" >&2
-      TMUX_SESSION=""
+      echo "Warning: $TMUX_SESSION matches airprompt-web-* but has no group — treating it as a plain session name" >&2
     fi
   fi
 fi

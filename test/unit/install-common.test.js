@@ -6,7 +6,7 @@
 
 'use strict';
 
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
@@ -21,9 +21,20 @@ const {
   copyManifestFiles,
 } = require('../../src/providers/install-common');
 
+// Every temp dir this file makes is removed once its tests finish. Without
+// this an uncleaned mkdtemp leaves a directory per call, and the suite runs
+// often enough that they pile up in the system temp dir.
+const TMP_DIRS = [];
+
 function tmpdir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-install-common-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-install-common-'));
+  TMP_DIRS.push(dir);
+  return dir;
 }
+
+after(() => {
+  for (const dir of TMP_DIRS) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 // ── readJson ──────────────────────────────────────────────────────────────
 

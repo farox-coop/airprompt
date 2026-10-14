@@ -4,6 +4,7 @@ set -euo pipefail
 PORT="${AIRPROMPT_TEST_PORT:-3211}"
 PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SERVER_PID=""
+STARTED=0 # flips once this run has spawned its own server; see cleanup()
 TMPDIR=$(mktemp -d)
 trap 'cleanup' EXIT
 
@@ -18,13 +19,19 @@ skipped() { echo "  SKIP: $1"; skip=$((skip + 1)); }
 
 cleanup() {
   set +e
-  if command -v tmux &>/dev/null; then
-    for s in $(tmux ls 2>/dev/null | grep -o 'airprompt-integtest-[^:]*' || true); do
-      tmux kill-session -t "$s" 2>/dev/null || true
-    done
+  # Only once this run has actually started its own server. The tmux sweep below
+  # matches by name prefix, so a run that never started — the port guard's
+  # early exit, or a startup failure — would reap ANOTHER run's fixtures and
+  # remove the pidfile the two share. Its own temp dir goes either way.
+  if [ "$STARTED" = 1 ]; then
+    if command -v tmux &>/dev/null; then
+      for s in $(tmux ls 2>/dev/null | grep -o 'airprompt-integtest-[^:]*' || true); do
+        tmux kill-session -t "$s" 2>/dev/null || true
+      done
+    fi
+    [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
+    rm -f "${TEST_PID_FILE:-/tmp/airprompt-server-test.pid}"
   fi
-  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
-  rm -f "${TEST_PID_FILE:-/tmp/airprompt-server-test.pid}"
   rm -rf "$TMPDIR"
 }
 
@@ -38,6 +45,18 @@ echo "=== AirPrompt Integration Tests ==="
 echo "tmux available: $TMUX_OK"
 
 # ── Start server ─────────────────────────────────────────────────────
+# Refuse to start on a port somebody already holds. The readiness loop below
+# accepts any answer on $PORT, so a second concurrent run — or any other
+# process on that port — would be silently adopted as "our" daemon and the two
+# would write into each other's sessions dirs and corrupt each other's results.
+# `--max-time` is load-bearing: a holder that accepts the connection and never
+# answers (a wedged daemon, `nc -l`, a half-open proxy) would otherwise block
+# curl — and this script — forever, with no output at all.
+if curl -s --max-time 5 -o /dev/null "http://localhost:${PORT}/api/sessions" 2>/dev/null; then
+  echo "Error: something is already listening on port ${PORT} — refusing to run" >&2
+  echo "  another integration run, or a stray daemon, holds it. Stop that first." >&2
+  exit 1
+fi
 echo "Starting AirPrompt server on port $PORT..."
 TEST_PID_FILE="/tmp/airprompt-server-test.pid"
 rm -f "$TEST_PID_FILE"
@@ -46,15 +65,22 @@ AIRPROMPT_NO_TLS=1 AIRPROMPT_PID_FILE="$TEST_PID_FILE" AIRPROMPT_STATE_DIR="$TMP
 SERVER_PID=$!
 
 for _ in $(seq 1 20); do
-  if kill -0 "$SERVER_PID" 2>/dev/null && curl -s "http://localhost:${PORT}/api/sessions" > /dev/null 2>&1; then
+  if kill -0 "$SERVER_PID" 2>/dev/null &&
+    curl -s --max-time 5 "http://localhost:${PORT}/api/sessions" >/dev/null 2>&1; then
     break
   fi
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    # Deliberately NOT marked started: this run never got a server, so it never
+    # created a fixture — and cleanup() would otherwise sweep the
+    # `airprompt-integtest-*` prefix, reaping sessions belonging to another run.
+    # Reached when the port guard passed but the bind then failed (a holder that
+    # does not answer HTTP makes the guard's curl fail).
     echo "Server process died" >&2
     exit 1
   fi
   sleep 0.5
 done
+STARTED=1 # our server is up and answering; from here cleanup owns what we made
 echo "Server running (PID $SERVER_PID)"
 
 # ── Test 1: Register → List → Unregister ────────────────────────────
@@ -495,19 +521,47 @@ else
 fi
 
 # 9c: Session list sweep — create dir with dead tmux marker, verify sweep logic
-SWEEP_DIR="${TMPDIR}/sessions/claude-deadsweep"
+# The root's name carries "airprompt" on purpose: on.sh sweeps through
+# `_safe_rm_rf`, which refuses any root without it, so with a plain
+# `${TMPDIR}/sessions` the sweep is a silent no-op and this subtest confirms
+# nothing.
+SWEEP_ROOT="${TMPDIR}/airprompt-sessions"
+SWEEP_DIR="${SWEEP_ROOT}/claude-deadsweep"
 mkdir -p "$SWEEP_DIR"
 echo "airprompt-nonexistent-999" > "$SWEEP_DIR/tmux"
 echo "test-sweep-sid" > "$SWEEP_DIR/session"
 echo "claude" > "$SWEEP_DIR/provider"
 echo "http://localhost:3210" > "$SWEEP_DIR/url"
 echo "" > "$SWEEP_DIR/active"
-AIRPROMPT_NO_TLS=1 AIRPROMPT_SESSIONS_DIR="${TMPDIR}/sessions" \
-  AIRPROMPT_PROVIDER=claude bash "${PROJECT_DIR}/bin/airprompt-on.sh" 2>/dev/null || true
-if [ ! -d "$SWEEP_DIR" ] || [ ! -f "$SWEEP_DIR/active" ]; then
-  ok "on.sh sweep cleans dead-tmux dirs (or idempotency skips)"
+# Every knob on.sh reads has to be pointed at this harness, or it reaches the
+# PRODUCTION daemon (port 3210, the real pidfile and state dir) and stands a
+# session up on the ambient tmux server — a live stray nobody reaps.
+#
+# Three things make that impossible here, and each is load-bearing:
+#   * `env -u TMUX` — on.sh fills TMUX_SESSION from `$TMUX` before it ever looks
+#     at AIRPROMPT_TMUX_SESSION, so with an ambient TMUX the knob is ignored and
+#     the subtest registers whatever session the runner happens to be sitting in.
+#   * the session name is `integtest-onsweep`, WITHOUT the `airprompt-` prefix.
+#     on.sh hands that name to the daemon without creating it, and the register
+#     route answers a name it cannot find by standing up a `airprompt-<sessionId>`
+#     of its own. Unprefixed here, that stand-in IS `airprompt-integtest-onsweep`
+#     — which is what cleanup() kills. Prefixed, it would come out as
+#     `airprompt-airprompt-integtest-onsweep`, which that `[^:]*` grep can never
+#     match, and the stray would outlive the run.
+#   * cleanup() then reaps it by that prefix.
+ON_LOG="${TMPDIR}/on-9c.log"
+env -u TMUX -u TMUX_PANE \
+  AIRPROMPT_NO_TLS=1 AIRPROMPT_SESSIONS_DIR="$SWEEP_ROOT" \
+  AIRPROMPT_PROVIDER=claude AIRPROMPT_PORT="$PORT" \
+  AIRPROMPT_PID_FILE="$TEST_PID_FILE" AIRPROMPT_STATE_DIR="$TMPDIR/state" \
+  AIRPROMPT_TMUX_SESSION="integtest-onsweep" \
+  bash "${PROJECT_DIR}/bin/airprompt-on.sh" >"$ON_LOG" 2>&1 || true
+if [ -d "$SWEEP_DIR" ] && [ -f "$SWEEP_DIR/active" ]; then
+  # Keep on.sh's output: with `2>/dev/null` an on.sh that died before its sweep
+  # (an unresolvable $TMUX, under `set -e`) failed this subtest with no evidence.
+  not_ok "on.sh left the dead-tmux dir in place — its sweep did not run: $(tr '\n' ' ' < "$ON_LOG" | head -c 200)"
 else
-  ok "dead sweep dir survives (may be idempotency skip)"
+  ok "on.sh swept the dead-tmux dir (or cleared its active marker)"
 fi
 
 # ── Test 10: Activate 409-recovery — session file written by 409 handler ──

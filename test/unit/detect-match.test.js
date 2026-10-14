@@ -16,6 +16,7 @@ const { detectMatch } = require('../../src/providers/provider');
 
 test('detectMatch — macapp: bare name resolves ~/Applications', (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-detect-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   fs.mkdirSync(path.join(tmp, 'Applications', 'Foo.app'), { recursive: true });
   t.mock.method(os, 'homedir', () => tmp);
   assert.strictEqual(detectMatch('macapp:Foo.app'), true);
@@ -24,6 +25,7 @@ test('detectMatch — macapp: bare name resolves ~/Applications', (t) => {
 
 test('detectMatch — vscode-ext: matches an installed extension id', (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'airprompt-detect-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   fs.mkdirSync(path.join(tmp, '.vscode', 'extensions', 'openai.codex-0.1.0'), { recursive: true });
   t.mock.method(os, 'homedir', () => tmp);
   assert.strictEqual(detectMatch('vscode-ext:openai.codex'), true);

@@ -29,9 +29,14 @@ CURRENT_TMUX="${AIRPROMPT_TEST_TMUX:-}"
 # ── Detect current tmux session ─────────────────────────────────────
 if [ -z "$CURRENT_TMUX" ] && [ -n "${TMUX:-}" ]; then
   CURRENT_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
-  # Inside a web proxy session — resolve to parent via tmux group name
+  # Inside a web proxy session — resolve to parent via tmux group name. A
+  # session merely *named* `airprompt-web-…` has no group and keeps its own
+  # name, which is the guard activate.js and deactivate.js use too.
   if echo "$CURRENT_TMUX" | grep -q '^airprompt-web-'; then
-    CURRENT_TMUX=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r' || true)
+    PROXY_GROUP=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r' || true)
+    if [ -n "$PROXY_GROUP" ]; then
+      CURRENT_TMUX="$PROXY_GROUP"
+    fi
   fi
 fi
 

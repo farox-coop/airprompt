@@ -3,10 +3,14 @@ set -euo pipefail
 
 # ── Help guard ─────────────────────────────────────────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-  echo "Usage: bin/airprompt off"
+  echo "Usage: bin/airprompt off [<sessionId>]"
   echo ""
   echo "  Unregister current session from daemon, remove local markers,"
   echo "  and stop daemon if no sessions remain."
+  echo ""
+  echo "  <sessionId> targets that session instead of the current one. Use it"
+  echo "  when the current session cannot be resolved — a pane whose \$TMUX was"
+  echo "  lost, for instance."
   echo ""
   echo "This is an internal script. Use 'bin/airprompt off' directly."
   exit 0
@@ -30,13 +34,31 @@ SAFE_TMUX=""
 if [ -n "${TMUX:-}" ]; then
   CURRENT_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
   if echo "$CURRENT_TMUX" | grep -q '^airprompt-web-'; then
-    CURRENT_TMUX=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r')
+    PROXY_GROUP=$(tmux display-message -p '#{session_group}' 2>/dev/null | tr -d '\n\r' || true)
+    # Only a session that really belongs to a group is a proxy. A session merely
+    # *named* `airprompt-web-…` — `--name web-x` produces exactly that — is not,
+    # and blanking its name here would leave `off` unable to resolve it at all.
+    # activate.js and deactivate.js guard the same way.
+    if [ -n "$PROXY_GROUP" ]; then
+      CURRENT_TMUX="$PROXY_GROUP"
+    fi
   fi
 fi
 
 # ── Auto-discover session from per-session dir ───────────────────────
+# An explicit sessionId names its own session, so resolve THAT session's dir.
+# Falling back to the current pane's would make `airprompt off <otherId>` remove
+# the caller's markers — and kill its mirror — while leaving the target's behind.
 MY_DIR=""
-if [ -n "$CURRENT_TMUX" ]; then
+if [ -n "$SESSION_ID" ]; then
+  for d in "${SESSIONS_DIR}"/*/; do
+    [ -d "$d" ] || continue
+    if [ "$(head -c 128 "${d}/session" 2>/dev/null | tr -d '\n\r' || true)" = "$SESSION_ID" ]; then
+      MY_DIR="${d%/}"
+      break
+    fi
+  done
+elif [ -n "$CURRENT_TMUX" ]; then
   SAFE_TMUX=$(printf '%s' "$CURRENT_TMUX" | tr -cd 'a-zA-Z0-9_.-')
   if [ -n "$PROVIDER" ] && [ -d "${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}" ]; then
     MY_DIR="${SESSIONS_DIR}/${PROVIDER}-${SAFE_TMUX}"
@@ -47,7 +69,7 @@ if [ -n "$CURRENT_TMUX" ]; then
       [ -d "$d" ] && { MY_DIR="$d"; break; }
     done
   fi
-  if [ -n "$MY_DIR" ] && [ -z "$SESSION_ID" ]; then
+  if [ -n "$MY_DIR" ]; then
     SESSION_ID=$(head -c 128 "${MY_DIR}/session" 2>/dev/null | tr -d '\n\r' || true)
   fi
 fi

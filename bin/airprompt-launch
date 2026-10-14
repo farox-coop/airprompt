@@ -194,12 +194,24 @@ SESSIONS_DIR="${AIRPROMPT_SESSIONS_DIR:-$HOME/.airprompt/sessions}"
 # per-project git scope, a port, a Docker project name, a token that belongs to
 # one session) reaches the IDE anyway, silently, and outlives whatever set it.
 # Those stale values are worse than missing ones: nothing on screen says where
-# they came from. With `-i` the IDE's environment is exactly this caller's,
-# which is what "forward the environment" has to mean.
+# they came from. With `-i` the IDE inherits this caller's environment and
+# nothing from that server, which is what "forward the environment" has to mean.
+#
+# The three vars tmux owns for a pane — TMUX, TMUX_PANE and TERM — are the ones
+# this cannot simply drop. tmux injects them into the process it starts, and
+# `env -i` would clear the only copy, leaving the IDE reporting "not inside
+# tmux" while it demonstrably is, or talking to a terminal it is not sitting in
+# (TERM inside a pane must name what tmux emulates, not the outer terminal). The
+# pane command therefore reads all three from the pane and hands them back (see
+# pane_argv below). They are also stripped from FORWARD_ENV: when the launcher
+# itself runs inside tmux it carries the OUTER session's copies, and a forwarded
+# copy arrives after the handed-back one and wins (`env` is last-wins), which
+# names the wrong session — or nothing at all, when the caller's TMUX is empty.
 declare -a FORWARD_ENV=()
 while IFS='=' read -r name value; do
   case "$name" in
     AIRPROMPT_DEBUG|AIRPROMPT_PID_FILE|AIRPROMPT_TMUX_SESSION|AIRPROMPT_CAPTURE) ;;  # strip internal-only vars
+    TMUX|TMUX_PANE|TERM) ;;  # the pane's own — pane_argv re-adds them; a caller's copy would override that set
     AIRPROMPT_*) FORWARD_ENV+=("$name=$value") ;;  # forward config vars for deactivate hooks
     BASH_FUNC_* | BASH_ALIASES | BASH_ARGV | BASH_SOURCE | BASH_LINENO | _) ;;  # skip shell internals
     *) FORWARD_ENV+=("$name=$value") ;;
@@ -236,11 +248,17 @@ args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --resume)
-      if [ $# -lt 2 ]; then
-        echo "Error: --resume requires a session name or ID" >&2
-        echo "Usage: airprompt-launch --resume <session_id>" >&2
-        exit 1
-      fi
+      # Two bad values, one guard. Empty falls through to a silent fresh launch
+      # — no resume, no complaint, a session nobody asked for; and a following
+      # flag (`--resume --name x`) would be swallowed as the session name,
+      # destroying the flag the user did type.
+      case "${2:-}" in
+        "" | -*)
+          echo "Error: --resume requires a session name or ID" >&2
+          echo "Usage: airprompt-launch --resume <session_id>" >&2
+          exit 1
+          ;;
+      esac
       RESUME_SESSION="$2"
       shift 2
       ;;
@@ -250,9 +268,18 @@ while [ $# -gt 0 ]; do
       # which the user typed and therefore reaches the IDE as typed — AirPrompt
       # does not decide for the CLI what it supports.
       case "${2:-}" in
-        -* | "")
+        -*)
           args+=("--continue")
           shift
+          ;;
+        "")
+          # A bare `--continue`, or one whose value came out empty
+          # (`--continue "$ID"` with `$ID` unset). The empty value has to be
+          # consumed too: left in place it re-enters the loop and reaches the
+          # IDE as an argument, which for a CLI is a prompt, not nothing.
+          args+=("--continue")
+          shift
+          if [ $# -gt 0 ]; then shift; fi
           ;;
         *)
           RESUME_SESSION="$2"
@@ -261,14 +288,22 @@ while [ $# -gt 0 ]; do
       esac
       ;;
     --name)
-      if [ $# -lt 2 ]; then
-        echo "Error: --name requires a name" >&2
-        exit 1
-      fi
+      # Same two values as --resume: an empty one would name nothing while
+      # looking like it did, and a flag would be taken as the name.
+      case "${2:-}" in
+        "" | -*)
+          echo "Error: --name requires a name" >&2
+          exit 1
+          ;;
+      esac
       SESSION_NAME="$2"
       shift 2
       ;;
     *)
+      # `--` included, on purpose: it is forwarded so the IDE still sees its own
+      # terminator, which is why the name pair above goes in front of the user's
+      # args rather than behind them. It does not stop THIS loop — a flag of
+      # AirPrompt's written after a `--` is still consumed here.
       args+=("$1")
       shift
       ;;
@@ -292,6 +327,41 @@ if [ -n "$SESSION_NAME" ]; then
   fi
 fi
 
+# ── Helper: the argv tmux is handed for a pane ──────────────────────
+# Sets PANE_ARGV = the pane's command shell, then `env -i` with its NAME=VALUE
+# list, then the wrapper that runs the IDE and captures the pane on exit.
+# Shared by both paths that start a process (new-session and respawn-pane) so
+# the environment rule cannot drift between them.
+#
+# The command shell exists only to move the values tmux owns for a pane — TMUX,
+# TMUX_PANE and TERM — across `env -i`. tmux injects them into the pane's
+# process; clear the environment without handing them back and the IDE sees
+# `$TMUX` empty and calls itself "not inside tmux" while sitting in a pane. They
+# are stripped from FORWARD_ENV so that this set is the only source — everything
+# else after `-i` is the caller's environment and nothing more, which is the
+# point of `-i`.
+pane_argv() { # pane_argv <capture_file> [ide-args...]
+  local capture_file="$1"
+  shift
+  # The command shell's $0 is not `_`: that name marks the IDE's own argv for
+  # `bash -c … _ "$@"` below, and this shell sits in front of it.
+  PANE_ARGV=(
+    bash -c 'exec env -i "TMUX=$TMUX" "TMUX_PANE=$TMUX_PANE" "TERM=$TERM" "$@"' airprompt-pane
+    AIRPROMPT_CAPTURE="$capture_file"
+  )
+  # Guarded like every other array here: bash 3.2 (macOS /bin/bash) reports an
+  # empty array as unbound under `set -u`. FORWARD_ENV is never empty in
+  # practice — it is `env` minus a few names — so this is parity, not a live bug.
+  local var
+  for var in ${FORWARD_ENV[@]+"${FORWARD_ENV[@]}"}; do
+    PANE_ARGV+=("$var")
+  done
+  PANE_ARGV+=(
+    bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _
+    "$@"
+  )
+}
+
 # ── Helper: run IDE inside tmux with pane-capture on exit ──────────
 # Usage: launch_tmux_capture <tmux_session> <capture_file> [ide-args...]
 # The wrapper bash script owns the capture file — it writes the last 100
@@ -301,15 +371,16 @@ launch_tmux_capture() {
   local capture_file="$2"
   shift 2
   # Args reach the IDE as argv, one element per argument (`bash -c … _ "$@"`),
-  # so spaces/newlines/metachars in env values or IDE args survive untouched
-  # and no shell re-parses them — no injection, no escaping needed.
-  local env_args=()
-  for var in "${FORWARD_ENV[@]}"; do
-    env_args+=("$var")
-  done
-  tmux new-session -d -s "$session" \
-    env -i AIRPROMPT_CAPTURE="$capture_file" "${env_args[@]}" \
-    bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ "$@"
+  # so spaces, quotes and metachars survive untouched and no shell re-parses
+  # them — no injection, no escaping needed. The exception is a forwarded env
+  # VALUE containing a newline: the collector above reads `env` line by line, so
+  # such a value is truncated at its first line and its tail becomes a stray
+  # variable named by its own text. Every element the collector emits contains
+  # an `=`, and the `env -i` operand list below always opens with the three
+  # handed-back assignments — so `env` has stopped parsing its own options
+  # before any collected element is read.
+  pane_argv "$capture_file" "$@"
+  tmux new-session -d -s "$session" "${PANE_ARGV[@]}"
   tmux set-option -t "$session" focus-events on
 }
 
@@ -346,17 +417,29 @@ attach_and_capture() {
 
 # ── Resume path ──────────────────────────────────────────────────────
 if [ -n "$RESUME_SESSION" ]; then
-  save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
-
   if tmux has-session -t "$RESUME_SESSION" 2>/dev/null; then
     # ── Known tmux session — reuse it ────────────────────────────────
+    # Only a real tmux session gets a marker here. `--resume` also accepts an
+    # IDE session id, and a marker keyed on one records a `tmux` name that can
+    # never exist — the junk dir the sweep then has to reap. The id-resume
+    # branch below writes its own marker for the session it actually creates.
+    save_session_marker "$RESUME_SESSION" "$SESSION_NAME"
     # Kill zombie pane (dead from previous /exit) silently, respawn fresh.
-    dead=$(tmux list-panes -t "$RESUME_SESSION" -F '#{pane_dead}' 2>/dev/null || true)
-    if echo "$dead" | tr -d '[:space:]' | grep -q '1'; then
+    # Resolve the DEAD pane's id: `-t <session>` targets the session's ACTIVE
+    # pane, so on a session holding a dead pane and a live one a bare session
+    # target would replace the live pane — killing the very process the user is
+    # returning to. Single-pane sessions (all AirPrompt makes) resolve the same.
+    DEAD_PANE=""
+    while read -r pane dead; do
+      if [ "$dead" = "1" ]; then
+        DEAD_PANE="$pane"
+        break
+      fi
+    done < <(tmux list-panes -t "$RESUME_SESSION" -F '#{pane_id} #{pane_dead}' 2>/dev/null || true)
+    if [ -n "$DEAD_PANE" ]; then
       AIRPROMPT_CAPTURE=$(mktemp)
-      tmux respawn-pane -k -t "$RESUME_SESSION" \
-        env -i AIRPROMPT_CAPTURE="$AIRPROMPT_CAPTURE" "${FORWARD_ENV[@]}" \
-        bash -c '"$@" || true; tmux capture-pane -p -J -S -100 > "$AIRPROMPT_CAPTURE"; exit 0' _ "$REAL_BINARY" ${args[@]+"${args[@]}"} 2>/dev/null || {
+      pane_argv "$AIRPROMPT_CAPTURE" "$REAL_BINARY" ${args[@]+"${args[@]}"}
+      tmux respawn-pane -k -t "$DEAD_PANE" "${PANE_ARGV[@]}" 2>/dev/null || {
         # respawn failed — kill zombie session and create new one
         tmux kill-session -t "$RESUME_SESSION" 2>/dev/null || true
         RESUME_IDE_ID=""
@@ -387,8 +470,30 @@ fi
 
 # ── Already inside tmux — just run real IDE, save session name ────
 if [ -n "${TMUX:-}" ]; then
+  # A set TMUX is not proof the session is reachable: a launcher that inherits
+  # one whose server is gone still lands here, and `display-message` then fails.
+  # Marking on that empty result would key the dir on save_session_marker's
+  # `airprompt-unknown` fallback — a marker naming no tmux session, the same
+  # junk the resume path no longer writes.
   SESSION_NAME_TMUX=$(tmux display-message -p '#S' 2>/dev/null || true)
-  save_session_marker "$SESSION_NAME_TMUX" "$SESSION_NAME"
+  # A web-proxy pane is named `airprompt-web-…`; the session it drives is the
+  # group it belongs to. Every other call site maps it back before using it as a
+  # key (off.sh, name.sh, statusline.sh, activate.js, deactivate.js) — without
+  # the same step here, a launch from a phone pane files its marker under the
+  # proxy, and `airprompt off`/`name` on the real session cannot find it.
+  if echo "$SESSION_NAME_TMUX" | grep -q '^airprompt-web-'; then
+    PROXY_GROUP=$(tmux display-message -p '#{session_group}' 2>/dev/null || true)
+    # Only a session that really belongs to a group is a proxy. An ungrouped
+    # session can still be *named* `airprompt-web-…` — `--name web-x` produces
+    # exactly that — and mapping it to an empty group would drop the marker
+    # altogether, where activate.js and deactivate.js keep the name instead.
+    if [ -n "$PROXY_GROUP" ]; then
+      SESSION_NAME_TMUX="$PROXY_GROUP"
+    fi
+  fi
+  if [ -n "$SESSION_NAME_TMUX" ]; then
+    save_session_marker "$SESSION_NAME_TMUX" "$SESSION_NAME"
+  fi
   exec "$REAL_BINARY" ${args[@]+"${args[@]}"}
 fi
 
