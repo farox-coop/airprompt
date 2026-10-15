@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+const ClaudeProvider = require('../../src/providers/claude');
 const CodexProvider = require('../../src/providers/codex');
 const CursorProvider = require('../../src/providers/cursor');
 const WindsurfProvider = require('../../src/providers/windsurf');
@@ -216,4 +217,97 @@ test('WindsurfProvider — install preserves existing object-form hook (non-clob
   } finally {
     env.restore();
   }
+});
+
+// ── ClaudeProvider — plugin record handling ─────────────────────────────────
+// install() used to decide "plugin already installed" by grepping
+// `claude plugin list` for the word airprompt, so a record whose cache dir was
+// gone — the state /plugin reports as `Plugin "airprompt" not cached at <path>`
+// — read as healthy and the repair never ran. A stub `claude` on PATH pins the
+// decision end to end: a stale record must go through `plugin update`, a
+// healthy one must spawn nothing at all.
+
+// Writes a stub `claude` that answers `plugin list --json`. The first call
+// reports `stalePath`; every call after that reports `freshPath`, which is what
+// the post-repair probe reads. `listOnly` keeps it answering `freshPath`.
+function writeFakeClaude(tmp, { stalePath, freshPath, listOnly }) {
+  const binDir = path.join(tmp, 'fakebin');
+  fs.mkdirSync(binDir, { recursive: true });
+  const log = path.join(tmp, 'claude-calls.log');
+  const seen = path.join(tmp, 'claude-seen');
+  const script = `#!/usr/bin/env bash
+echo "$@" >> ${JSON.stringify(log)}
+if [ "$1" = plugin ] && [ "$2" = list ]; then
+  if [ -f ${JSON.stringify(seen)} ]; then
+    printf '[{"id":"airprompt@airprompt","installPath":%s}]' ${JSON.stringify(JSON.stringify(freshPath))}
+  else
+    : > ${JSON.stringify(seen)}
+    printf '[{"id":"airprompt@airprompt","installPath":%s}]' ${JSON.stringify(JSON.stringify(listOnly ? freshPath : stalePath))}
+  fi
+fi
+exit 0
+`;
+  const file = path.join(binDir, 'claude');
+  fs.writeFileSync(file, script);
+  fs.chmodSync(file, 0o755);
+  return { binDir, log };
+}
+
+async function withFakeClaude(t, env, opts, fn) {
+  const fake = writeFakeClaude(env.tmp, opts);
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${fake.binDir}:${savedPath}`;
+  fs.writeFileSync(path.join(env.targetDir, 'src', 'hooks', 'airprompt-statusline.sh'), '');
+  try {
+    // The log only exists once the stub has been called, so hand `fn` a reader.
+    return await fn(() => fs.readFileSync(fake.log, 'utf8'));
+  } finally {
+    process.env.PATH = savedPath;
+    env.restore();
+  }
+}
+
+test('ClaudeProvider — install() repairs a stale plugin record instead of reinstalling', async (t) => {
+  const env = setupInstallEnv(t);
+  env.ctx.configDir = path.join(env.tmp, '.claude');
+  fs.mkdirSync(path.join(env.ctx.configDir, 'hooks'), { recursive: true });
+  const fresh = path.join(env.tmp, 'cache');
+  fs.mkdirSync(fresh, { recursive: true });
+
+  await withFakeClaude(
+    t,
+    env,
+    { stalePath: path.join(env.tmp, 'cache-gone'), freshPath: fresh },
+    async (readLog) => {
+      await ClaudeProvider.install(env.ctx);
+      const log = readLog();
+
+      assert.match(log, /plugin update airprompt@airprompt/, 'repairs via plugin update');
+      assert.doesNotMatch(log, /plugin install/, 'does not reinstall over a stale record');
+      assert.ok(
+        env.ctx.results.installed.includes('claude-plugin-repair'),
+        'repair reported as installed work'
+      );
+    }
+  );
+});
+
+test('ClaudeProvider — install() leaves a healthy plugin record alone', async (t) => {
+  const env = setupInstallEnv(t);
+  env.ctx.configDir = path.join(env.tmp, '.claude');
+  fs.mkdirSync(path.join(env.ctx.configDir, 'hooks'), { recursive: true });
+  const fresh = path.join(env.tmp, 'cache');
+  fs.mkdirSync(fresh, { recursive: true });
+
+  await withFakeClaude(t, env, { freshPath: fresh, listOnly: true }, async (readLog) => {
+    await ClaudeProvider.install(env.ctx);
+    const log = readLog();
+
+    assert.match(log, /plugin list --json/, 'probes the record');
+    assert.doesNotMatch(log, /plugin (update|install|marketplace)/, 'spawns no mutation');
+    assert.ok(
+      env.ctx.results.skipped.some(([id]) => id === 'claude'),
+      'reports the plugin as already installed'
+    );
+  });
 });

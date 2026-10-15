@@ -25,6 +25,7 @@ EXEMPT_FILES=(
   "bin/airprompt-autostart.sh"
   "bin/install.js"
   "src/providers/claude.js"
+  "src/providers/claude-plugin.js"
   "src/providers/codex.js"
   "src/providers/cursor.js"
   "src/providers/windsurf.js"

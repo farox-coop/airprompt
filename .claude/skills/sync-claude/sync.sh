@@ -4,7 +4,13 @@ set -euo pipefail
 REPO="$(git rev-parse --show-toplevel 2>/dev/null || { echo "ERROR: not inside a git repo" >&2; exit 1; })"
 # Shared portable helpers (_md5, _safe_rm_rf, _lan_ip, _is_airprompt_pid).
 source "$REPO/bin/lib/protocol.sh"
-CACHE_BASE=$(set +o pipefail; ls -d "$HOME/.claude/plugins/cache/"*-airprompt/airprompt 2>/dev/null | head -1 || true)
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# Widen past `*-airprompt`: the cache directory is named after the marketplace,
+# which is named after the repo slug at *add* time. `airprompt` (the name now)
+# and `diegomanuel-airprompt` (the pre-rename name) must both match, or the live
+# cache is missed and nothing gets synced or pruned. Newest base wins — a
+# rename leaves the previous base behind, and the live one keeps being written.
+CACHE_BASE=$(set +o pipefail; ls -dt "$CLAUDE_DIR/plugins/cache/"*airprompt/airprompt 2>/dev/null | head -1 || true)
 
 # Discover cache dirs (optional — hooks point to dev repo, caches are copies)
 CACHES=()
@@ -22,16 +28,87 @@ fi
 # Each commit creates a new cache dir with full node_modules (~70MB).
 # Sort by modification time so new commits don't nuke all old caches
 # just because the git hashes changed.
+#
+# Two dirs are never pruned, because Claude Code keeps pointing at them:
+#   - the one recorded in installed_plugins.json (`installPath`) — deleting it
+#     is exactly what produces `Plugin "airprompt" not cached at <path>`
+#   - one a live session is using (`.in_use/` holds its pid files)
 KEEP_COUNT=2
-if [ ${#CACHES[@]} -gt $KEEP_COUNT ]; then
+PLUGIN_RECORD="$CLAUDE_DIR/plugins/installed_plugins.json"
+RECORDED_PATHS=()
+if [ -f "$PLUGIN_RECORD" ]; then
+  # Node is a hard requirement of this project, and `jq` is not guaranteed.
+  while IFS= read -r p; do
+    [ -n "$p" ] && RECORDED_PATHS+=("$p")
+  done < <(node -e '
+    try {
+      const fs = require("fs");
+      const d = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      for (const entries of Object.values(d.plugins || {})) {
+        for (const e of entries || []) if (e && e.installPath) console.log(e.installPath);
+      }
+    } catch (_) {}
+  ' "$PLUGIN_RECORD" 2>/dev/null || true)
+fi
+
+# A missing node (or a shape we cannot parse) leaves this empty, and pruning
+# without knowing which dir Claude Code recorded is how the recorded one gets
+# deleted — that is the `Plugin "airprompt" not cached at <path>` bug. So when
+# there is a record we cannot read, skip the prune instead of guessing.
+PRUNE_OK=1
+if [ -f "$PLUGIN_RECORD" ] && [ ${#RECORDED_PATHS[@]} -eq 0 ]; then
+  echo "  WARNING: no installPath read from $PLUGIN_RECORD — skipping the prune rather than delete a recorded cache" >&2
+  PRUNE_OK=0
+fi
+
+_is_recorded() {
+  local dir="${1%/}"
+  for p in "${RECORDED_PATHS[@]:-}"; do
+    [ -n "$p" ] && [ "${p%/}" = "$dir" ] && return 0
+  done
+  return 1
+}
+
+# Claude Code names each file after the pid of the session using the dir, and
+# leaves the file behind when that session exits — so a non-empty `.in_use/` is
+# not proof of a live session. Reading the pids keeps a dead one from pinning
+# its 70 MB dir forever (which would turn KEEP_COUNT into a no-op).
+# An entry whose name is not a pid is assumed live: never prune on a guess.
+_is_in_use() {
+  local dir="${1%/}" f pid
+  [ -d "$dir/.in_use" ] || return 1
+  for f in "$dir/.in_use"/*; do
+    [ -f "$f" ] || continue
+    pid="${f##*/}"
+    pid="${pid//[!0-9]/}"
+    [ -n "$pid" ] || return 0
+    kill -0 "$pid" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+if [ "$PRUNE_OK" -eq 1 ] && [ ${#CACHES[@]} -gt $KEEP_COUNT ]; then
   # ls -dt sorts newest first — keep first $KEEP_COUNT, remove the rest.
   # `mapfile` is bash ≥4 — macOS ships bash 3.2, so use a while-read loop.
   REMOVED=0
+  KEPT=0
   idx=0
   while IFS= read -r dir; do
     idx=$((idx + 1))
-    [ "$idx" -le "$KEEP_COUNT" ] && continue
-    dirname=$(basename "$dir")
+    dir="${dir%/}"
+    if [ "$idx" -le "$KEEP_COUNT" ]; then
+      continue
+    fi
+    if _is_recorded "$dir"; then
+      echo "  keeping $(basename "$dir") — recorded in installed_plugins.json"
+      ((KEPT++)) || true
+      continue
+    fi
+    if _is_in_use "$dir"; then
+      echo "  keeping $(basename "$dir") — in use by a running session"
+      ((KEPT++)) || true
+      continue
+    fi
     _safe_canonical="$(cd "$(dirname "$dir")" 2>/dev/null && pwd -P 2>/dev/null)" || {
       echo "  SAFETY: cannot resolve parent of ${dir} — skipping" >&2
       continue
@@ -41,11 +118,11 @@ if [ ${#CACHES[@]} -gt $KEEP_COUNT ]; then
       echo "  SAFETY: canonical path missing 'airprompt' — refusing rm -rf $_safe_canonical" >&2
       continue
     fi
-    echo "  pruning stale cache: $dirname"
+    echo "  pruning stale cache: $(basename "$dir")"
     rm -rf "$dir"
     ((REMOVED++)) || true
   done < <(ls -dt "${CACHES[@]}" 2>/dev/null)
-  echo "  removed $REMOVED stale cache dirs (keeping latest $KEEP_COUNT)"
+  echo "  removed $REMOVED stale cache dirs (kept latest $KEEP_COUNT + $KEPT protected)"
   # Refresh cache list after pruning
   CACHES=($(ls -d "$CACHE_BASE"/*/ 2>/dev/null || true))
 fi

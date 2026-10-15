@@ -69,9 +69,11 @@ function runSpawn(cmd, args, opts, dry) {
   return spawnXplat(cmd, args, Object.assign({ stdio: 'inherit' }, opts || {}));
 }
 
-function captureSpawn(cmd, args) {
+// `opts` carries `env` when the caller resolved a config dir of its own — a
+// probe that reads the ambient environment answers about the wrong config.
+function captureSpawn(cmd, args, opts) {
   try {
-    return spawnXplat(cmd, args, { encoding: 'utf8' });
+    return spawnXplat(cmd, args, Object.assign({ encoding: 'utf8' }, opts || {}));
   } catch (_) {
     return { status: 1, stdout: '', stderr: '' };
   }

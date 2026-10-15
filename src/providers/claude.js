@@ -16,6 +16,7 @@ const path = require('path');
 const os = require('os');
 
 const { resolveInstallDir, hasCmd, detectMatch, sessionsRootDir } = require('./provider');
+const PLUGIN = require('./claude-plugin');
 const { ensureCoreInstall } = require('./install-common');
 const { safeRmSync } = require('../utils');
 
@@ -28,6 +29,16 @@ function loadInstallDeps() {
 }
 
 const REPO = 'farox-coop/airprompt';
+
+// Environment for every `claude plugin …` call. The CLI resolves its config
+// from CLAUDE_CONFIG_DIR, so without it a probe (and the install that follows)
+// reads the *ambient* config: `--config-dir <other>` would report the plugin as
+// already installed — from the default `~/.claude` — and then skip wiring hooks
+// for the config dir the user asked for. Inherits the shared tmp env so a
+// download and its rename stay on one filesystem.
+function pluginCliEnv(H, configDir) {
+  return Object.assign(H.sameFilesystemTmpEnv(configDir), { CLAUDE_CONFIG_DIR: configDir });
+}
 
 const HOOK_FILES = ['airprompt-activate.js', 'airprompt-deactivate.js', 'airprompt-statusline.sh'];
 
@@ -375,43 +386,57 @@ const ClaudeProvider = {
     if (!targetDir) return; // clone failed — abort
 
     // 4. Claude Code plugin install (idempotent unless --force)
-    let alreadyInstalled = false;
-    if (!opts.force && hasCmd('claude')) {
-      const r = H.captureSpawn('claude', ['plugin', 'list']);
-      if (r.status === 0 && /airprompt/i.test(r.stdout || '')) alreadyInstalled = true;
-    }
     let pluginInstallSucceeded = false;
-    if (alreadyInstalled) {
-      note('  airprompt plugin already installed (use --force to reinstall)');
-      results.skipped.push(['claude', 'plugin already installed']);
-      pluginInstallSucceeded = true;
-    } else if (hasCmd('claude')) {
-      say('  → installing Claude Code plugin');
-      const pluginEnv = H.sameFilesystemTmpEnv(configDir);
-      const r1 = H.runSpawn(
-        'claude',
-        ['plugin', 'marketplace', 'add', REPO],
-        { env: pluginEnv },
-        opts.dryRun
-      );
-      const r2 = H.runSpawn(
-        'claude',
-        ['plugin', 'install', 'airprompt@airprompt'],
-        { env: pluginEnv },
-        opts.dryRun
-      );
-      if (H.spawnOk(r1) && H.spawnOk(r2)) {
-        results.installed.push('claude');
-        pluginInstallSucceeded = true;
-      } else {
-        if (r1.error || r2.error) {
-          warn('  claude CLI not found on PATH (or could not be spawned)');
-        }
-        results.failed.push(['claude', 'claude plugin install failed']);
-      }
-    } else {
+    if (!hasCmd('claude')) {
       warn('  claude CLI not found — skipping plugin install');
       note('  hooks will be wired standalone instead');
+    } else {
+      const pluginEnv = pluginCliEnv(H, configDir);
+      const { record, health } = PLUGIN.probePlugin(H, pluginEnv);
+
+      switch (PLUGIN.planPluginAction(record, health, opts.force)) {
+        case 'skip':
+          // Healthy, or a CLI too old to report the cache path — either way
+          // there is nothing to check or redo.
+          note('  airprompt plugin already installed (use --force to reinstall)');
+          results.skipped.push(['claude', 'plugin already installed']);
+          pluginInstallSucceeded = true;
+          break;
+        case 'repair': {
+          // Stale record (`/plugin` reports `Plugin "airprompt" not cached at …`)
+          // or --force: `plugin update` is the form that actually re-checks out.
+          say(
+            health === 'missing-dir'
+              ? `  → repairing stale plugin record (${record.id})`
+              : `  → refreshing Claude Code plugin (${record.id})`
+          );
+          const rep = PLUGIN.repairPlugin(H, record.id, pluginEnv, opts.dryRun);
+          if (rep.ok) {
+            ok(`  plugin record repaired (${record.id})`);
+            if (!opts.dryRun) results.installed.push('claude-plugin-repair');
+            pluginInstallSucceeded = true;
+          } else {
+            warn('  repair did not take — falling back to a fresh install');
+            note(`  manual fix: claude plugin update ${record.id}`);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+
+      if (!pluginInstallSucceeded) {
+        say('  → installing Claude Code plugin');
+        const r = PLUGIN.installPlugin(H, REPO, pluginEnv, opts.dryRun);
+        if (r.ok) {
+          if (!opts.dryRun) results.installed.push('claude');
+          pluginInstallSucceeded = true;
+        } else {
+          warn('  claude CLI could not install the plugin');
+          note(`  manual fix: claude plugin install airprompt --marketplace ${REPO}`);
+          results.failed.push(['claude', 'claude plugin install failed']);
+        }
+      }
     }
 
     // 5. Self-heal: prune orphaned hook entries
@@ -602,17 +627,21 @@ const ClaudeProvider = {
 
     // 6. Claude Code plugin uninstall
     if (hasCmd('claude')) {
-      const probe = H.captureSpawn('claude', ['plugin', 'list']);
-      if (probe.status === 0 && /airprompt/i.test(probe.stdout || '')) {
+      const pluginEnv = pluginCliEnv(H, configDir);
+      const { record, health } = PLUGIN.probePlugin(H, pluginEnv);
+      if (health === 'not-installed') {
+        note('  claude plugin not installed — skipping');
+      } else {
+        // The record knows the real id; a --json-less CLI falls back to the id
+        // `marketplace add <owner>/<repo>` yields.
+        const id = record ? record.id : PLUGIN.legacyId();
         const r = H.runSpawn(
           'claude',
-          ['plugin', 'uninstall', 'airprompt@airprompt'],
-          null,
+          ['plugin', 'uninstall', id],
+          { env: pluginEnv },
           opts.dryRun
         );
-        if (H.spawnOk(r)) ok('  removed claude plugin');
-      } else {
-        note('  claude plugin not installed — skipping');
+        if (H.spawnOk(r) || opts.dryRun) ok('  removed claude plugin');
       }
     }
 
