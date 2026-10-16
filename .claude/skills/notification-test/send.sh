@@ -15,7 +15,7 @@
 #   --cwd <path>          working directory (default: resolved from session)
 #   --ai-title <title>    simulated Claude transcript aiTitle
 #   --duration-ms <ms>    simulated turn duration in ms (default: random 500-5000)
-#   --message-count <n>   simulated turn message count (default: random 1-20)
+#   --tokens <n>          simulated session context size in tokens (default: random 10k-200k)
 #   --permission-mode <m> acceptEdits|bypassPermissions|default|plan (default: default)
 #   --effort <level>      low|medium|high|xhigh|max (default: medium)
 #   --count <n>           send N notifications (default: 1)
@@ -43,16 +43,24 @@ SESSION_ID=""
 CWD=""
 AI_TITLE=""
 DURATION_MS=""
-MESSAGE_COUNT=""
+TOKENS=""
 PERMISSION_MODE="default"
 EFFORT="medium"
 COUNT=1
+# The server compares `auto_dismiss === true`, so the payload must carry a real
+# boolean: `--argjson 1` never auto-dismissed a notification on either path.
+AUTO_DISMISS_BOOL=false
 DELAY_MS=100
-AUTO_DISMISS=0
 DRY_RUN=0
 
 # ── Parse args ──────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
+  # Every flag except the two booleans takes a value; without this a trailing
+  # `--tokens` (value eaten by shift) loops forever instead of reporting itself.
+  case "$1" in
+    --dry-run|--help) ;;
+    *) [ $# -ge 2 ] || { echo "ERROR: $1 expects a value" >&2; exit 1; } ;;
+  esac
   case "$1" in
     --type)             NOTIFY_TYPE="$2"; shift 2 ;;
     --message)          MESSAGE="$2"; shift 2 ;;
@@ -60,12 +68,12 @@ while [ $# -gt 0 ]; do
     --cwd)              CWD="$2"; shift 2 ;;
     --ai-title)         AI_TITLE="$2"; shift 2 ;;
     --duration-ms)      DURATION_MS="$2"; shift 2 ;;
-    --message-count)    MESSAGE_COUNT="$2"; shift 2 ;;
+    --tokens)           TOKENS="$2"; TOKENS_GIVEN=1; shift 2 ;;
     --permission-mode)  PERMISSION_MODE="$2"; shift 2 ;;
     --effort)           EFFORT="$2"; shift 2 ;;
     --count)            COUNT="$2"; shift 2 ;;
     --delay)            DELAY_MS="$2"; shift 2 ;;
-    --auto-dismiss)     AUTO_DISMISS="$2"; shift 2 ;;
+    --auto-dismiss)     case "$2" in 1|true) AUTO_DISMISS_BOOL=true ;; esac; shift 2 ;;
     --dry-run)          DRY_RUN=1; shift ;;
     --help)
       sed -n '2,/^$/p' "$0" | sed 's/^# //; s/^#$//'
@@ -73,6 +81,16 @@ while [ $# -gt 0 ]; do
     *) echo "Unknown: $1"; exit 1 ;;
   esac
 done
+
+# ── Guard: reject a --tokens that is not a positive count ───────────────
+# Same rule as the helper (which would reject it too, one layer down): a value
+# that is not a number never becomes a badge. `--tokens ''` is a caller mistake,
+# not a request for the random default, so it is rejected rather than ignored.
+if [ -n "$TOKENS_GIVEN" ]; then
+  case "$TOKENS" in
+    ''|0|0*|*[!0-9]*) echo "ERROR: --tokens expects a positive integer, got '$TOKENS'" >&2; exit 1 ;;
+  esac
+fi
 
 # ── Resolve session + daemon connection ──────────────────────────────────
 _resolve_session() {
@@ -110,8 +128,11 @@ fi
 if [ -z "$DURATION_MS" ]; then
   DURATION_MS=$(( 500 + RANDOM % 4500 ))
 fi
-if [ -z "$MESSAGE_COUNT" ]; then
-  MESSAGE_COUNT=$(( 1 + RANDOM % 20 ))
+if [ -z "$TOKENS" ]; then
+  # `(10 + RANDOM % 191) * 1000` spans the whole documented range. The obvious
+  # `10000 + RANDOM % 190000` does not: bash RANDOM is 0-32767, so the modulo is
+  # a no-op and every simulated session would report 10k-43k.
+  TOKENS=$(( (10 + RANDOM % 191) * 1000 ))
 fi
 if [ -z "$MESSAGE" ]; then
   case "$NOTIFY_TYPE" in
@@ -137,7 +158,25 @@ _format_duration() {
     echo "$(echo "scale=1; $ms/3600000" | bc 2>/dev/null || echo "0")h"
   fi
 }
-TURN_INFO="$(_format_duration "$DURATION_MS") — ${MESSAGE_COUNT} msgs"
+# ── Current context tokens — the same badge the statusline shows ────────
+# Computed with the real helper (AirPrompt's provider-agnostic reader) so the
+# simulation prints exactly what notify.sh derives from the transcript below.
+# No local fallback: a second copy of the rounding rule would drift from the
+# helper, and a badge is either the number the helper read or nothing at all.
+# Path resolved with `cd … && pwd -P`, never `readlink -f` — that flag is absent
+# on macOS ≤12 and banned repo-wide (bin/airprompt:8-11). A symlink *file*
+# pointing at this script is not followed here; the documented invocation is a
+# repo path.
+TOKENS_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." 2>/dev/null && pwd -P)/src/hooks/airprompt-session-tokens.js"
+TOKEN_BADGE=""
+if [ -f "$TOKENS_HELPER" ] && command -v node >/dev/null 2>&1; then
+  TOKEN_BADGE=$(node "$TOKENS_HELPER" --tokens "$TOKENS" 2>/dev/null | tr -d '\n\r')
+else
+  echo "WARNING: no token badge — helper=$TOKENS_HELPER node=$(command -v node || echo missing)" >&2
+fi
+
+TURN_INFO="$(_format_duration "$DURATION_MS")"
+[ -n "$TOKEN_BADGE" ] && TURN_INFO="$TURN_INFO — ${TOKEN_BADGE}"
 PROJECT_NAME="$(basename "$CWD")"
 if [ -n "$SESSION_NAME" ]; then
   SESSION_LABEL="$SESSION_NAME"
@@ -158,12 +197,17 @@ fi
 TRANSCRIPT_DIR="$(mktemp -d)"
 trap 'rm -rf "$TRANSCRIPT_DIR"' EXIT
 TRANSCRIPT_FILE="$TRANSCRIPT_DIR/transcript.jsonl"
-# Write turn_duration last so tac finds it first (notify.sh reads bottom-up)
+# Write the events in the shape a real transcript uses, so notify.sh extracts
+# them the same way it does in production: notify.sh greps each event name
+# separately (`tac | grep '"ai-title"' | head -1`), so file order is not load
+# bearing — but the JSON keys must match (`aiTitle`, not `ai-title` as a key).
+# The assistant line carries the usage record the context badge is read from, so
+# the simulated badge is real data, not a hardcoded string.
 cat > "$TRANSCRIPT_FILE" <<TRANSCRIPT_EOF
 {"type":"user","message":{"role":"user","content":"simulated prompt"}}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"simulated response"}]}}
-{"turn_duration":"${DURATION_MS}","durationMs":${DURATION_MS},"messageCount":${MESSAGE_COUNT}}
-{"ai-title":"${AI_TITLE}"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"simulated response"}],"usage":{"input_tokens":${TOKENS},"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"turn_duration":"${DURATION_MS}","durationMs":${DURATION_MS}}
+{"type":"ai-title","aiTitle":"${AI_TITLE}"}
 TRANSCRIPT_EOF
 
 # ── Build JSON payload ──────────────────────────────────────────────────
@@ -181,7 +225,7 @@ build_payload() {
       --arg turn_info "$TURN_INFO" \
       --arg subtitle "$SUBTITLE" \
       --arg cc_title "$AI_TITLE" \
-      --argjson auto_dismiss "$AUTO_DISMISS" \
+      --argjson auto_dismiss "$AUTO_DISMISS_BOOL" \
       '{notification_type:$type,message:$message,session_id:$session_id,cwd:$cwd,transcript_path:$transcript_path,permission_mode:$permission_mode,effort:{level:$effort},session_label:$session_label,turn_info:$turn_info,subtitle:$subtitle,cc_title:$cc_title,auto_dismiss:$auto_dismiss}'
   else
     jq -n \
@@ -195,7 +239,7 @@ build_payload() {
       --arg turn_info "$TURN_INFO" \
       --arg subtitle "$SUBTITLE" \
       --arg cc_title "$AI_TITLE" \
-      --argjson auto_dismiss "$AUTO_DISMISS" \
+      --argjson auto_dismiss "$AUTO_DISMISS_BOOL" \
       '{notification_type:$type,message:$message,session_id:$session_id,cwd:$cwd,permission_mode:$permission_mode,effort:{level:$effort},session_label:$session_label,turn_info:$turn_info,subtitle:$subtitle,cc_title:$cc_title,auto_dismiss:$auto_dismiss}'
   fi
 }
@@ -230,5 +274,5 @@ rm -rf "$TRANSCRIPT_DIR"
 
 # ── Summary ─────────────────────────────────────────────────────────────
 if [ "$DRY_RUN" = "0" ]; then
-  echo "Sent $COUNT notification(s) via $DELIVERY: type=$NOTIFY_TYPE session=$SESSION_ID ($SESSION_NAME) cwd=$CWD ai_title=\"$AI_TITLE\" duration=${DURATION_MS}ms msgs=$MESSAGE_COUNT"
+  echo "Sent $COUNT notification(s) via $DELIVERY: type=$NOTIFY_TYPE session=$SESSION_ID ($SESSION_NAME) cwd=$CWD ai_title=\"$AI_TITLE\" duration=${DURATION_MS}ms tokens=${TOKENS}"
 fi

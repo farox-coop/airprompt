@@ -32,6 +32,7 @@ EXEMPT_FILES=(
   "src/hooks/airprompt-activate.js"
   "src/hooks/airprompt-deactivate.js"
   "src/hooks/core/resolve-provider.js"
+  "src/hooks/airprompt-session-tokens.js"
 )
 
 EXEMPT_DIRS=(

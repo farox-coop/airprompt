@@ -69,13 +69,14 @@ done
 if [ "$all_ok" -eq 1 ]; then ok "all ${#HOOKS[@]} hooks + ${#BINS[@]} bins exist"; else not_ok "some files missing"; fi
 
 # ── Test 7: script runs successfully from repo root (fresh HOME) ──────
-# Isolate HOME so sync.sh must create ~/.claude/{hooks,commands} itself —
-# a fresh machine (or CI runner) has none. Also avoids mutating the real
-# ~/.claude and ~/bin as a side effect.
+# Isolate HOME so sync.sh must create the config dir itself — a fresh machine
+# (or CI runner) has none. CLAUDE_CONFIG_DIR must be pinned too: sync.sh honours
+# it, so an exported value would make it sync (and prune) the developer's REAL
+# config dir, HOME or no HOME. Also avoids mutating ~/bin as a side effect.
 echo "[7/8] End-to-end sync from repo root (fresh HOME)"
 cd "$REPO_ROOT"
 FAKE_HOME=$(mktemp -d)
-OUT=$(HOME="$FAKE_HOME" bash "$SYNC_SH" 2>&1) && rc=$? || rc=$?
+OUT=$(HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" bash "$SYNC_SH" 2>&1) && rc=$? || rc=$?
 rm -rf "$FAKE_HOME"
 if [ "$rc" -eq 0 ] && echo "$OUT" | grep -q "SYNCED OK"; then
   ok "sync completed ($(echo "$OUT" | grep 'SYNCED OK' | head -1))"
@@ -103,7 +104,7 @@ touch -t 202001010004 "$CACHE/d"; touch -t 202001010005 "$CACHE/e"
 # A foreign HOME breaks the asdf/mise `node` shim, and sync.sh needs node to
 # read the record, so put the real binary's directory in front of PATH.
 NODE_DIR=$(dirname "$(node -p 'process.execPath' 2>/dev/null || echo /nonexistent/node)")
-( cd "$REPO_ROOT" && HOME="$FAKE_HOME" PATH="$NODE_DIR:$PATH" bash "$SYNC_SH" >/dev/null 2>&1 ) || true
+( cd "$REPO_ROOT" && HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" PATH="$NODE_DIR:$PATH" bash "$SYNC_SH" >/dev/null 2>&1 ) || true
 KEPT_A=$([ -d "$CACHE/a" ] && echo yes || echo no)
 KEPT_B=$([ -d "$CACHE/b" ] && echo yes || echo no)
 KEPT_E=$([ -d "$CACHE/e" ] && echo yes || echo no)

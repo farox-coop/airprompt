@@ -278,9 +278,9 @@ test('ClaudeProvider — buildStatusLineEntry uses bash wrapper', () => {
 
 // ── File manifests ──────────────────────────────────────────────────────────
 
-test('ClaudeProvider — getHookFiles returns 3 hook files', () => {
+test('ClaudeProvider — getHookFiles returns 4 hook files', () => {
   const files = ClaudeProvider.getHookFiles();
-  assert.strictEqual(files.length, 3);
+  assert.strictEqual(files.length, 4);
   for (const f of files) {
     assert.ok(typeof f.src === 'string' && f.src.length > 0, 'src must be non-empty string');
     assert.ok(typeof f.dest === 'string' && f.dest.length > 0, 'dest must be non-empty string');
@@ -293,6 +293,7 @@ test('ClaudeProvider — getHookFiles includes all expected hooks', () => {
   assert.ok(names.includes('airprompt-activate.js'));
   assert.ok(names.includes('airprompt-deactivate.js'));
   assert.ok(names.includes('airprompt-statusline.sh'));
+  assert.ok(names.includes('airprompt-session-tokens.js'));
 });
 
 test('ClaudeProvider — getHookFiles dest paths end in hooksDir', () => {

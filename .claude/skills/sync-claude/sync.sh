@@ -127,7 +127,7 @@ if [ "$PRUNE_OK" -eq 1 ] && [ ${#CACHES[@]} -gt $KEEP_COUNT ]; then
   CACHES=($(ls -d "$CACHE_BASE"/*/ 2>/dev/null || true))
 fi
 
-HOOKS=(airprompt-activate.js airprompt-deactivate.js airprompt-statusline.sh)
+HOOKS=(airprompt-activate.js airprompt-deactivate.js airprompt-statusline.sh airprompt-session-tokens.js)
 BINS=(airprompt airprompt-autostart.sh airprompt-clean.sh airprompt-launch airprompt-name.sh airprompt-off.sh airprompt-on.sh airprompt-restart.sh airprompt-status.sh generate-cert.sh install.js)
 
 # Copy to caches
@@ -196,9 +196,9 @@ done
 
 # Sync hooks to ~/.claude/ — prefer symlinks into repo. If symlink was
 # overwritten by a stale copy (content matches repo), restore it.
-mkdir -p "$HOME/.claude/hooks" "$HOME/.claude/commands"
+mkdir -p "$CLAUDE_DIR/hooks" "$CLAUDE_DIR/commands"
 for h in "${HOOKS[@]}"; do
-  dest="$HOME/.claude/hooks/$h"
+  dest="$CLAUDE_DIR/hooks/$h"
   src="$REPO/src/hooks/$h"
   if [ ! -f "$src" ]; then
     echo "  (skip $h — source missing from repo)"
@@ -207,7 +207,7 @@ for h in "${HOOKS[@]}"; do
   if [ -d "$dest" ]; then
     echo "  WARNING: $dest is a directory, should be a symlink — removing"
     # Safety: only rm -rf under ~/.claude/
-    [[ "$dest" == "$HOME/.claude/"* ]] || { echo "  SAFETY: refusing rm -rf outside ~/.claude/ — $dest" >&2; continue; }
+    [[ "$dest" == "$CLAUDE_DIR/"* ]] || { echo "  SAFETY: refusing rm -rf outside the claude config dir — $dest" >&2; continue; }
     rm -rf "$dest"
     ln -s "$src" "$dest"
     echo "  restored symlink: $dest → $src"
@@ -240,12 +240,12 @@ done
 
 # Sync commands to ~/.claude/commands/ — same symlink logic
 for f in airprompt.md airprompt.toml; do
-  dest="$HOME/.claude/commands/$f"
+  dest="$CLAUDE_DIR/commands/$f"
   src="$REPO/commands/$f"
   [ ! -f "$src" ] && continue
   if [ -d "$dest" ]; then
     echo "  WARNING: $dest is a directory, should be a symlink — removing"
-    [[ "$dest" == "$HOME/.claude/"* ]] || { echo "  SAFETY: refusing rm -rf outside ~/.claude/ — $dest" >&2; continue; }
+    [[ "$dest" == "$CLAUDE_DIR/"* ]] || { echo "  SAFETY: refusing rm -rf outside the claude config dir — $dest" >&2; continue; }
     rm -rf "$dest"
     ln -s "$src" "$dest"
     echo "  restored symlink: $dest → $src"
@@ -305,11 +305,11 @@ for h in "${HOOKS[@]}"; do
     debug_mismatch "hook" "$REPO/src/hooks/$h" "$d/src/hooks" "$h"
   done
   # Verify ~/.claude/hooks/ copy — skip symlinks and user-edited copies
-  dest="$HOME/.claude/hooks/$h"
+  dest="$CLAUDE_DIR/hooks/$h"
   if [ ! -L "$dest" ] && [ -f "$dest" ]; then
     # Only verify if content matches repo (i.e. a managed copy, not user-edited)
     if diff -q "$REPO/src/hooks/$h" "$dest" >/dev/null 2>&1; then
-      debug_mismatch "hook" "$REPO/src/hooks/$h" "$HOME/.claude/hooks" "$h"
+      debug_mismatch "hook" "$REPO/src/hooks/$h" "$CLAUDE_DIR/hooks" "$h"
     fi
   fi
 done
@@ -366,10 +366,10 @@ for f in airprompt.md airprompt.toml; do
     debug_mismatch "command" "$REPO/commands/$f" "$d/commands" "$f"
   done
   # Also verify ~/.claude/commands/ copy — skip symlinks and user-edited copies
-  dest="$HOME/.claude/commands/$f"
+  dest="$CLAUDE_DIR/commands/$f"
   if [ ! -L "$dest" ] && [ -f "$dest" ]; then
     if diff -q "$REPO/commands/$f" "$dest" >/dev/null 2>&1; then
-      debug_mismatch "command" "$REPO/commands/$f" "$HOME/.claude/commands" "$f"
+      debug_mismatch "command" "$REPO/commands/$f" "$CLAUDE_DIR/commands" "$f"
     fi
   fi
 done

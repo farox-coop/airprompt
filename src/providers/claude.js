@@ -40,7 +40,16 @@ function pluginCliEnv(H, configDir) {
   return Object.assign(H.sameFilesystemTmpEnv(configDir), { CLAUDE_CONFIG_DIR: configDir });
 }
 
+// Hooks `installHooks()` copies. The session-tokens helper is deliberately NOT
+// here: that loop returns on the first missing source — before settings.json is
+// touched at all — and any checkout predating the helper would therefore abort
+// the whole standalone wiring (SessionStart/Stop never written). The helper has
+// its own installer in install(), which runs on every path.
 const HOOK_FILES = ['airprompt-activate.js', 'airprompt-deactivate.js', 'airprompt-statusline.sh'];
+
+// Everything AirPrompt puts in hooksDir — what uninstall removes. Superset of
+// HOOK_FILES: the helper is copied by install() itself, not by installHooks().
+const MANAGED_HOOK_FILES = [...HOOK_FILES, 'airprompt-session-tokens.js'];
 
 // ── Hook installer (standalone, non-plugin) ─────────────────────────────────
 
@@ -497,6 +506,36 @@ const ClaudeProvider = {
       else results.failed.push(['claude-statusline', r]);
     }
 
+    // 6c. Session-tokens helper — a provider-agnostic reader any agent's
+    // notification hook can call (today Claude's own notify.sh is the only
+    // caller), copied into hooksDir because that is where such a hook resolves
+    // it from — `$(dirname "$0")/airprompt-session-tokens.js`. The plugin
+    // manifest cannot provide it (it declares event handlers, not files), and
+    // installHooks() no longer carries it either, so this IS the installer.
+    //
+    // Unconditional, unlike 6b: it edits no settings.json, and a user's own
+    // notification hook keeps working when AirPrompt's settings wiring is
+    // declined — the file just has to be there. A missing source is a real
+    // failure (the badge dies silently otherwise), matching installStatusline's
+    // hard-fail rather than copyManifestFiles' lenient note.
+    {
+      const src = path.join(targetDir, 'src', 'hooks', 'airprompt-session-tokens.js');
+      const dest = path.join(configDir, 'hooks', 'airprompt-session-tokens.js');
+      if (opts.dryRun) {
+        note(`  would install ${dest}`);
+      } else if (!fs.existsSync(src)) {
+        results.failed.push([
+          'claude-session-tokens',
+          'source hook not found: airprompt-session-tokens.js',
+        ]);
+      } else {
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.copyFileSync(src, dest);
+        process.stdout.write(`  installed: ${dest}\n`);
+        results.installed.push('claude-session-tokens');
+      }
+    }
+
     // 7. Copy command files for non-plugin installs
     if (!pluginInstallSucceeded) {
       say('  → installing command files');
@@ -569,7 +608,7 @@ const ClaudeProvider = {
 
     // 3. Delete hook files
     if (fs.existsSync(hooksDir)) {
-      for (const f of HOOK_FILES) {
+      for (const f of MANAGED_HOOK_FILES) {
         const p = path.join(hooksDir, f);
         if (!fs.existsSync(p)) continue;
         if (!opts.dryRun) {
@@ -700,6 +739,14 @@ const ClaudeProvider = {
       {
         src: path.join(srcDir, 'airprompt-statusline.sh'),
         dest: path.join(hooksDir, 'airprompt-statusline.sh'),
+      },
+      {
+        // Shared by every provider's notification hook: it reads the current
+        // context size out of whichever agent's session log it is handed.
+        // Installed here because Claude's hooks are copied into hooksDir,
+        // while the other providers' hooks reference repo scripts directly.
+        src: path.join(srcDir, 'airprompt-session-tokens.js'),
+        dest: path.join(hooksDir, 'airprompt-session-tokens.js'),
       },
     ];
   },

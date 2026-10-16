@@ -81,11 +81,21 @@ function setupInstallEnv(t) {
     install: process.env.AIRPROMPT_INSTALL_DIR,
     codexHome: process.env.CODEX_HOME,
     xdg: process.env.XDG_CONFIG_HOME,
+    pidFile: process.env.AIRPROMPT_PID_FILE,
+    claudeConfigDir: process.env.CLAUDE_CONFIG_DIR,
   };
   process.env.AIRPROMPT_STATE_DIR = stateDir;
   delete process.env.AIRPROMPT_INSTALL_DIR;
   delete process.env.CODEX_HOME;
   delete process.env.XDG_CONFIG_HOME;
+  // MANDATORY: ClaudeProvider.uninstall() on a full uninstall SIGTERMs the PID
+  // in `AIRPROMPT_PID_FILE || /tmp/airprompt-server.pid` and deletes that file.
+  // Un-isolated, a test that calls uninstall() kills the developer's live
+  // daemon — which is exactly what happened, four times, before this line.
+  process.env.AIRPROMPT_PID_FILE = path.join(tmp, 'not-a-daemon.pid');
+  // Same class of hazard: a provider that falls back to the config dir would
+  // otherwise resolve the developer's real one when a test forgets ctx.configDir.
+  delete process.env.CLAUDE_CONFIG_DIR;
 
   return {
     tmp,
@@ -100,6 +110,10 @@ function setupInstallEnv(t) {
       else process.env.CODEX_HOME = saved.codexHome;
       if (saved.xdg === undefined) delete process.env.XDG_CONFIG_HOME;
       else process.env.XDG_CONFIG_HOME = saved.xdg;
+      if (saved.pidFile === undefined) delete process.env.AIRPROMPT_PID_FILE;
+      else process.env.AIRPROMPT_PID_FILE = saved.pidFile;
+      if (saved.claudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = saved.claudeConfigDir;
     },
   };
 }
@@ -258,6 +272,7 @@ async function withFakeClaude(t, env, opts, fn) {
   const savedPath = process.env.PATH;
   process.env.PATH = `${fake.binDir}:${savedPath}`;
   fs.writeFileSync(path.join(env.targetDir, 'src', 'hooks', 'airprompt-statusline.sh'), '');
+  fs.writeFileSync(path.join(env.targetDir, 'src', 'hooks', 'airprompt-session-tokens.js'), '');
   try {
     // The log only exists once the stub has been called, so hand `fn` a reader.
     return await fn(() => fs.readFileSync(fake.log, 'utf8'));
@@ -309,5 +324,62 @@ test('ClaudeProvider — install() leaves a healthy plugin record alone', async 
       env.ctx.results.skipped.some(([id]) => id === 'claude'),
       'reports the plugin as already installed'
     );
+  });
+});
+
+test('ClaudeProvider — a checkout without the session-tokens helper still wires the hooks', async (t) => {
+  const env = setupInstallEnv(t);
+  env.ctx.configDir = path.join(env.tmp, '.claude');
+  fs.mkdirSync(path.join(env.ctx.configDir, 'hooks'), { recursive: true });
+  // The helper did not exist in older checkouts, and ensureCoreInstall does not
+  // refresh an existing target. Reachable whenever the plugin install fails
+  // (no `claude` CLI, offline, error): the standalone path, where installHooks()
+  // runs. That loop returns on the first missing source *before* settings.json
+  // is touched — so with the helper in HOOK_FILES this would leave SessionStart
+  // and Stop unwired, silently.
+  fs.writeFileSync(path.join(env.targetDir, 'src', 'hooks', 'airprompt-statusline.sh'), '');
+  fs.rmSync(path.join(env.targetDir, 'src', 'hooks', 'airprompt-session-tokens.js'), {
+    force: true,
+  });
+
+  const emptyBin = path.join(env.tmp, 'emptybin');
+  fs.mkdirSync(emptyBin, { recursive: true });
+  const savedPath = process.env.PATH;
+  process.env.PATH = emptyBin; // no `claude` → the plugin install cannot succeed
+  try {
+    await ClaudeProvider.install(env.ctx);
+  } finally {
+    process.env.PATH = savedPath;
+  }
+
+  const settings = JSON.parse(
+    fs.readFileSync(path.join(env.ctx.configDir, 'settings.json'), 'utf8')
+  );
+  assert.ok(JSON.stringify(settings).includes('airprompt-activate'), 'SessionStart still wired');
+  assert.ok(
+    env.ctx.results.failed.some(([id]) => id === 'claude-session-tokens'),
+    'the missing helper is reported as a failure, not swallowed'
+  );
+  env.restore();
+});
+
+test('ClaudeProvider — install() copies the session-tokens helper even on the plugin path', async (t) => {
+  const env = setupInstallEnv(t);
+  env.ctx.configDir = path.join(env.tmp, '.claude');
+  fs.mkdirSync(path.join(env.ctx.configDir, 'hooks'), { recursive: true });
+  const fresh = path.join(env.tmp, 'cache');
+  fs.mkdirSync(fresh, { recursive: true });
+
+  // A healthy plugin record means the standalone hook wiring is skipped, so the
+  // helper has to be copied by install() itself — the plugin manifest declares
+  // event handlers, not the file a settings.json hook resolves by path.
+  await withFakeClaude(t, env, { freshPath: fresh, listOnly: true }, async () => {
+    await ClaudeProvider.install(env.ctx);
+
+    const helper = path.join(env.ctx.configDir, 'hooks', 'airprompt-session-tokens.js');
+    assert.ok(fs.existsSync(helper), 'session-tokens helper copied into hooksDir');
+
+    await ClaudeProvider.uninstall(env.ctx);
+    assert.ok(!fs.existsSync(helper), 'uninstall removes it again');
   });
 });
