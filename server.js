@@ -18,6 +18,7 @@ const {
   reapOwnedStandIn,
 } = require('./src/utils');
 const { runStaleSweep } = require('./src/sweep');
+const { fixNodePtyPerms } = require('./src/fix-node-pty-perms');
 const auth = require('./src/auth');
 const uploads = require('./src/uploads');
 
@@ -1365,6 +1366,10 @@ if (require.main === module) {
   writePid();
   writeDaemonJson(TLS_ENABLED ? 'https' : 'http', PORT, getLocalIp());
   log('info', 'daemon starting', { port: PORT, pid: process.pid, tls: TLS_ENABLED, debug: DEBUG });
+  // Heal a node-pty prebuild whose spawn-helper lost its exec bit — an
+  // installed tree never re-runs npm, so postinstall alone misses upgrades.
+  const fixedHelpers = fixNodePtyPerms();
+  if (fixedHelpers) log('info', 'node-pty spawn-helper exec bit restored', { count: fixedHelpers });
   // Rebuild session registry from on-disk markers BEFORE listen
   // so first WS client sees recovered sessions immediately.
   recoverSessionsFromDisk();

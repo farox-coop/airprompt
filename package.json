@@ -14,6 +14,7 @@
   },
   "scripts": {
     "start": "umask 077; nohup node server.js > /tmp/airprompt.log 2>&1 & echo \"AirPrompt daemon started\"",
+    "postinstall": "node bin/fix-node-pty-perms.js",
     "stop": "kill \"$(cat ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid} 2>/dev/null)\" 2>/dev/null; rm -f ${AIRPROMPT_PID_FILE:-/tmp/airprompt-server.pid}",
     "register": "bash bin/airprompt on",
     "unregister": "bash bin/airprompt off",

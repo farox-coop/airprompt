@@ -140,6 +140,17 @@ PROVIDEREOF
   done
 }
 
+# Canonicalize a path that may not exist yet: resolve the parent, append the
+# basename. `pwd -P` folds symlinked roots (/tmp → /private/tmp on macOS), so
+# both the target and the allowed roots must go through it or they never match.
+# CDPATH is cleared: an exported one makes `cd` echo the directory into the
+# captured value.
+_canonical_path() {
+  local p="$1" parent
+  parent="$(CDPATH='' cd "$(dirname "$p")" 2>/dev/null && pwd -P 2>/dev/null)" || return 1
+  printf '%s/%s' "${parent%/}" "$(basename "$p")"
+}
+
 # ── Safe rm -rf ─────────────────────────────────────────────────────────
 # Canonicalize path then verify it lives under an AirPrompt-owned root before
 # allowing rm -rf. Prevents disaster on misconfigured env vars and blocks the
@@ -147,14 +158,14 @@ PROVIDEREOF
 #
 # Roots: $HOME/.airprompt (default install/state/sessions/uploads), plus custom
 # AIRPROMPT_INSTALL_DIR / AIRPROMPT_STATE_DIR / AIRPROMPT_SESSIONS_DIR /
-# AIRPROMPT_UPLOADS_DIR when set — each must contain "airprompt" in its path
-# (blocks /, /home, /tmp).
+# AIRPROMPT_UPLOADS_DIR when set — each must contain "airprompt" in its
+# canonical path (blocks /, /home, /tmp).
 #
 # Usage: _safe_rm_rf "/path/to/dir" && echo "ok"
 # Returns 0 (safe, caller should rm -rf) or 1 (blocked, already printed).
 _safe_rm_rf() {
   local path="$1"
-  local canonical root
+  local canonical root root_canonical
 
   # Resolve .. first, then canonicalize. `readlink -f` works on nonexistent
   # paths on GNU; on macOS readlink -f fails on nonexistent, so resolve
@@ -163,15 +174,17 @@ _safe_rm_rf() {
     return 1  # nothing to delete — safe to skip
   fi
 
-  canonical="$(cd "$(dirname "$path")" 2>/dev/null && pwd -P 2>/dev/null)" || {
+  canonical="$(_canonical_path "$path")" || {
     echo "  SAFETY: cannot resolve parent of ${path} — refusing rm -rf" >&2
     return 1
   }
-  canonical="${canonical%/}/$(basename "$path")"
 
   # Allowed roots, in priority order. Every root must be clearly
   # airprompt-owned ("airprompt" in the path) — blocks misconfigured
-  # AIRPROMPT_*_DIR=/ , /home , /tmp from ever passing the guard.
+  # AIRPROMPT_*_DIR=/ , /home , /tmp from ever passing the guard. The root is
+  # fully resolved when it exists (a symlinked root otherwise never matches its
+  # own children) and the ownership test runs on the RESULT: testing the raw
+  # string would let `..` inside the value authorize a path outside it.
   for root in \
     "$HOME/.airprompt" \
     "${AIRPROMPT_INSTALL_DIR:-}" \
@@ -179,9 +192,13 @@ _safe_rm_rf() {
     "${AIRPROMPT_SESSIONS_DIR:-}" \
     "${AIRPROMPT_UPLOADS_DIR:-}"; do
     [ -n "$root" ] || continue
-    case "$root" in *airprompt*) ;; *) continue ;; esac
+    root_canonical="$(_canonical_path "$root")" || continue
+    if [ -d "$root" ]; then
+      root_canonical="$(CDPATH='' cd "$root" 2>/dev/null && pwd -P)" || continue
+    fi
+    case "$root_canonical" in *airprompt*) ;; *) continue ;; esac
     case "$canonical" in
-      "$root"|"$root/"*) return 0 ;;
+      "$root_canonical"|"$root_canonical/"*) return 0 ;;
     esac
   done
 

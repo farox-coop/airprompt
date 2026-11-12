@@ -176,6 +176,8 @@ Daemon output goes to `/tmp/airprompt.log`. Tail it with `make logs` or `tail -f
 
 **`/airprompt` is an unknown command** — the install didn't complete, or `~/bin` isn't on your PATH. Re-run the installer and add `export PATH="$HOME/bin:$PATH"` to your shell profile.
 
+**Terminal pane stays blank** — macOS only: node-pty 1.1.x publishes `prebuilds/darwin-*/spawn-helper` without the executable bit, so the PTY spawn fails and the page shows an empty terminal. The npm `postinstall` hook and the daemon at startup both run `bin/fix-node-pty-perms.js`, which restores it. If it still fails, run `node ~/.airprompt/bin/fix-node-pty-perms.js` and check the daemon log for `posix_spawnp failed` (a root-owned install may need `sudo chmod +x` on the path it prints), or see [microsoft/node-pty#850](https://github.com/microsoft/node-pty/issues/850).
+
 **Self-signed certificate warning** — expected. Accept it once. It's the local TLS cert required for HTTPS (mic + pairing). If it keeps re-prompting, regenerate the cert (see Configuration).
 
 **Voice dictation (mic) doesn't work** — HTTPS is required. Chrome/Android block `SpeechRecognition` over plain HTTP. Don't set `AIRPROMPT_NO_TLS=1` if you need the mic.
