@@ -18,7 +18,7 @@ set -euo pipefail
 
 REPO="farox-coop/airprompt"
 # Pinned install tag (immutable). `make set-release-tag TAG=vX.Y.Z` bumps this.
-VERSION="v1.1.0"
+VERSION="v1.1.1"
 
 # Require Node ≥20. nvm is a common path; print a hint if missing.
 if ! command -v node >/dev/null 2>&1; then

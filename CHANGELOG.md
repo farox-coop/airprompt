@@ -4,7 +4,9 @@ Release notes for AirPrompt, newest first. Each entry mirrors the [GitHub releas
 
 ## [Unreleased]
 
-A launched session keeps the tmux identity of the pane it runs in, and `airprompt off` can name the session it tears down. `airprompt-launch --name` now names the CLI's own session too. A notification can show the session's context size instead of a message count.
+## [1.1.1] - 2026-11-12
+
+A launched session keeps the launching shell's environment and the pane's own tmux identity, `--name` reaches the CLI's own session, a notification shows the session's context size instead of a message count, and the installer heals a stale plugin record. The macOS terminal renders again, and every Dependabot advisory is fixed.
 
 ### Highlights
 
@@ -22,6 +24,17 @@ A launched session keeps the tmux identity of the pane it runs in, and `airpromp
 - **The CLI commands work on macOS again.** On plain HTTP — the default — `airprompt on|off|name|restart|status` aborted under macOS `/bin/bash` 3.2 with `AP_CURL_OPTS[@]: unbound variable`, because an empty array counts as unset with `set -u` before bash 4.4. Every expansion is now guarded, and `airprompt-launch` too (an empty argument list aborted a launch outright).
 - **The installer repairs a plugin record whose cache directory is gone, and installs the plugin by name instead of by the marketplace's own name.** Claude Code pins an installed plugin to a directory in its marketplace cache, and that record outlives the directory: once the cache dir was pruned or cleaned, `/plugin` reported `Plugin "airprompt" not cached at <path>` while the installer's "is it installed?" probe — a plain search for the word `airprompt` in `claude plugin list` — called the record healthy and skipped the repair, so it stayed broken. Install also spelled the plugin `airprompt@airprompt`, where the marketplace half is frozen at whatever the marketplace was named when it was added; that name went stale when this project moved to `farox-coop`, and the install then targeted a plugin id nothing resolves. The installer now reads the recorded `installPath`, repairs the record with `claude plugin update <id>` (falling back to a fresh install), and installs with `claude plugin install airprompt --marketplace farox-coop/airprompt`. Every `claude plugin` call also runs against the config dir the install targets, so `--config-dir` no longer reads the default `~/.claude` and reports another config's plugin as installed. `sync-claude` no longer prunes the cache dir Claude Code records, nor one a live session is using.
 - **A bare `--continue` now means what the IDE means by it.** `airprompt-launch --continue` used to be swallowed and quietly start a _new_ session; it now reaches the IDE as the CLI's own "continue the most recent conversation" flag (and `--continue <session_id>` keeps using AirPrompt's resume path).
+- **The macOS terminal renders again.** node-pty 1.1.x publishes its macOS prebuilds with `spawn-helper` at mode `0644`, so `pty.spawn()` fails with `posix_spawnp` and the web terminal stays blank. A `postinstall` hook and a daemon-startup repair both restore the executable bit (`bin/fix-node-pty-perms.js`), and the troubleshooting section documents the failure. The `rm -rf` safety guard also canonicalizes its allowed roots: `pwd -P` on the target never matched a `/var` vs `/private/var` root, so a legitimate cleanup was refused on macOS, while testing the raw root let `..` authorize a path outside it.
+
+### Security
+
+- **Three Dependabot advisories are fixed.** `body-parser` 1.20.9 closes a high-severity DoS via trailing bytes after a compressed request body (GHSA-27r3-jxmh-p828); `qs` 6.16.2 closes a medium DoS on `arrayFormat: 'comma'` (GHSA-6pq8-jhm2-2vcw); `minimatch` 11.0.8 closes a medium globparts-amplification DoS that is dev-only (GHSA-g3hv-75wg-m249). eslint still pins `^10.x`, so the last one is forced through an `overrides` entry — the API eslint uses (the `Minimatch` constructor, `match()`, `pattern`) is unchanged in v11. `npm audit` now reports 0 vulnerabilities.
+
+### Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/v1.1.1/install.sh | bash
+```
 
 ## [1.1.0] - 2026-10-09
 
@@ -84,6 +97,7 @@ curl -fsSL https://raw.githubusercontent.com/farox-coop/airprompt/v1.0.0/install
 
 **Read more:** [README.md](https://github.com/farox-coop/airprompt/blob/v1.0.0/README.md) — full setup, provider matrix, troubleshooting, and configuration reference.
 
-[Unreleased]: https://github.com/farox-coop/airprompt/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/farox-coop/airprompt/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/farox-coop/airprompt/releases/tag/v1.1.1
 [1.1.0]: https://github.com/farox-coop/airprompt/releases/tag/v1.1.0
 [1.0.0]: https://github.com/farox-coop/airprompt/releases/tag/v1.0.0
